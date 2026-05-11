@@ -1,0 +1,55 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-background: #080808;
+  --color-foreground: #F0F0F0;
+  
+  --color-card: #111111;
+  --color-card-foreground: #F0F0F0;
+  
+  --color-popover: #111111;
+  --color-popover-foreground: #F0F0F0;
+  
+  --color-primary: #FF3E00;
+  --color-primary-foreground: #000000;
+  
+  --color-secondary: #0C0C0D;
+  --color-secondary-foreground: #F0F0F0;
+  
+  --color-muted: #1A1A1A;
+  --color-muted-foreground: rgba(255, 255, 255, 0.4);
+  
+  --color-accent: #1A1A1A;
+  --color-accent-foreground: #F0F0F0;
+  
+  --color-destructive: #FF3E00;
+  --color-destructive-foreground: #000000;
+  
+  --color-border: #1A1A1A;
+  --color-input: #1A1A1A;
+  --color-ring: #FF3E00;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-muted;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-[#333];
+}
