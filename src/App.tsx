@@ -28,6 +28,8 @@ import { HackathonsView } from './components/views/Hackathon';
 import { WorkingGroupsView } from './components/views/WorkingGroups';
 import { NexusAssistant } from './components/NexusAssistant';
 import { CommandPalette } from './components/CommandPalette';
+import { UserGuide } from './components/views/UserGuide';
+import { OnboardingModal } from './components/OnboardingModal';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -127,6 +129,7 @@ const App: React.FC = () => {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [seenNotifIds, setSeenNotifIds] = useState<Set<string>>(new Set());
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -262,6 +265,15 @@ const App: React.FC = () => {
     [appState]
   );
 
+  // Show onboarding popup on first login per user
+  useEffect(() => {
+    if (!currentUser) return;
+    const key = `doing_ai_onboarded_${currentUser.id}`;
+    if (!localStorage.getItem(key)) {
+      setOnboardingOpen(true);
+    }
+  }, [currentUser?.id]);
+
   const filteredState = useMemo(() => (appState ? getFilteredState(appState) : null), [appState]);
 
   const notifications = useMemo(() => (appState ? computeNotifications(appState) : []), [appState]);
@@ -306,6 +318,8 @@ const App: React.FC = () => {
         ) : (
           <div className="p-10 text-center text-muted">Admin only.</div>
         );
+      case 'guide':
+        return <UserGuide currentUser={currentUser} />;
       default:
         return null;
     }
@@ -406,6 +420,15 @@ const App: React.FC = () => {
         state={filteredState}
         llmConfig={appState.llmConfig}
       />
+      {onboardingOpen && currentUser && (
+        <OnboardingModal
+          currentUser={currentUser}
+          onClose={() => {
+            localStorage.setItem(`doing_ai_onboarded_${currentUser.id}`, '1');
+            setOnboardingOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };

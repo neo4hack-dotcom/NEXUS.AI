@@ -18,6 +18,7 @@ import {
   CircleDot,
   Zap,
   Network,
+  BookOpen,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 
@@ -33,7 +34,8 @@ export type TabId =
   | 'repos'
   | 'hackathons'
   | 'workinggroups'
-  | 'settings';
+  | 'settings'
+  | 'guide';
 
 interface Props {
   activeTab: TabId;
@@ -72,6 +74,7 @@ const NAV: NavItem[] = [
   { id: 'repos', label: 'Code Repositories', icon: GitBranch },
   { id: 'hackathons', label: 'Hackathons', icon: Zap },
   { id: 'workinggroups', label: 'Working Groups', icon: Network },
+  { id: 'guide', label: 'User Guide', icon: BookOpen },
 ];
 
 export const Sidebar: React.FC<Props> = ({
