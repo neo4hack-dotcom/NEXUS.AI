@@ -22,6 +22,12 @@ const VERSION_KEY = 'nexus_ai_app_version';
 const CURRENT_APP_VERSION = '1.0.0';
 const API_URL = '/api/data';
 
+// Tracks the lastUpdated timestamp the server last confirmed. Used as X-Base-Version
+// to avoid 409s caused by server-side timestamp drift.
+let _serverVersion = 0;
+// Serialises server POSTs so rapid mutations never race each other.
+let _saveQueue: Promise<void> = Promise.resolve();
+
 const DEFAULT_LLM_CONFIG: LlmConfig = {
   provider: 'ollama',
   baseUrl: 'http://localhost:11434',
@@ -43,201 +49,30 @@ export const generateId = (): string => {
 
 /* ===== Default seed ===== */
 
-const seedUser = (
-  uid: string,
-  firstName: string,
-  lastName: string,
-  role: 'admin' | 'manager' | 'contributor',
-  team: string,
-  title: string,
-  password: string
-): User => ({
-  id: generateId(),
-  uid,
-  password,
-  firstName,
-  lastName,
-  email: `${uid.toLowerCase()}@nexus.ai`,
-  team,
-  functionTitle: title,
-  role,
-  expectations: '',
-  avatarColor: '#FF3E00',
-  createdAt: new Date().toISOString(),
-});
-
 export const getDefaultState = (): AppState => {
-  const admin = seedUser('admin', 'Mathieu', 'Masson', 'admin', 'Operations', 'Head of AI Operations', 'MM@2026');
-  const pm = seedUser('emma', 'Emma', 'Dupont', 'manager', 'Core AI', 'Lead AI Engineer', 'changeme');
-  const dev = seedUser('lucas', 'Lucas', 'Martin', 'contributor', 'Platform', 'Fullstack Engineer', 'changeme');
-
-  const techReact: Technology = {
+  const admin: User = {
     id: generateId(),
-    name: 'React',
-    category: 'framework',
-    description: 'UI library for building component-driven interfaces.',
-    version: '19',
-    url: 'https://react.dev',
-    tags: ['frontend'],
+    uid: 'admin',
+    password: 'MM@2026',
+    firstName: 'Admin',
+    lastName: '',
+    email: 'admin@nexus.ai',
+    team: '',
+    functionTitle: 'Administrator',
+    role: 'admin',
+    expectations: '',
+    avatarColor: '#FF3E00',
     createdAt: new Date().toISOString(),
   };
-  const techTorch: Technology = {
-    id: generateId(),
-    name: 'PyTorch',
-    category: 'framework',
-    description: 'Deep learning framework for research & production.',
-    version: '2.5',
-    url: 'https://pytorch.org',
-    tags: ['ml'],
-    createdAt: new Date().toISOString(),
-  };
-  const techFast: Technology = {
-    id: generateId(),
-    name: 'FastAPI',
-    category: 'framework',
-    description: 'High-performance Python web framework.',
-    version: '0.115',
-    url: 'https://fastapi.tiangolo.com',
-    tags: ['backend'],
-    createdAt: new Date().toISOString(),
-  };
-
-  const repoCore: Repository = {
-    id: generateId(),
-    name: 'nexus-ai-core',
-    url: 'https://github.com/org/nexus-ai-core',
-    description: 'Core inference engine and LLM orchestration.',
-    language: 'Python',
-    visibility: 'private',
-    projectIds: [],
-    createdAt: new Date().toISOString(),
-  };
-
-  const now = new Date();
-  const inTwoMonths = new Date(now.getFullYear(), now.getMonth() + 2, now.getDate()).toISOString();
-  const inOneMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate()).toISOString();
-  const inOneWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7).toISOString();
-
-  const project: Project = {
-    id: generateId(),
-    name: 'NEXUS Agent v1',
-    description: 'Conversational AI agent for automated support ticket triage and resolution.',
-    status: ProjectStatus.ACTIVE,
-    managerId: pm.id,
-    startDate: now.toISOString(),
-    deadline: inTwoMonths,
-    isImportant: true,
-    isArchived: false,
-    budget: 120000,
-    members: [
-      { userId: pm.id, role: ProjectRole.OWNER },
-      { userId: dev.id, role: ProjectRole.CONTRIBUTOR },
-    ],
-    tasks: [
-      {
-        id: generateId(),
-        title: 'Fine-tune LLaMA-3 on support corpus',
-        description: 'Curate dataset, run LoRA fine-tune, evaluate.',
-        status: TaskStatus.ONGOING,
-        priority: TaskPriority.HIGH,
-        assigneeId: pm.id,
-        originalEta: inOneWeek,
-        weight: 8,
-        isImportant: true,
-        checklist: [
-          { id: generateId(), text: 'Dataset curation', done: true },
-          { id: generateId(), text: 'LoRA training', done: false },
-          { id: generateId(), text: 'Eval suite', done: false },
-        ],
-      },
-      {
-        id: generateId(),
-        title: 'API integration (FastAPI)',
-        description: 'Expose inference endpoints with auth and rate limiting.',
-        status: TaskStatus.TODO,
-        priority: TaskPriority.MEDIUM,
-        assigneeId: dev.id,
-        originalEta: inOneMonth,
-        weight: 5,
-      },
-    ],
-    milestones: [
-      { id: generateId(), label: 'Alpha demo', date: inOneMonth, done: false },
-      { id: generateId(), label: 'Production cut-over', date: inTwoMonths, done: false },
-    ],
-    technologyIds: [techTorch.id, techFast.id],
-    repoIds: [repoCore.id],
-    tags: ['ai', 'support', 'q1'],
-    auditLog: [
-      {
-        id: generateId(),
-        date: now.toISOString(),
-        userId: admin.id,
-        userName: 'System',
-        action: 'Project created',
-      },
-    ],
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  };
-
-  repoCore.projectIds = [project.id];
-
-  const templates: EmailTemplate[] = [
-    {
-      id: generateId(),
-      name: 'Standard Weekly Status',
-      type: 'weekly',
-      subject: '[Weekly] {{projectName}} — Status Update',
-      content:
-        'Hi team,\n\nHere is the weekly status for {{projectName}}.\n\n— Accomplishments\n• \n\n— Blockers\n• \n\n— Next Steps\n• \n\nBest,\n{{authorName}}',
-      createdAt: now.toISOString(),
-    },
-    {
-      id: generateId(),
-      name: 'Executive Committee Update',
-      type: 'exco',
-      subject: '[Exco] AI Portfolio — Monthly Brief',
-      content:
-        'Dear Exco,\n\n— Headline\n• \n\n— Business impact / ROI\n• \n\n— Critical risks\n• \n\n— Asks\n• \n\nRegards,\n{{authorName}}',
-      createdAt: now.toISOString(),
-    },
-    {
-      id: generateId(),
-      name: 'Broad Audience Newsletter',
-      type: 'newsletter',
-      subject: '[NEXUS.AI Newsletter] What shipped this month',
-      content:
-        'Hello everyone,\n\nHere is what the NEXUS.AI team shipped recently.\n\n— Highlights\n• \n\n— What is next\n• \n\nCall to action: ...\n\nThe NEXUS.AI team',
-      createdAt: now.toISOString(),
-    },
-  ];
-
-  const mailingLists: MailingList[] = [
-    {
-      id: generateId(),
-      name: 'All employees',
-      description: 'Broad newsletter audience',
-      emails: ['all@company.com'],
-      createdAt: now.toISOString(),
-    },
-    {
-      id: generateId(),
-      name: 'Executive committee',
-      description: 'Exco / leadership',
-      emails: ['ceo@company.com', 'cto@company.com', 'coo@company.com'],
-      createdAt: now.toISOString(),
-    },
-  ];
 
   return {
-    users: [admin, pm, dev],
-    projects: [project],
-    technologies: [techReact, techTorch, techFast],
-    repositories: [repoCore],
+    users: [admin],
+    projects: [],
+    technologies: [],
+    repositories: [],
     communications: [],
-    emailTemplates: templates,
-    mailingLists,
+    emailTemplates: [],
+    mailingLists: [],
     weeklyCheckIns: [],
     notifications: [],
     llmConfig: DEFAULT_LLM_CONFIG,
@@ -324,7 +159,11 @@ export const fetchFromServer = async (): Promise<AppState | null> => {
     const res = await fetch(API_URL);
     if (!res.ok) return null;
     const data = await res.json();
-    if (data && (data.users || data.projects)) return sanitizeAppState(data);
+    if (data && (data.users !== undefined || data.projects !== undefined)) {
+      // Seed the confirmed version so the first save uses the right base.
+      _serverVersion = typeof data.lastUpdated === 'number' ? data.lastUpdated : 0;
+      return sanitizeAppState(data);
+    }
     return null;
   } catch {
     return null;
@@ -336,35 +175,42 @@ export const saveState = (state: AppState): void => {
     const timestamp = Date.now();
     const stamped = { ...state, lastUpdated: timestamp };
 
+    // 1. localStorage: always instant.
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stamped));
     localStorage.setItem(VERSION_KEY, CURRENT_APP_VERSION);
 
-    // Strip per-session keys before sending to server
+    // 2. Server: serialise POSTs to prevent rapid-click 409s.
+    //    Read _serverVersion INSIDE the chained .then so it reflects
+    //    the version confirmed by the previous save, not the one at
+    //    the time this save was queued.
     const { currentUserId, theme, ...serverPayload } = stamped;
-    const baseVersion = String(state.lastUpdated || 0);
-
-    fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Base-Version': baseVersion,
-      },
-      body: JSON.stringify(serverPayload),
-    })
-      .then(async (response) => {
-        if (response.status === 409) {
+    _saveQueue = _saveQueue.then(async () => {
+      const baseVersion = _serverVersion;
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Base-Version': String(baseVersion),
+          },
+          body: JSON.stringify(serverPayload),
+        });
+        if (response.ok) {
+          const result = await response.json();
+          _serverVersion = result.timestamp ?? timestamp;
+        } else if (response.status === 409) {
           const conflictData = await response.json();
           window.dispatchEvent(
             new CustomEvent('nexus_conflict', { detail: { serverData: conflictData.serverData } })
           );
         }
-      })
-      .catch((err) => console.warn('[NEXUS] Server save failed', err));
-
-    // Cross-tab broadcast
-    window.dispatchEvent(
-      new StorageEvent('storage', { key: STORAGE_KEY, newValue: JSON.stringify(stamped) })
-    );
+      } catch (err) {
+        console.warn('[NEXUS] Server save failed', err);
+      }
+    });
+    // NOTE: do NOT dispatch a synthetic StorageEvent here — it would fire in the same
+    // tab and trigger the subscribeToStoreUpdates callback, causing a save loop that
+    // produces rapid-fire 409s. Real cross-tab sync is handled natively by the browser.
   } catch (e: any) {
     console.error('[NEXUS] Save error', e);
     if (e.name === 'QuotaExceededError') {

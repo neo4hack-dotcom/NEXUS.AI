@@ -109,13 +109,30 @@ export interface Project {
   updatedAt: string;
 }
 
+export type TechLayer =
+  | 'frontend'
+  | 'backend'
+  | 'fullstack'
+  | 'data'
+  | 'ml-ai'
+  | 'infrastructure'
+  | 'devops'
+  | 'mobile'
+  | 'security';
+
+export type TechMaturity = 'evaluating' | 'adopted' | 'deprecated' | 'hold';
+
 export interface Technology {
   id: string;
   name: string;
   category: 'framework' | 'library' | 'database' | 'tool' | 'language' | 'service';
+  layer?: TechLayer;
+  maturityStatus?: TechMaturity;
   description: string;
   version?: string;
   url?: string;
+  license?: string;
+  internalOwner?: string;
   tags: string[];
   createdAt: string;
 }

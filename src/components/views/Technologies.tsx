@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Search, Plus, Code, Database, Box, Wrench, FileCode, Cloud, Trash2, X, ExternalLink } from 'lucide-react';
-import { AppState, Technology, User } from '../../types';
+import { AppState, Technology, TechLayer, TechMaturity, User } from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
@@ -21,9 +21,16 @@ const ICONS: Record<Technology['category'], React.ComponentType<{ className?: st
   service: Cloud,
 };
 
+const MATURITY_TONE: Record<TechMaturity, 'green' | 'amber' | 'red' | 'muted'> = {
+  adopted: 'green',
+  evaluating: 'amber',
+  hold: 'amber',
+  deprecated: 'red',
+};
+
 const newTech = (): Technology => ({
   id: generateId(),
-  name: 'New tech',
+  name: 'New technology',
   category: 'framework',
   description: '',
   tags: [],
@@ -35,11 +42,18 @@ export const Technologies: React.FC<Props> = ({ state, currentUser, update }) =>
   const [edit, setEdit] = useState<Technology | null>(null);
   const canEdit = currentUser.role !== 'viewer';
 
-  const filtered = state.technologies.filter(
-    (t) =>
-      t.name.toLowerCase().includes(q.toLowerCase()) ||
-      t.description.toLowerCase().includes(q.toLowerCase())
-  );
+  const filtered = state.technologies.filter((t) => {
+    const lq = q.toLowerCase();
+    return (
+      t.name.toLowerCase().includes(lq) ||
+      t.description.toLowerCase().includes(lq) ||
+      (t.layer || '').toLowerCase().includes(lq) ||
+      (t.maturityStatus || '').toLowerCase().includes(lq) ||
+      (t.license || '').toLowerCase().includes(lq) ||
+      (t.internalOwner || '').toLowerCase().includes(lq) ||
+      t.tags.some((tag) => tag.toLowerCase().includes(lq))
+    );
+  });
 
   const upsert = (t: Technology) =>
     update((s) => ({
@@ -97,7 +111,13 @@ export const Technologies: React.FC<Props> = ({ state, currentUser, update }) =>
                 <div className="p-2 surface-flat border">
                   <Icon className="w-5 h-5 text-brand" />
                 </div>
-                <Badge tone="muted">{t.category}</Badge>
+                <div className="flex gap-1.5 flex-wrap justify-end">
+                  <Badge tone="muted">{t.category}</Badge>
+                  {t.layer && <Badge tone="muted">{t.layer}</Badge>}
+                  {t.maturityStatus && (
+                    <Badge tone={MATURITY_TONE[t.maturityStatus]}>{t.maturityStatus}</Badge>
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-between">
                 <h3 className="font-black uppercase tracking-tight text-lg">{t.name}</h3>
@@ -118,7 +138,15 @@ export const Technologies: React.FC<Props> = ({ state, currentUser, update }) =>
                   v{t.version}
                 </p>
               )}
+              {t.license && (
+                <p className="text-[10px] font-mono text-muted mt-0.5">{t.license}</p>
+              )}
               <p className="text-xs text-muted mt-2 line-clamp-3">{t.description}</p>
+              {t.internalOwner && (
+                <p className="text-[10px] text-muted mt-2">
+                  Owner: <span className="text-neutral-700 dark:text-neutral-300">{t.internalOwner}</span>
+                </p>
+              )}
               {t.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">
                   {t.tags.map((tag) => (
@@ -170,7 +198,7 @@ const Editor: React.FC<{
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="label-xs">Name</label>
@@ -193,12 +221,63 @@ const Editor: React.FC<{
               </Select>
             </div>
             <div className="space-y-1.5">
+              <label className="label-xs">Layer</label>
+              <Select
+                value={d.layer || ''}
+                onChange={(e) =>
+                  setD({ ...d, layer: (e.target.value as TechLayer) || undefined })
+                }
+              >
+                <option value="">— not set —</option>
+                <option value="frontend">Frontend</option>
+                <option value="backend">Backend</option>
+                <option value="fullstack">Full-stack</option>
+                <option value="data">Data</option>
+                <option value="ml-ai">ML / AI</option>
+                <option value="infrastructure">Infrastructure</option>
+                <option value="devops">DevOps / CI-CD</option>
+                <option value="mobile">Mobile</option>
+                <option value="security">Security</option>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">Maturity status</label>
+              <Select
+                value={d.maturityStatus || ''}
+                onChange={(e) =>
+                  setD({ ...d, maturityStatus: (e.target.value as TechMaturity) || undefined })
+                }
+              >
+                <option value="">— not set —</option>
+                <option value="evaluating">Evaluating</option>
+                <option value="adopted">Adopted</option>
+                <option value="hold">Hold</option>
+                <option value="deprecated">Deprecated</option>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
               <label className="label-xs">Version</label>
               <Input value={d.version || ''} onChange={(e) => setD({ ...d, version: e.target.value })} />
             </div>
             <div className="space-y-1.5">
-              <label className="label-xs">URL</label>
+              <label className="label-xs">License</label>
+              <Input
+                value={d.license || ''}
+                onChange={(e) => setD({ ...d, license: e.target.value })}
+                placeholder="MIT, Apache 2.0, Proprietary…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">URL / docs</label>
               <Input value={d.url || ''} onChange={(e) => setD({ ...d, url: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">Internal owner / team</label>
+              <Input
+                value={d.internalOwner || ''}
+                onChange={(e) => setD({ ...d, internalOwner: e.target.value })}
+                placeholder="Platform team, John Doe…"
+              />
             </div>
             <div className="col-span-2 space-y-1.5">
               <label className="label-xs">Description</label>
