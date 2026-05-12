@@ -234,7 +234,7 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
       <div className="flex-1 bg-black/40" onClick={onClose} />
 
       {/* Panel */}
-      <div className="w-full max-w-xl h-full bg-white dark:bg-ink-900 border-l border-neutral-200 dark:border-ink-700 flex flex-col shadow-2xl">
+      <div className="w-full max-w-2xl h-full bg-white dark:bg-ink-900 border-l border-neutral-200 dark:border-ink-700 flex flex-col shadow-2xl">
         {/* Header */}
         <div className="px-5 py-4 border-b border-neutral-200 dark:border-ink-700 bg-neutral-50 dark:bg-ink-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -316,12 +316,14 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
                   {msg.content}
                 </div>
               ) : (
-                <div className="bg-neutral-50 dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 px-4 py-3 max-w-[95%] text-[12px] leading-relaxed group relative">
-                  <MarkdownView content={msg.content} />
+                <div className="group relative w-full max-w-[95%]">
+                  <div className="bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 rounded-sm shadow-sm px-4 py-3.5 text-[12px] leading-relaxed">
+                    <MarkdownView content={msg.content} />
+                  </div>
                   <button
                     onClick={() => copy(msg.id, msg.content)}
-                    className="absolute top-2 right-2 text-muted opacity-0 group-hover:opacity-100 transition-opacity hover:text-brand"
-                    title="Copy"
+                    className="absolute -top-1 right-0 text-muted opacity-0 group-hover:opacity-100 transition-opacity hover:text-brand bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 p-1"
+                    title="Copy raw text"
                   >
                     {copiedId === msg.id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                   </button>

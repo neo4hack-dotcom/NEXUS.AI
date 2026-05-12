@@ -240,10 +240,21 @@ export const wrapHtmlDoc = (
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>${esc(title)}</title>
   <style>
     @page { size: A4${landscape ? ' landscape' : ''}; margin: 15mm 16mm 20mm; }
     ${PDF_BASE_STYLES}
+    /* Screen preview: fluid, readable at any viewport */
+    @media screen {
+      html { font-size: 11px; }
+      body { max-width: 100%; overflow-x: hidden; padding: 16px 20px; margin: 0 auto; }
+      * { max-width: 100%; word-break: break-word; }
+      table { table-layout: fixed; width: 100%; }
+      svg { max-width: 100%; height: auto; }
+      div[style*="grid-template-columns"] { display: flex !important; flex-wrap: wrap !important; gap: 8px !important; }
+      div[style*="grid-template-columns"] > * { flex: 1 1 120px !important; min-width: 0 !important; }
+    }
   </style>
 </head>
 <body>

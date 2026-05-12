@@ -118,7 +118,19 @@ export const sanitizeAppState = (data: any): AppState => {
       ...wg,
       members: arr(wg.members),
       tasks: arr(wg.tasks).map((t: any) => ({ ...t, checklist: arr(t.checklist), labels: arr(t.labels) })),
-      meetings: arr(wg.meetings).map((m: any) => ({ ...m, decisions: arr(m.decisions), attendeeIds: arr(m.attendeeIds) })),
+      meetings: arr(wg.meetings).map((m: any) => ({
+        ...m,
+        decisions: arr(m.decisions),
+        attendeeIds: arr(m.attendeeIds),
+        actionItems: arr(m.actionItems).map((a: any) => ({
+          id: a.id || '',
+          text: a.text || '',
+          ownerId: a.ownerId,
+          dueDate: a.dueDate,
+          status: a.status || 'todo',
+          carriedFromSessionId: a.carriedFromSessionId,
+        })),
+      })),
       tags: arr(wg.tags),
     })),
     llmConfig: { ...DEFAULT_LLM_CONFIG, ...(data.llmConfig || {}) },
@@ -290,7 +302,7 @@ export const clearState = () => {
 /* ===== Backup helpers ===== */
 
 export const exportBackup = (state: AppState): void => {
-  const { currentUserId, theme, ...payload } = state;
+  const { currentUserId, ...payload } = state; // strip session state; keep theme + all data
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

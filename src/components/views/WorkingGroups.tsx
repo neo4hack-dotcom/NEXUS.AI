@@ -4,11 +4,12 @@ import {
   Calendar, Edit2, Trash2, Tag, Flag, User as UserIcon,
   ChevronDown, MessageSquare, Target, MoreHorizontal,
   ArrowLeft, Check, Clock, AlertCircle, GripVertical,
+  RefreshCw, Circle, PlayCircle, PauseCircle, CheckCircle2,
 } from 'lucide-react';
 import {
   AppState, User, WorkingGroup, WGTask, WGMeetingNote,
   WGStatus, WGMemberRole, WGTaskStatus, WGTaskPriority,
-  ChecklistItem,
+  WGActionItem, WGActionStatus, ChecklistItem,
 } from '../../types';
 import { generateId } from '../../services/storage';
 
@@ -291,24 +292,49 @@ const TaskModal: React.FC<{
 };
 
 /* ══════════════════════════════════════════════════
-   MEETING EDITOR
+   SESSION EDITOR — chained meeting sessions
 ══════════════════════════════════════════════════ */
-const MeetingEditor: React.FC<{
-  meeting: WGMeetingNote | null;
+
+const ACTION_STATUS_CYCLE: WGActionStatus[] = ['todo', 'ongoing', 'blocked', 'done'];
+
+const ACTION_STATUS_ICON: Record<WGActionStatus, React.ReactNode> = {
+  todo: <Circle className="w-3.5 h-3.5 text-neutral-400" />,
+  ongoing: <PlayCircle className="w-3.5 h-3.5 text-blue-500" />,
+  blocked: <PauseCircle className="w-3.5 h-3.5 text-red-500" />,
+  done: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />,
+};
+
+const ACTION_STATUS_LABEL: Record<WGActionStatus, string> = {
+  todo: 'To Do',
+  ongoing: 'Ongoing',
+  blocked: 'Blocked',
+  done: 'Done',
+};
+
+const SessionEditor: React.FC<{
+  session: WGMeetingNote | null;
+  carriedItems: WGActionItem[];
   users: User[];
   wgMembers: string[];
   onClose: () => void;
   onSave: (m: WGMeetingNote) => void;
   onDelete?: () => void;
-}> = ({ meeting, users, wgMembers, onClose, onSave, onDelete }) => {
-  const isNew = !meeting;
-  const [date, setDate] = useState(meeting?.date ?? new Date().toISOString().slice(0, 10));
-  const [title, setTitle] = useState(meeting?.title ?? '');
-  const [attendeeIds, setAttendeeIds] = useState<string[]>(meeting?.attendeeIds ?? []);
-  const [agenda, setAgenda] = useState(meeting?.agenda ?? '');
-  const [notes, setNotes] = useState(meeting?.notes ?? '');
-  const [decisions, setDecisions] = useState<string[]>(meeting?.decisions ?? []);
+}> = ({ session, carriedItems, users, wgMembers, onClose, onSave, onDelete }) => {
+  const isNew = !session;
+  const [date, setDate] = useState(session?.date ?? new Date().toISOString().slice(0, 10));
+  const [title, setTitle] = useState(session?.title ?? '');
+  const [attendeeIds, setAttendeeIds] = useState<string[]>(session?.attendeeIds ?? []);
+  const [agenda, setAgenda] = useState(session?.agenda ?? '');
+  const [notes, setNotes] = useState(session?.notes ?? '');
+  const [decisions, setDecisions] = useState<string[]>(session?.decisions ?? []);
   const [decisionInput, setDecisionInput] = useState('');
+  // Pre-populate with carried items (for new session) or existing actionItems
+  const [actionItems, setActionItems] = useState<WGActionItem[]>(
+    session?.actionItems ?? carriedItems.map((a) => ({ ...a, id: generateId(), carriedFromSessionId: a.carriedFromSessionId ?? a.id }))
+  );
+  const [actionInput, setActionInput] = useState('');
+  const [actionOwnerId, setActionOwnerId] = useState('');
+  const [actionDueDate, setActionDueDate] = useState('');
 
   const assignableUsers = users.filter((u) => wgMembers.includes(u.id));
 
@@ -320,33 +346,64 @@ const MeetingEditor: React.FC<{
     if (v) { setDecisions([...decisions, v]); setDecisionInput(''); }
   };
 
+  const addAction = () => {
+    const v = actionInput.trim();
+    if (!v) return;
+    const item: WGActionItem = {
+      id: generateId(),
+      text: v,
+      ownerId: actionOwnerId || undefined,
+      dueDate: actionDueDate || undefined,
+      status: 'todo',
+    };
+    setActionItems([...actionItems, item]);
+    setActionInput('');
+    setActionOwnerId('');
+    setActionDueDate('');
+  };
+
+  const cycleActionStatus = (id: string) => {
+    setActionItems(actionItems.map((a) => {
+      if (a.id !== id) return a;
+      const idx = ACTION_STATUS_CYCLE.indexOf(a.status);
+      return { ...a, status: ACTION_STATUS_CYCLE[(idx + 1) % ACTION_STATUS_CYCLE.length] };
+    }));
+  };
+
+  const removeAction = (id: string) => setActionItems(actionItems.filter((a) => a.id !== id));
+
   const handleSave = () => {
     if (!title.trim()) return;
     onSave({
-      id: meeting?.id ?? generateId(),
+      id: session?.id ?? generateId(),
       date,
       title: title.trim(),
       attendeeIds,
       agenda: agenda.trim(),
       notes: notes.trim(),
       decisions,
-      createdAt: meeting?.createdAt ?? now(),
+      actionItems,
+      createdAt: session?.createdAt ?? now(),
       updatedAt: now(),
     });
   };
 
+  const carried = actionItems.filter((a) => a.carriedFromSessionId);
+  const newActions = actionItems.filter((a) => !a.carriedFromSessionId);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
-        className="bg-white dark:bg-ink-900 w-full max-w-lg max-h-[90vh] overflow-y-auto border border-neutral-200 dark:border-ink-700 shadow-2xl"
+        className="bg-white dark:bg-ink-900 w-full max-w-2xl max-h-[92vh] overflow-y-auto border border-neutral-200 dark:border-ink-700 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-ink-700">
-          <h2 className="text-[11px] font-bold uppercase tracking-[0.14em]">{isNew ? 'Log Meeting' : 'Edit Meeting'}</h2>
+          <h2 className="text-[11px] font-bold uppercase tracking-[0.14em]">{isNew ? 'New Session' : 'Edit Session'}</h2>
           <button onClick={onClose} className="text-muted hover:text-neutral-900 dark:hover:text-white"><X className="w-4 h-4" /></button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-5">
+          {/* Date + Title */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Date</label>
@@ -354,10 +411,11 @@ const MeetingEditor: React.FC<{
             </div>
             <div>
               <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Title *</label>
-              <input className="w-full input-base" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Meeting title" />
+              <input className="w-full input-base" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" autoFocus />
             </div>
           </div>
 
+          {/* Attendees */}
           <div>
             <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Attendees</label>
             <div className="flex flex-wrap gap-2">
@@ -374,22 +432,55 @@ const MeetingEditor: React.FC<{
             </div>
           </div>
 
+          {/* Carried-over open actions */}
+          {carried.length > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/50 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-400">
+                  Carried-over open actions ({carried.length})
+                </p>
+              </div>
+              <div className="space-y-2">
+                {carried.map((a) => (
+                  <div key={a.id} className="flex items-center gap-2">
+                    <button
+                      onClick={() => cycleActionStatus(a.id)}
+                      title={`Status: ${ACTION_STATUS_LABEL[a.status]} — click to advance`}
+                      className="shrink-0"
+                    >
+                      {ACTION_STATUS_ICON[a.status]}
+                    </button>
+                    <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
+                    {a.ownerId && (
+                      <span className="text-[9px] text-muted">
+                        {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
+                      </span>
+                    )}
+                    <button onClick={() => removeAction(a.id)} className="text-muted hover:text-red-500 shrink-0"><X className="w-3 h-3" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Agenda + Notes */}
           <div>
             <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Agenda</label>
-            <textarea className="w-full input-base resize-none" rows={2} value={agenda} onChange={(e) => setAgenda(e.target.value)} placeholder="Topics discussed…" />
+            <textarea className="w-full input-base resize-none" rows={2} value={agenda} onChange={(e) => setAgenda(e.target.value)} placeholder="Topics to cover…" />
           </div>
-
           <div>
             <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Notes</label>
-            <textarea className="w-full input-base resize-none" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Meeting notes…" />
+            <textarea className="w-full input-base resize-none" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Session notes, context, discussions…" />
           </div>
 
+          {/* Decisions */}
           <div>
             <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Key Decisions</label>
             <div className="space-y-1 mb-2">
               {decisions.map((d, i) => (
                 <div key={i} className="flex items-start gap-2">
-                  <span className="text-brand mt-0.5">•</span>
+                  <span className="text-brand mt-0.5 shrink-0">•</span>
                   <span className="flex-1 text-[11px]">{d}</span>
                   <button onClick={() => setDecisions(decisions.filter((_, j) => j !== i))} className="text-muted hover:text-red-500"><X className="w-3 h-3" /></button>
                 </div>
@@ -406,18 +497,57 @@ const MeetingEditor: React.FC<{
               <button onClick={addDecision} className="btn-secondary text-[10px]">Add</button>
             </div>
           </div>
+
+          {/* New action items */}
+          <div>
+            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">
+              Action Items — This Session ({newActions.length})
+            </label>
+            <div className="space-y-1 mb-3">
+              {newActions.map((a) => (
+                <div key={a.id} className="flex items-center gap-2 py-1 border-b border-neutral-100 dark:border-ink-800">
+                  <button onClick={() => cycleActionStatus(a.id)} title={ACTION_STATUS_LABEL[a.status]} className="shrink-0">
+                    {ACTION_STATUS_ICON[a.status]}
+                  </button>
+                  <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
+                  {a.ownerId && (
+                    <span className="text-[9px] text-muted">
+                      {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
+                    </span>
+                  )}
+                  {a.dueDate && <span className="text-[9px] font-mono text-muted">{a.dueDate.slice(5)}</span>}
+                  <button onClick={() => removeAction(a.id)} className="text-muted hover:text-red-500 shrink-0"><X className="w-3 h-3" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <input
+                className="col-span-3 input-base"
+                value={actionInput}
+                onChange={(e) => setActionInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addAction())}
+                placeholder="New action item…"
+              />
+              <select className="input-base text-[10px]" value={actionOwnerId} onChange={(e) => setActionOwnerId(e.target.value)}>
+                <option value="">Owner…</option>
+                {assignableUsers.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+              </select>
+              <input type="date" className="input-base text-[10px]" value={actionDueDate} onChange={(e) => setActionDueDate(e.target.value)} />
+              <button onClick={addAction} className="btn-secondary text-[10px]">Add</button>
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center justify-between px-6 py-4 border-t border-neutral-200 dark:border-ink-700">
           <div>
             {!isNew && onDelete && (
-              <button onClick={onDelete} className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-500 hover:text-red-700">Delete</button>
+              <button onClick={onDelete} className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-500 hover:text-red-700">Delete Session</button>
             )}
           </div>
           <div className="flex gap-3">
             <button onClick={onClose} className="btn-secondary text-[10px]">Cancel</button>
             <button onClick={handleSave} disabled={!title.trim()} className="btn-primary text-[10px]">
-              {isNew ? 'Log Meeting' : 'Save'}
+              {isNew ? 'Log Session' : 'Save'}
             </button>
           </div>
         </div>
@@ -818,7 +948,7 @@ const TasksTab: React.FC<{
 };
 
 /* ══════════════════════════════════════════════════
-   MEETINGS TAB
+   MEETINGS TAB — session-chaining view
 ══════════════════════════════════════════════════ */
 const MeetingsTab: React.FC<{
   wg: WorkingGroup;
@@ -831,14 +961,22 @@ const MeetingsTab: React.FC<{
 
   const sorted = [...wg.meetings].sort((a, b) => b.date.localeCompare(a.date));
 
-  const saveMeeting = (m: WGMeetingNote) => {
+  // All action items from all sessions that are not done — used as carry-over for new sessions
+  const openCarriedItems: WGActionItem[] = wg.meetings.flatMap((m) =>
+    (m.actionItems ?? []).filter((a) => a.status !== 'done').map((a) => ({
+      ...a,
+      carriedFromSessionId: a.carriedFromSessionId ?? m.id,
+    }))
+  );
+
+  const saveSession = (m: WGMeetingNote) => {
     const exists = wg.meetings.find((x) => x.id === m.id);
     const next = exists ? wg.meetings.map((x) => (x.id === m.id ? m : x)) : [...wg.meetings, m];
     onUpdateMeetings(next);
     setEditing(null);
   };
 
-  const deleteMeeting = (id: string) => {
+  const deleteSession = (id: string) => {
     onUpdateMeetings(wg.meetings.filter((m) => m.id !== id));
     setEditing(null);
   };
@@ -848,12 +986,21 @@ const MeetingsTab: React.FC<{
     return u ? `${u.firstName} ${u.lastName}` : id;
   };
 
+  const sessionOpenCount = (m: WGMeetingNote) =>
+    (m.actionItems ?? []).filter((a) => a.status !== 'done').length;
+
   return (
     <div>
       {canManage && (
-        <div className="flex justify-end mb-4">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[9px] text-muted uppercase tracking-[0.14em]">
+            {sorted.length} session{sorted.length !== 1 ? 's' : ''}
+            {openCarriedItems.length > 0 && (
+              <span className="ml-2 text-amber-600 font-bold">{openCarriedItems.length} open action{openCarriedItems.length !== 1 ? 's' : ''} across sessions</span>
+            )}
+          </p>
           <button onClick={() => setEditing('new')} className="btn-primary text-[10px] flex items-center gap-2">
-            <Plus className="w-3.5 h-3.5" /> Log Meeting
+            <Plus className="w-3.5 h-3.5" /> New Session
           </button>
         </div>
       )}
@@ -861,19 +1008,25 @@ const MeetingsTab: React.FC<{
       {sorted.length === 0 ? (
         <div className="text-center py-16 text-muted">
           <MessageSquare className="w-8 h-8 mx-auto mb-3 opacity-30" />
-          <p className="text-[11px] uppercase tracking-[0.14em]">No meetings logged yet</p>
+          <p className="text-[11px] uppercase tracking-[0.14em]">No sessions logged yet</p>
         </div>
       ) : (
         <div className="space-y-3">
-          {sorted.map((m) => {
+          {sorted.map((m, idx) => {
             const isExpanded = expanded === m.id;
+            const openCount = sessionOpenCount(m);
+            const carriedCount = (m.actionItems ?? []).filter((a) => a.carriedFromSessionId).length;
+            const isMostRecent = idx === 0;
             return (
-              <div key={m.id} className="border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
+              <div key={m.id} className={`border bg-white dark:bg-ink-900 ${isMostRecent ? 'border-brand/40' : 'border-neutral-200 dark:border-ink-700'}`}>
                 <button
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-neutral-50 dark:hover:bg-ink-800 transition-colors"
                   onClick={() => setExpanded(isExpanded ? null : m.id)}
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {isMostRecent && (
+                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-brand text-white">Latest</span>
+                    )}
                     <span className="text-[9px] font-mono text-muted">{fmtDate(m.date)}</span>
                     <span className="text-[11px] font-bold">{m.title}</span>
                     <span className="text-[9px] text-muted">{m.attendeeIds.length} attendees</span>
@@ -882,8 +1035,18 @@ const MeetingsTab: React.FC<{
                         {m.decisions.length} decision{m.decisions.length > 1 ? 's' : ''}
                       </span>
                     )}
+                    {openCount > 0 && (
+                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
+                        {openCount} open action{openCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {carriedCount > 0 && (
+                      <span className="flex items-center gap-1 text-[8px] text-muted">
+                        <RefreshCw className="w-2.5 h-2.5" /> {carriedCount} carried
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     {canManage && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setEditing(m); }}
@@ -897,7 +1060,7 @@ const MeetingsTab: React.FC<{
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-neutral-100 dark:border-ink-700 px-4 py-3 space-y-3">
+                  <div className="border-t border-neutral-100 dark:border-ink-700 px-4 py-4 space-y-4">
                     {m.attendeeIds.length > 0 && (
                       <div>
                         <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1">Attendees</p>
@@ -929,6 +1092,48 @@ const MeetingsTab: React.FC<{
                         </ul>
                       </div>
                     )}
+                    {(m.actionItems ?? []).length > 0 && (
+                      <div>
+                        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-2">Action Items</p>
+                        {/* Carried-over section */}
+                        {(m.actionItems ?? []).filter((a) => a.carriedFromSessionId).length > 0 && (
+                          <div className="mb-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/40 p-2 rounded">
+                            <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-amber-600 mb-1.5">
+                              <RefreshCw className="w-2.5 h-2.5 inline mr-1" />Carried over
+                            </p>
+                            <div className="space-y-1">
+                              {(m.actionItems ?? []).filter((a) => a.carriedFromSessionId).map((a) => (
+                                <div key={a.id} className="flex items-center gap-2">
+                                  {ACTION_STATUS_ICON[a.status]}
+                                  <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
+                                  {a.ownerId && (
+                                    <span className="text-[9px] text-muted">
+                                      {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
+                                    </span>
+                                  )}
+                                  {a.dueDate && <span className="text-[9px] font-mono text-muted">{a.dueDate.slice(5)}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {/* New actions from this session */}
+                        <div className="space-y-1">
+                          {(m.actionItems ?? []).filter((a) => !a.carriedFromSessionId).map((a) => (
+                            <div key={a.id} className="flex items-center gap-2 py-0.5">
+                              {ACTION_STATUS_ICON[a.status]}
+                              <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
+                              {a.ownerId && (
+                                <span className="text-[9px] text-muted">
+                                  {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
+                                </span>
+                              )}
+                              {a.dueDate && <span className="text-[9px] font-mono text-muted">{a.dueDate.slice(5)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -938,13 +1143,14 @@ const MeetingsTab: React.FC<{
       )}
 
       {editing !== null && (
-        <MeetingEditor
-          meeting={editing === 'new' ? null : editing}
+        <SessionEditor
+          session={editing === 'new' ? null : editing}
+          carriedItems={editing === 'new' ? openCarriedItems : []}
           users={users}
           wgMembers={wg.members.map((m) => m.userId)}
           onClose={() => setEditing(null)}
-          onSave={saveMeeting}
-          onDelete={editing !== 'new' ? () => deleteMeeting((editing as WGMeetingNote).id) : undefined}
+          onSave={saveSession}
+          onDelete={editing !== 'new' ? () => deleteSession((editing as WGMeetingNote).id) : undefined}
         />
       )}
     </div>
