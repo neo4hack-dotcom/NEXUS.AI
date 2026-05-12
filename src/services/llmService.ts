@@ -1,4 +1,4 @@
-import { LlmConfig, Project, User, AppState, WeeklyCheckIn } from '../types';
+import { LlmConfig, Project, User, AppState, WeeklyCheckIn, TaskStatus, TaskPriority } from '../types';
 
 export const DEFAULT_PROMPTS: Record<string, string> = {
   portfolio_summary: `
@@ -343,4 +343,84 @@ export const buildWeeklyCheckInData = (checkIns: WeeklyCheckIn[], users: User[])
         `Accomplishments: ${c.accomplishments}\nBlockers: ${c.blockers}\nNext: ${c.nextSteps}`;
     })
     .join('\n\n');
+};
+
+/* ===== AI Project Extraction ===== */
+
+export interface ExtractedTask {
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  originalEta: string;
+}
+
+export interface ExtractedProject {
+  name: string;
+  description: string;
+  context: string;
+  deadline: string;
+  tasks: ExtractedTask[];
+}
+
+const EXTRACT_PROJECT_PROMPT = `You are a project manager assistant. Extract structured project information from the raw text below.
+
+RAW TEXT:
+{{TEXT}}
+
+TODAY: {{TODAY}}
+
+Respond with ONLY a valid JSON object matching this exact schema (no markdown, no explanation):
+{
+  "name": "Project name (short)",
+  "description": "1–2 sentence project description",
+  "context": "Background, constraints, or stakeholder context extracted from the text",
+  "deadline": "ISO date YYYY-MM-DD (estimate from text, or today+90 days if not mentioned)",
+  "tasks": [
+    {
+      "title": "Task title",
+      "description": "What needs to be done",
+      "priority": "Low|Medium|High|Urgent",
+      "originalEta": "ISO date YYYY-MM-DD"
+    }
+  ]
+}
+
+Rules:
+- Extract as many tasks as clearly mentioned in the text.
+- If no deadline is mentioned, default to today + 90 days.
+- If no task ETAs mentioned, space them evenly before the project deadline.
+- Priority: infer from urgency words, or default to Medium.
+- Output ONLY the JSON object, nothing else.`;
+
+export const extractProjectFromText = async (text: string, config: LlmConfig): Promise<ExtractedProject> => {
+  const today = new Date().toISOString().slice(0, 10);
+  const prompt = EXTRACT_PROJECT_PROMPT
+    .replace('{{TEXT}}', text)
+    .replace('{{TODAY}}', today);
+  const raw = await runPrompt(prompt, config);
+  // Strip possible code fences the LLM might still add
+  const cleaned = raw.replace(/^```[a-z]*\n?/, '').replace(/```$/, '').trim();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Try to extract JSON object from the response
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('LLM did not return valid JSON. Try again or rephrase your input.');
+    parsed = JSON.parse(match[0]);
+  }
+  // Validate and normalise
+  const tasks: ExtractedTask[] = (Array.isArray(parsed.tasks) ? parsed.tasks : []).map((t: any) => ({
+    title: String(t.title || 'Untitled task'),
+    description: String(t.description || ''),
+    priority: (['Low', 'Medium', 'High', 'Urgent'].includes(t.priority) ? t.priority : 'Medium') as TaskPriority,
+    originalEta: String(t.originalEta || today),
+  }));
+  return {
+    name: String(parsed.name || 'New Project'),
+    description: String(parsed.description || ''),
+    context: String(parsed.context || ''),
+    deadline: String(parsed.deadline || new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)),
+    tasks,
+  };
 };

@@ -16,6 +16,11 @@ import {
   Maximize2,
   Minimize2,
   RotateCcw,
+  Bot,
+  Clipboard,
+  ChevronRight,
+  Edit2,
+  Loader2,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
@@ -39,6 +44,9 @@ import {
   DEFAULT_PROMPTS,
   fillTemplate,
   runPrompt,
+  extractProjectFromText,
+  ExtractedProject,
+  ExtractedTask,
 } from '../../services/llmService';
 
 interface Props {
@@ -107,11 +115,267 @@ const projectProgress = (p: Project): number => {
   return totalW ? Math.round((doneW / totalW) * 100) : 0;
 };
 
+/* ══════════════════════════════════════════════════
+   AI PROJECT BOT — slide-in panel, 3-step flow
+══════════════════════════════════════════════════ */
+
+type AIBotStep = 'paste' | 'review' | 'saving';
+
+const AIProjectBot: React.FC<{
+  llmConfig: AppState['llmConfig'];
+  currentUser: User;
+  onClose: () => void;
+  onCreate: (p: Project) => void;
+}> = ({ llmConfig, currentUser, onClose, onCreate }) => {
+  const [step, setStep] = useState<AIBotStep>('paste');
+  const [rawText, setRawText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [extracted, setExtracted] = useState<ExtractedProject | null>(null);
+  // Editable review state
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [context, setContext] = useState('');
+  const [deadline, setDeadline] = useState('');
+  const [tasks, setTasks] = useState<ExtractedTask[]>([]);
+
+  const handleExtract = async () => {
+    if (!rawText.trim()) return;
+    setLoading(true);
+    setError('');
+    try {
+      const result = await extractProjectFromText(rawText, llmConfig);
+      setExtracted(result);
+      setName(result.name);
+      setDescription(result.description);
+      setContext(result.context);
+      setDeadline(result.deadline);
+      setTasks(result.tasks);
+      setStep('review');
+    } catch (e: any) {
+      setError(e.message || 'Extraction failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateTask = (i: number, patch: Partial<ExtractedTask>) =>
+    setTasks((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+
+  const removeTask = (i: number) => setTasks((prev) => prev.filter((_, idx) => idx !== i));
+
+  const addTask = () =>
+    setTasks((prev) => [
+      ...prev,
+      {
+        title: '',
+        description: '',
+        priority: TaskPriority.MEDIUM,
+        originalEta: deadline || new Date().toISOString().slice(0, 10),
+      },
+    ]);
+
+  const handleCreate = () => {
+    const now = new Date().toISOString();
+    const dl = deadline || new Date(Date.now() + 90 * 86400000).toISOString();
+    const project: Project = {
+      id: generateId(),
+      name: name.trim() || 'New Project',
+      description: description.trim(),
+      context: context.trim(),
+      status: ProjectStatus.PLANNING,
+      managerId: currentUser.id,
+      startDate: now,
+      deadline: dl,
+      initialDeadline: dl,
+      isImportant: false,
+      isArchived: false,
+      budget: 0,
+      members: [{ userId: currentUser.id, role: ProjectRole.OWNER }],
+      tasks: tasks
+        .filter((t) => t.title.trim())
+        .map((t) => ({
+          id: generateId(),
+          title: t.title.trim(),
+          description: t.description,
+          status: TaskStatus.TODO,
+          priority: t.priority,
+          originalEta: t.originalEta,
+          weight: 5,
+          checklist: [],
+          dependencies: [],
+        })),
+      milestones: [],
+      technologyIds: [],
+      repoIds: [],
+      tags: [],
+      auditLog: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    onCreate(project);
+  };
+
+  return (
+    <div className="fixed inset-y-0 right-0 z-50 flex">
+      <div className="fixed inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative ml-auto w-full max-w-lg bg-white dark:bg-ink-900 flex flex-col h-full shadow-2xl border-l border-neutral-200 dark:border-ink-700">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200 dark:border-ink-700 shrink-0">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-brand" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em]">AI Project Builder</span>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-neutral-900 dark:hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Step indicator */}
+        <div className="flex items-center gap-1 px-5 py-2 border-b border-neutral-100 dark:border-ink-800 shrink-0">
+          {(['paste', 'review'] as const).map((s, i) => (
+            <React.Fragment key={s}>
+              <span className={`text-[9px] font-bold uppercase tracking-[0.14em] px-2 py-0.5 ${step === s ? 'bg-brand text-white' : 'text-muted'}`}>
+                {i + 1}. {s === 'paste' ? 'Paste Text' : 'Review & Edit'}
+              </span>
+              {i === 0 && <ChevronRight className="w-3 h-3 text-muted" />}
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {step === 'paste' && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-[11px] font-bold mb-1">Paste your project description</p>
+                <p className="text-[10px] text-muted mb-3">
+                  Paste emails, meeting notes, briefs, Confluence pages — anything describing the project. The AI will extract structure for you.
+                </p>
+                <textarea
+                  className="w-full input-base resize-none text-[11px]"
+                  rows={16}
+                  placeholder="Paste project description, emails, requirements, meeting notes…"
+                  value={rawText}
+                  onChange={(e) => setRawText(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              {error && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 p-3 text-[10px] text-red-700 dark:text-red-400">
+                  {error}
+                </div>
+              )}
+              <button
+                onClick={handleExtract}
+                disabled={!rawText.trim() || loading}
+                className="btn-primary w-full flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Extracting…</>
+                ) : (
+                  <><Sparkles className="w-3.5 h-3.5" /> Extract with AI</>
+                )}
+              </button>
+            </div>
+          )}
+
+          {step === 'review' && extracted && (
+            <div className="space-y-5">
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Project Name *</label>
+                <input className="w-full input-base" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Description</label>
+                <textarea className="w-full input-base resize-none" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Context / Background</label>
+                <textarea className="w-full input-base resize-none" rows={3} value={context} onChange={(e) => setContext(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Deadline</label>
+                <input type="date" className="w-full input-base" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+              </div>
+
+              {/* Tasks */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Tasks ({tasks.length})</label>
+                  <button onClick={addTask} className="text-[9px] text-brand font-bold uppercase tracking-[0.14em] flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> Add
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {tasks.map((t, i) => (
+                    <div key={i} className="border border-neutral-200 dark:border-ink-700 p-3 space-y-2 bg-neutral-50 dark:bg-ink-800">
+                      <div className="flex items-start gap-2">
+                        <input
+                          className="flex-1 input-base text-[11px] font-medium"
+                          placeholder="Task title"
+                          value={t.title}
+                          onChange={(e) => updateTask(i, { title: e.target.value })}
+                        />
+                        <button onClick={() => removeTask(i)} className="text-muted hover:text-red-500 shrink-0 mt-1">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <textarea
+                        className="w-full input-base resize-none text-[10px]"
+                        rows={2}
+                        placeholder="Description…"
+                        value={t.description}
+                        onChange={(e) => updateTask(i, { description: e.target.value })}
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          className="input-base text-[10px]"
+                          value={t.priority}
+                          onChange={(e) => updateTask(i, { priority: e.target.value as TaskPriority })}
+                        >
+                          {Object.values(TaskPriority).map((p) => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                        <input
+                          type="date"
+                          className="input-base text-[10px]"
+                          value={t.originalEta}
+                          onChange={(e) => updateTask(i, { originalEta: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {tasks.length === 0 && (
+                    <p className="text-[10px] text-muted text-center py-3">No tasks extracted — add them manually above.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setStep('paste')} className="btn-secondary flex-1 text-[10px]">Back</button>
+                <button
+                  onClick={handleCreate}
+                  disabled={!name.trim()}
+                  className="btn-primary flex-1 text-[10px] flex items-center justify-center gap-2"
+                >
+                  <Save className="w-3.5 h-3.5" /> Create Project
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [showAiBot, setShowAiBot] = useState(false);
   const canEdit = currentUser.role !== 'viewer';
+  const canUseAI = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   const filtered = useMemo(
     () =>
@@ -166,6 +430,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             <Archive className="w-4 h-4 mr-2" />
             {showArchived ? 'Hide archived' : 'Show archived'}
           </Button>
+          {canUseAI && (
+            <Button variant="outline" size="md" onClick={() => setShowAiBot(true)}>
+              <Bot className="w-4 h-4 mr-2" />
+              AI PRJ
+            </Button>
+          )}
           {canEdit && (
             <Button onClick={handleCreate}>
               <Plus className="w-4 h-4 mr-2" />
@@ -260,6 +530,19 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           onAudit={(action, details) =>
             upsertProject(addAudit(selected, currentUser, action, details))
           }
+        />
+      )}
+
+      {showAiBot && (
+        <AIProjectBot
+          llmConfig={state.llmConfig}
+          currentUser={currentUser}
+          onClose={() => setShowAiBot(false)}
+          onCreate={(p) => {
+            upsertProject(addAudit(p, currentUser, 'Project created via AI PRJ'));
+            setSelectedId(p.id);
+            setShowAiBot(false);
+          }}
         />
       )}
     </div>

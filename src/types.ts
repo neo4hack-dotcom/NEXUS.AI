@@ -298,6 +298,16 @@ export type WGStatus = 'active' | 'paused' | 'closed';
 export type WGMemberRole = 'lead' | 'contributor' | 'observer';
 export type WGTaskStatus = 'todo' | 'doing' | 'review' | 'done';
 export type WGTaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type WGActionStatus = 'todo' | 'ongoing' | 'blocked' | 'done';
+
+export interface WGActionItem {
+  id: string;
+  text: string;
+  ownerId?: string;
+  dueDate?: string;
+  status: WGActionStatus;
+  carriedFromSessionId?: string;
+}
 
 export interface WGMember {
   userId: string;
@@ -326,6 +336,7 @@ export interface WGMeetingNote {
   agenda?: string;
   notes: string;
   decisions: string[];
+  actionItems?: WGActionItem[];
   createdAt: string;
   updatedAt: string;
 }
