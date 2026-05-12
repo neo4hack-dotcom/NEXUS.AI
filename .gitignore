@@ -5,4 +5,13 @@ coverage/
 .DS_Store
 *.log
 .env*
-!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local DB (kept out of git on purpose)
+db.json
+server-config.json
