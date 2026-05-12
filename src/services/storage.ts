@@ -15,6 +15,7 @@ import {
   WeeklyCheckIn,
   AppNotification,
   Hackathon,
+  WorkingGroup,
   Theme,
 } from '../types';
 
@@ -80,6 +81,7 @@ export const getDefaultState = (): AppState => {
     weeklyCheckIns: [],
     notifications: [],
     hackathons: [],
+    workingGroups: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -111,6 +113,13 @@ export const sanitizeAppState = (data: any): AppState => {
       documents: arr(h.documents),
       messages: arr(h.messages),
       tags: arr(h.tags),
+    })),
+    workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
+      ...wg,
+      members: arr(wg.members),
+      tasks: arr(wg.tasks).map((t: any) => ({ ...t, checklist: arr(t.checklist), labels: arr(t.labels) })),
+      meetings: arr(wg.meetings).map((m: any) => ({ ...m, decisions: arr(m.decisions), attendeeIds: arr(m.attendeeIds) })),
+      tags: arr(wg.tags),
     })),
     llmConfig: { ...DEFAULT_LLM_CONFIG, ...(data.llmConfig || {}) },
     prompts: data.prompts && typeof data.prompts === 'object' ? data.prompts : {},

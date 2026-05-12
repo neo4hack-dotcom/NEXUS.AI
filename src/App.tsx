@@ -25,6 +25,7 @@ import { Technologies } from './components/views/Technologies';
 import { Repositories } from './components/views/Repositories';
 import { Settings } from './components/views/Settings';
 import { HackathonsView } from './components/views/Hackathon';
+import { WorkingGroupsView } from './components/views/WorkingGroups';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -247,6 +248,8 @@ const App: React.FC = () => {
         return <Repositories state={filteredState} currentUser={currentUser} update={update} />;
       case 'hackathons':
         return <HackathonsView state={filteredState} currentUser={currentUser} update={update} />;
+      case 'workinggroups':
+        return <WorkingGroupsView state={filteredState} currentUser={currentUser} update={update} />;
       case 'settings':
         return currentUser.role === 'admin' ? (
           <Settings state={appState} update={update} />
