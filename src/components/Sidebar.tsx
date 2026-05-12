@@ -19,6 +19,7 @@ import {
   Zap,
   Network,
   BookOpen,
+  CheckSquare,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 
@@ -35,7 +36,8 @@ export type TabId =
   | 'hackathons'
   | 'workinggroups'
   | 'settings'
-  | 'guide';
+  | 'guide'
+  | 'todos';
 
 interface Props {
   activeTab: TabId;
@@ -74,6 +76,7 @@ const NAV: NavItem[] = [
   { id: 'repos', label: 'Code Repositories', icon: GitBranch },
   { id: 'hackathons', label: 'Hackathons', icon: Zap },
   { id: 'workinggroups', label: 'Working Groups', icon: Network },
+  { id: 'todos', label: 'Smart ToDo', icon: CheckSquare, minRole: 'contributor' },
   { id: 'guide', label: 'User Guide', icon: BookOpen },
 ];
 

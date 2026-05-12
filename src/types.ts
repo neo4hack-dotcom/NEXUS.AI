@@ -1,4 +1,4 @@
-/* === NEXUS.AI — Domain Types === */
+/* === DOINg.AI — Domain Types === */
 
 export type Theme = 'light' | 'dark';
 export type Role = 'admin' | 'manager' | 'contributor' | 'viewer';
@@ -120,6 +120,8 @@ export interface Project {
   repoIds: string[];
   tags: string[];
   auditLog: AuditEntry[];
+  presentations?: ProjectPresentation[];
+  linkedApps?: ProjectLinkedApp[];
   createdAt: string;
   updatedAt: string;
 }
@@ -284,6 +286,66 @@ export interface Hackathon {
   updatedAt: string;
 }
 
+// Smart ToDo
+export type TodoStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'cancelled';
+export type TodoPriorityLevel = 'low' | 'medium' | 'high' | 'urgent';
+export type EnergyLevel = 'low' | 'medium' | 'high';
+export type PlanningPeriod = 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'this_quarter' | 'this_year' | 'tbd';
+
+export interface TodoAttachment {
+  name: string;
+  url: string;
+}
+
+export interface SmartTodo {
+  id: string;
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+  source: string;
+  requester: string;
+  sponsor?: string;
+  isRecurring: boolean;
+  recurrenceRule: string | null;
+  createdByBot?: boolean;
+  isArchived?: boolean;
+  managerAssigned?: boolean;
+  assignedByUserId?: string;
+  title: string;
+  description: string;
+  tags: string[];
+  attachments: TodoAttachment[];
+  links: string[];
+  status: TodoStatus;
+  priorityLevel: TodoPriorityLevel;
+  eisenhowerQuadrant: 1 | 2 | 3 | 4 | null;
+  energyRequired: EnergyLevel;
+  estimatedDurationMin: number | null;
+  actualTimeSpentMin: number | null;
+  startDate: string | null;
+  dueDate: string | null;
+  completedAt: string | null;
+  planningFor?: PlanningPeriod | null;
+  scheduledDateTime?: string | null;
+  scheduledDuration?: number | null;
+}
+
+export interface ProjectPresentation {
+  id: string;
+  name: string;
+  url: string;
+  addedAt: string;
+  addedByUserId: string;
+}
+
+export interface ProjectLinkedApp {
+  id: string;
+  name: string;
+  role: 'impacted' | 'contributor' | 'both';
+  description?: string;
+  url?: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -297,6 +359,7 @@ export interface AppState {
   notifications: AppNotification[];
   hackathons: Hackathon[];
   workingGroups: WorkingGroup[];
+  smartTodos: SmartTodo[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

@@ -30,6 +30,7 @@ import { NexusAssistant } from './components/NexusAssistant';
 import { CommandPalette } from './components/CommandPalette';
 import { UserGuide } from './components/views/UserGuide';
 import { OnboardingModal } from './components/OnboardingModal';
+import { SmartTodoView } from './components/views/SmartTodo';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -318,6 +319,8 @@ const App: React.FC = () => {
         ) : (
           <div className="p-10 text-center text-muted">Admin only.</div>
         );
+      case 'todos':
+        return <SmartTodoView state={appState} currentUser={currentUser} update={update} />;
       case 'guide':
         return <UserGuide currentUser={currentUser} />;
       default:

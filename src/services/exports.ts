@@ -5,7 +5,7 @@
 import { AppState, Hackathon, Project } from '../types';
 
 export const exportEML = (subject: string, body: string, recipients: string[]): void => {
-  const safeSubj = (subject || 'NEXUS.AI Update').replace(/[\r\n]+/g, ' ').trim();
+  const safeSubj = (subject || 'DOINg.AI Update').replace(/[\r\n]+/g, ' ').trim();
   const to = recipients.filter(Boolean).join(',');
 
   const eml = [
@@ -97,13 +97,13 @@ export const exportPDF = (title: string, sections: { heading: string; body: stri
   <body>
     <header>
       <div>
-        <div class="brand">NEXUS<span class="dot">.AI</span></div>
+        <div class="brand">DOINg<span class="dot">.AI</span></div>
         <h1 style="margin-top:8pt">${esc(title)}</h1>
       </div>
       <div class="meta"><div>Confidential</div><div>${today}</div></div>
     </header>
     ${sectionHtml}
-    <footer>NEXUS.AI • AI Project Operations Platform</footer>
+    <footer>DOINg.AI • AI Project Operations Platform</footer>
     <script>window.onload = function () { setTimeout(function () { window.print(); }, 250); };</script>
   </body>
 </html>`);
@@ -180,7 +180,7 @@ const projectCard = (name: string, status: string, rag: string, deadline: string
 
 const sectionHeader = (title: string, accent = BRAND) =>
   `<div style="border-left:4px solid ${accent};padding-left:12px;margin:20px 0 12px">
-    <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.18em;color:#aaa;font-weight:700;font-family:system-ui">NEXUS.AI</div>
+    <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.18em;color:#aaa;font-weight:700;font-family:system-ui">DOINg.AI</div>
     <div style="font-size:14pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.02em;font-family:system-ui">${esc(title)}</div>
   </div>`;
 
@@ -204,7 +204,7 @@ const pdfHeader = (
         ${subtitle ? `<div style="font-size:10pt;color:#777;margin-top:6px;font-family:system-ui">${esc(subtitle)}</div>` : ''}
       </div>
       <div style="text-align:right">
-        <div style="font-size:22pt;font-weight:900;font-family:system-ui;color:#111">NEXUS<span style="color:${accentColor}">.AI</span></div>
+        <div style="font-size:22pt;font-weight:900;font-family:system-ui;color:#111">DOINg<span style="color:${accentColor}">.AI</span></div>
         <div style="font-size:8pt;color:#aaa;text-transform:uppercase;letter-spacing:0.12em;font-family:system-ui;margin-top:2px">Confidential</div>
         <div style="font-size:8pt;color:#888;font-family:system-ui;margin-top:2px">${today}</div>
       </div>
@@ -214,7 +214,7 @@ const pdfHeader = (
 
 const pdfFooter = (type: string) =>
   `<div style="position:fixed;bottom:8mm;left:16mm;right:16mm;color:#bbb;font-size:7.5pt;text-align:center;border-top:1px solid #e5e7eb;padding-top:6px;font-family:system-ui">
-    NEXUS.AI • AI Project Operations Platform • ${esc(type)} Report
+    DOINg.AI • AI Project Operations Platform • ${esc(type)} Report
   </div>`;
 
 const PDF_BASE_STYLES = `
@@ -403,7 +403,7 @@ const buildNewsletterBody = (title: string, content: string, state: AppState): s
       <div style="font-size:28pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.03em;line-height:1;font-family:system-ui">${esc(title || 'Portfolio Newsletter')}</div>
       <div style="font-size:9pt;color:#888;margin-top:8px;font-family:system-ui">${period} Edition</div>
       <div style="position:absolute;top:16px;right:32px;text-align:right">
-        <div style="font-size:18pt;font-weight:900;font-family:system-ui">NEXUS<span style="color:${BRAND}">.AI</span></div>
+        <div style="font-size:18pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
         <div style="font-size:7pt;color:#666;letter-spacing:0.1em;text-transform:uppercase;font-family:system-ui">Confidential</div>
       </div>
     </div>
@@ -704,7 +704,7 @@ export const exportHackathonCandidatePDF = (hackathon: Hackathon, state: AppStat
       <div style="position:absolute;top:-20px;right:-20px;width:200px;height:200px;background:${statusColor[hackathon.status] || BRAND};opacity:0.08;border-radius:50%"></div>
       <div style="position:absolute;bottom:-30px;left:30%;width:120px;height:120px;background:${BRAND};opacity:0.05;border-radius:50%"></div>
       <div style="font-size:8pt;letter-spacing:0.28em;text-transform:uppercase;color:${statusColor[hackathon.status] || BRAND};font-weight:700;font-family:system-ui;margin-bottom:6px">
-        NEXUS.AI — HACKATHON CANDIDATE KIT
+        DOINg.AI — HACKATHON CANDIDATE KIT
       </div>
       <div style="font-size:32pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.03em;line-height:1;font-family:system-ui;margin-bottom:10px">${esc(hackathon.title)}</div>
       ${hackathon.theme ? `<div style="font-size:13pt;color:#aaa;font-family:system-ui;margin-bottom:12px;font-style:italic">${esc(hackathon.theme)}</div>` : ''}
@@ -925,7 +925,7 @@ export const buildProjectHTML = (
           ${project.description ? `<div style="font-size:10pt;color:#777;margin-top:6px;font-family:system-ui">${esc(project.description)}</div>` : ''}
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:20px">
-          <div style="font-size:22pt;font-weight:900;font-family:system-ui;color:#111">NEXUS<span style="color:${BRAND}">.AI</span></div>
+          <div style="font-size:22pt;font-weight:900;font-family:system-ui;color:#111">DOINg<span style="color:${BRAND}">.AI</span></div>
           <div style="font-size:8pt;color:#aaa;text-transform:uppercase;letter-spacing:0.12em;font-family:system-ui;margin-top:2px">Confidential</div>
           <div style="font-size:8pt;color:#888;font-family:system-ui;margin-top:2px">${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
           <div style="margin-top:8px;background:${accentColor}20;color:${accentColor};font-size:8pt;font-weight:900;text-transform:uppercase;padding:4px 12px;border-radius:2px;font-family:system-ui">${esc(project.status)}</div>
