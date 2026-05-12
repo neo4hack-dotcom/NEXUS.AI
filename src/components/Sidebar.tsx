@@ -16,6 +16,7 @@ import {
   Bell,
   Sparkles,
   CircleDot,
+  Zap,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 
@@ -29,6 +30,7 @@ export type TabId =
   | 'communications'
   | 'tech'
   | 'repos'
+  | 'hackathons'
   | 'settings';
 
 interface Props {
@@ -42,6 +44,7 @@ interface Props {
   onOpenNotifications: () => void;
   notificationCount: number;
   isOnline: boolean;
+  syncFlash: boolean;
 }
 
 type MinRole = Role;
@@ -65,6 +68,7 @@ const NAV: NavItem[] = [
   { id: 'communications', label: 'Communications', icon: Mail, minRole: 'contributor' },
   { id: 'tech', label: 'Technologies', icon: Cpu },
   { id: 'repos', label: 'Code Repositories', icon: GitBranch },
+  { id: 'hackathons', label: 'Hackathons', icon: Zap },
 ];
 
 export const Sidebar: React.FC<Props> = ({
@@ -78,6 +82,7 @@ export const Sidebar: React.FC<Props> = ({
   onOpenNotifications,
   notificationCount,
   isOnline,
+  syncFlash,
 }) => {
   const isAdmin = currentUser?.role === 'admin';
   const userLevel = ROLE_LEVEL[currentUser?.role ?? 'viewer'];
@@ -88,18 +93,27 @@ export const Sidebar: React.FC<Props> = ({
   return (
     <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col border-r border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
       <div className="px-6 pt-8 pb-6 border-b border-neutral-200 dark:border-ink-700">
-        <div className="flex items-center gap-2 mb-1">
-          <CircleDot className="w-4 h-4 text-brand" />
-          <span className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted">
-            v1.0 • {isOnline ? 'online' : 'offline'}
-          </span>
-        </div>
-        <h1 className="display-lg">
+        <h1 className="display-lg mb-3">
           NEXUS<span className="text-brand">.AI</span>
         </h1>
-        <p className="text-[10px] uppercase tracking-[0.18em] text-muted mt-1">
-          AI Project Operations
-        </p>
+        {/* Server sync indicator — DOINg-style live badge */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex items-center justify-center w-4 h-4">
+            {isOnline ? (
+              <>
+                <span className={`absolute inline-flex h-3 w-3 rounded-full opacity-60 ${syncFlash ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500 animate-ping'}`} />
+                <span className={`relative inline-flex h-2 w-2 rounded-full ${syncFlash ? 'bg-emerald-400' : 'bg-emerald-500'}`} />
+              </>
+            ) : (
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-neutral-400" />
+            )}
+          </div>
+          <span className={`text-[9px] font-mono uppercase tracking-[0.2em] transition-all duration-300 ${
+            syncFlash ? 'text-emerald-500 font-bold' : isOnline ? 'text-muted' : 'text-neutral-400'
+          }`}>
+            {syncFlash ? 'synced ✓' : isOnline ? 'server live' : 'offline'}
+          </span>
+        </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">

@@ -215,6 +215,59 @@ export interface LlmConfig {
   systemPrompt: string;
 }
 
+/* === Hackathon === */
+
+export type HackathonStatus = 'upcoming' | 'active' | 'completed' | 'archived';
+export type HackathonRole = 'dev' | 'sme' | 'expert' | 'pm' | 'designer' | 'other';
+export type HackathonDocType = 'brief' | 'guide' | 'result' | 'presentation' | 'resource' | 'other';
+
+export interface HackathonParticipant {
+  id: string;
+  name: string;
+  role: HackathonRole;
+  email?: string;
+  team?: string;
+  expertise?: string;
+}
+
+export interface HackathonDocument {
+  id: string;
+  title: string;
+  type: HackathonDocType;
+  content: string;
+  authorId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HackathonMessage {
+  id: string;
+  authorId: string;
+  authorName: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface Hackathon {
+  id: string;
+  title: string;
+  theme: string;
+  objective: string;
+  challenge?: string;
+  status: HackathonStatus;
+  startDate: string;
+  endDate: string;
+  location?: string;
+  participants: HackathonParticipant[];
+  documents: HackathonDocument[];
+  messages: HackathonMessage[];
+  results?: string;
+  aiSynthesis?: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -225,6 +278,7 @@ export interface AppState {
   mailingLists: MailingList[];
   weeklyCheckIns: WeeklyCheckIn[];
   notifications: AppNotification[];
+  hackathons: Hackathon[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

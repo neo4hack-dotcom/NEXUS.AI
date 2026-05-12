@@ -24,6 +24,7 @@ import { Communications } from './components/views/Communications';
 import { Technologies } from './components/views/Technologies';
 import { Repositories } from './components/views/Repositories';
 import { Settings } from './components/views/Settings';
+import { HackathonsView } from './components/views/Hackathon';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -118,6 +119,7 @@ const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(true);
   const [notifOpen, setNotifOpen] = useState(false);
   const [aiInsightOpen, setAiInsightOpen] = useState(false);
+  const [syncFlash, setSyncFlash] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -169,6 +171,8 @@ const App: React.FC = () => {
             : curr
         );
         setIsOnline(true);
+        setSyncFlash(true);
+        setTimeout(() => setSyncFlash(false), 2500);
       }
     });
 
@@ -218,26 +222,10 @@ const App: React.FC = () => {
 
   const notifications = useMemo(() => (appState ? computeNotifications(appState) : []), [appState]);
 
-  if (!appState) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted">Loading NEXUS.AI…</p>
-      </div>
-    );
-  }
-
-  if (!currentUser || !filteredState) {
-    return (
-      <Login
-        users={appState.users}
-        onLogin={onLogin}
-        theme={appState.theme}
-        toggleTheme={toggleTheme}
-      />
-    );
-  }
-
-  const renderView = useMemo(() => () => {
+  // renderView MUST be defined before any conditional returns to satisfy Rules of Hooks.
+  // Null-guard inside keeps it safe when appState / filteredState aren't ready yet.
+  const activeView = useMemo(() => {
+    if (!filteredState || !currentUser || !appState) return null;
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard state={filteredState} currentUser={currentUser} setActiveTab={setActiveTab} onOpenAi={() => setAiInsightOpen(true)} />;
@@ -257,6 +245,8 @@ const App: React.FC = () => {
         return <Technologies state={filteredState} currentUser={currentUser} update={update} />;
       case 'repos':
         return <Repositories state={filteredState} currentUser={currentUser} update={update} />;
+      case 'hackathons':
+        return <HackathonsView state={filteredState} currentUser={currentUser} update={update} />;
       case 'settings':
         return currentUser.role === 'admin' ? (
           <Settings state={appState} update={update} />
@@ -266,7 +256,28 @@ const App: React.FC = () => {
       default:
         return null;
     }
-  }, [activeTab, filteredState, appState, currentUser, update, setActiveTab]);
+  // setActiveTab and setAiInsightOpen are stable React dispatchers — no need in deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, filteredState, appState, currentUser, update]);
+
+  if (!appState) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-xs uppercase tracking-[0.18em] text-muted">Loading NEXUS.AI…</p>
+      </div>
+    );
+  }
+
+  if (!currentUser || !filteredState) {
+    return (
+      <Login
+        users={appState.users}
+        onLogin={onLogin}
+        theme={appState.theme}
+        toggleTheme={toggleTheme}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex bg-neutral-50 dark:bg-ink-950 transition-colors">
@@ -281,6 +292,7 @@ const App: React.FC = () => {
         onOpenNotifications={() => setNotifOpen(true)}
         notificationCount={notifications.length}
         isOnline={isOnline}
+        syncFlash={syncFlash}
       />
 
       <main className="flex-1 min-w-0 flex flex-col">
@@ -300,7 +312,7 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8">{renderView()}</div>
+        <div className="flex-1 overflow-y-auto p-8">{activeView}</div>
       </main>
 
       <NotificationCenter
