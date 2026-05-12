@@ -5,6 +5,8 @@ import {
   saveState,
   fetchFromServer,
   subscribeToStoreUpdates,
+  startPolling,
+  stopPolling,
   generateId,
   getFilteredState,
 } from './services/storage';
@@ -157,8 +159,22 @@ const App: React.FC = () => {
     };
     window.addEventListener('nexus_conflict', onConflict);
 
+    // Real-time collaboration: poll server for remote changes every 5 s
+    startPolling(async () => {
+      const serverState = await fetchFromServer();
+      if (serverState) {
+        setAppState((curr) =>
+          curr
+            ? { ...serverState, currentUserId: curr.currentUserId, theme: curr.theme }
+            : curr
+        );
+        setIsOnline(true);
+      }
+    });
+
     return () => {
       unsub();
+      stopPolling();
       window.removeEventListener('nexus_conflict', onConflict);
     };
   }, []);

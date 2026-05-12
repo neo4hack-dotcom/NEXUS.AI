@@ -31,7 +31,7 @@ import {
   buildPortfolioSummaryData,
   buildProjectBriefData,
 } from '../../services/llmService';
-import { exportEML, exportPDF } from '../../services/exports';
+import { exportEML, exportCommunicationPDF } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -82,7 +82,7 @@ export const Communications: React.FC<Props> = ({ state, currentUser, update }) 
       {tab === 'generate' && <Generator state={state} currentUser={currentUser} update={update} />}
       {tab === 'templates' && <Templates state={state} update={update} canEdit={canEdit} />}
       {tab === 'lists' && <Lists state={state} update={update} canEdit={canEdit} />}
-      {tab === 'history' && <History state={state} />}
+      {tab === 'history' && <History state={state} currentUser={currentUser} />}
     </div>
   );
 };
@@ -567,37 +567,51 @@ const Lists: React.FC<{
 
 /* === History === */
 
-const History: React.FC<{ state: AppState }> = ({ state }) => {
+const History: React.FC<{ state: AppState; currentUser: User }> = ({ state, currentUser }) => {
+  const isPrivileged = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const visible = isPrivileged
+    ? state.communications
+    : state.communications.filter((c) => c.authorId === currentUser.id);
+
   return (
     <div className="space-y-2">
-      {state.communications.length === 0 && (
+      {visible.length === 0 && (
         <p className="text-center text-sm text-muted py-12">No saved drafts yet.</p>
       )}
-      {state.communications.map((c) => (
-        <div key={c.id} className="surface border p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-bold uppercase tracking-tight text-sm">{c.title}</p>
-              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted mt-0.5">
-                {new Date(c.createdAt).toLocaleString()} • {c.type}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge tone={c.status === 'sent' ? 'green' : 'muted'}>{c.status}</Badge>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  exportPDF(c.title || c.subject, [{ heading: 'Communication', body: c.content }])
-                }
-              >
-                <FileDown className="w-3 h-3 mr-1" />
-                PDF
-              </Button>
+      {visible.map((c) => {
+        const author = state.users.find((u) => u.id === c.authorId);
+        return (
+          <div key={c.id} className="surface border p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold uppercase tracking-tight text-sm">{c.title}</p>
+                <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted mt-0.5">
+                  {new Date(c.createdAt).toLocaleString()} • {c.type}
+                  {author && isPrivileged && ` • ${author.firstName} ${author.lastName}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge tone={c.status === 'sent' ? 'green' : 'muted'}>{c.status}</Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    exportCommunicationPDF(
+                      c.type as 'weekly' | 'newsletter' | 'exco',
+                      c.title || c.subject || 'Communication',
+                      c.content,
+                      state
+                    )
+                  }
+                >
+                  <FileDown className="w-3 h-3 mr-1" />
+                  PDF
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

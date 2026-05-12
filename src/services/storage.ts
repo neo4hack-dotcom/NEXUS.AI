@@ -230,6 +230,31 @@ export const saveState = (state: AppState): void => {
   }
 };
 
+let _pollTimer: ReturnType<typeof setInterval> | null = null;
+
+export const startPolling = (onNewVersion: () => void, intervalMs = 5000): void => {
+  if (_pollTimer) return;
+  _pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/version');
+      if (!res.ok) return;
+      const { lastUpdated } = await res.json();
+      if (lastUpdated > _serverVersion) {
+        onNewVersion();
+      }
+    } catch {
+      // ignore network errors silently
+    }
+  }, intervalMs);
+};
+
+export const stopPolling = (): void => {
+  if (_pollTimer) {
+    clearInterval(_pollTimer);
+    _pollTimer = null;
+  }
+};
+
 export const subscribeToStoreUpdates = (callback: () => void) => {
   const handler = (event: StorageEvent) => {
     if (event.key === STORAGE_KEY) callback();
