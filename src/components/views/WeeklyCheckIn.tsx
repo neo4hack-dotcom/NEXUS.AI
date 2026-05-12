@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ClipboardList, Sparkles, Loader2, Save, Smile, AlertCircle, AlertTriangle, FileDown } from 'lucide-react';
+import { MarkdownView } from '../ui/MarkdownView';
 import { AppState, User, WeeklyCheckIn as CheckIn } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -202,7 +203,7 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
       {aiOutput && (
         <div className="surface-flat border p-5">
           <p className="label-xs mb-2">AI Consolidation</p>
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{aiOutput}</pre>
+          <MarkdownView content={aiOutput} />
         </div>
       )}
     </div>

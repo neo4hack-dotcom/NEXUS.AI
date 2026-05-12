@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -11,7 +11,9 @@ import {
   X,
   History,
   CheckCircle2,
+  Save,
 } from 'lucide-react';
+import { MarkdownView } from '../ui/MarkdownView';
 import {
   AppState,
   Project,
@@ -270,7 +272,14 @@ const ProjectDetailModal: React.FC<{
 
   React.useEffect(() => setDraft(project), [project.id]);
 
-  const save = () => onSave(draft);
+  // Escape key closes the modal
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const saveAndClose = () => { onSave(draft); onClose(); };
 
   const moveTask = (taskId: string, newStatus: TaskStatus) => {
     setDraft((d) => ({
@@ -443,9 +452,10 @@ const ProjectDetailModal: React.FC<{
                   disabled={!canEdit}
                 />
               </Field>
-              <Field label="Budget (€)">
+              <Field label="Cost (MD — Man Days)">
                 <Input
                   type="number"
+                  min={0}
                   value={draft.budget || 0}
                   onChange={(e) => setDraft({ ...draft, budget: Number(e.target.value) })}
                   disabled={!canEdit}
@@ -525,9 +535,7 @@ const ProjectDetailModal: React.FC<{
                   </Button>
                 </div>
                 {aiOutput ? (
-                  <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">
-                    {aiOutput}
-                  </pre>
+                  <MarkdownView content={aiOutput} />
                 ) : (
                   <p className="text-xs text-muted">
                     Generate an executive brief from current project data.
@@ -538,55 +546,25 @@ const ProjectDetailModal: React.FC<{
           )}
 
           {tab === 'kanban' && (
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <p className="text-xs text-muted">
-                  Click a task button to move it through the workflow.
-                </p>
-                {canEdit && (
-                  <Button size="sm" onClick={addTask}>
-                    <Plus className="w-3 h-3 mr-2" />
-                    Add task
-                  </Button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                {Object.values(TaskStatus).map((status) => {
-                  const tasks = draft.tasks.filter((t) => t.status === status);
-                  return (
-                    <div key={status} className="surface-flat border p-3 min-h-[300px]">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="label-xs">{status}</p>
-                        <span className="text-[10px] font-mono text-muted">{tasks.length}</span>
-                      </div>
-                      <div className="space-y-2">
-                        {tasks.map((t) => (
-                          <KanbanCard
-                            key={t.id}
-                            task={t}
-                            users={state.users}
-                            canEdit={canEdit}
-                            onMove={(s) => moveTask(t.id, s)}
-                            onChange={(patch) =>
-                              setDraft((d) => ({
-                                ...d,
-                                tasks: d.tasks.map((x) => (x.id === t.id ? { ...x, ...patch } : x)),
-                              }))
-                            }
-                            onDelete={() =>
-                              setDraft((d) => ({
-                                ...d,
-                                tasks: d.tasks.filter((x) => x.id !== t.id),
-                              }))
-                            }
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <KanbanBoard
+              draft={draft}
+              state={state}
+              canEdit={canEdit}
+              onMoveTask={moveTask}
+              onAddTask={addTask}
+              onChangeTask={(id, patch) =>
+                setDraft((d) => ({
+                  ...d,
+                  tasks: d.tasks.map((x) => (x.id === id ? { ...x, ...patch } : x)),
+                }))
+              }
+              onDeleteTask={(id) =>
+                setDraft((d) => ({
+                  ...d,
+                  tasks: d.tasks.filter((x) => x.id !== id),
+                }))
+              }
+            />
           )}
 
           {tab === 'audit' && (
@@ -629,9 +607,14 @@ const ProjectDetailModal: React.FC<{
               </Button>
             )}
             <Button variant="outline" size="md" onClick={onClose}>
-              Cancel
+              Discard & close
             </Button>
-            {canEdit && <Button onClick={save}>Save</Button>}
+            {canEdit && (
+              <Button onClick={saveAndClose}>
+                <Save className="w-4 h-4 mr-2" />
+                Save & close
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -645,6 +628,75 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
     {children}
   </div>
 );
+
+/* ===== KanbanBoard with drag-and-drop ===== */
+
+const KanbanBoard: React.FC<{
+  draft: Project;
+  state: AppState;
+  canEdit: boolean;
+  onMoveTask: (id: string, s: TaskStatus) => void;
+  onAddTask: () => void;
+  onChangeTask: (id: string, patch: Partial<Task>) => void;
+  onDeleteTask: (id: string) => void;
+}> = ({ draft, state, canEdit, onMoveTask, onAddTask, onChangeTask, onDeleteTask }) => {
+  const [dragOver, setDragOver] = useState<TaskStatus | null>(null);
+
+  const handleDrop = (e: React.DragEvent, status: TaskStatus) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain');
+    if (id) onMoveTask(id, status);
+    setDragOver(null);
+  };
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <p className="text-xs text-muted">Drag tasks between columns or use the arrow button.</p>
+        {canEdit && (
+          <Button size="sm" onClick={onAddTask}>
+            <Plus className="w-3 h-3 mr-2" />
+            Add task
+          </Button>
+        )}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        {Object.values(TaskStatus).map((status) => {
+          const tasks = draft.tasks.filter((t) => t.status === status);
+          return (
+            <div
+              key={status}
+              className={`surface-flat border p-3 min-h-[300px] transition-colors ${
+                dragOver === status ? 'border-brand bg-brand/5' : ''
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(status); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={(e) => handleDrop(e, status)}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <p className="label-xs">{status}</p>
+                <span className="text-[10px] font-mono text-muted">{tasks.length}</span>
+              </div>
+              <div className="space-y-2">
+                {tasks.map((t) => (
+                  <KanbanCard
+                    key={t.id}
+                    task={t}
+                    users={state.users}
+                    canEdit={canEdit}
+                    onMove={(s) => onMoveTask(t.id, s)}
+                    onChange={(patch) => onChangeTask(t.id, patch)}
+                    onDelete={() => onDeleteTask(t.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const KanbanCard: React.FC<{
   task: Task;
@@ -660,7 +712,14 @@ const KanbanCard: React.FC<{
   const nextStatus = statuses[(statuses.indexOf(task.status) + 1) % statuses.length];
 
   return (
-    <div className="surface border p-3 text-xs">
+    <div
+      className="surface border p-3 text-xs cursor-grab active:cursor-grabbing"
+      draggable={canEdit}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', task.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+    >
       <div className="flex items-start gap-2">
         <button
           onClick={() => setOpen((v) => !v)}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { GitBranch, ExternalLink, Plus, Trash2, X, Search } from 'lucide-react';
-import { AppState, Repository, User } from '../../types';
+import { AppState, Repository, RepoProvider, User } from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
@@ -12,10 +12,27 @@ interface Props {
   update: (m: (s: AppState) => AppState) => void;
 }
 
+const PROVIDER_BASE: Record<RepoProvider, string> = {
+  bitbucket: 'https://bitbucket.org/',
+  github: 'https://github.com/',
+  gitlab: 'https://gitlab.com/',
+  azure: 'https://dev.azure.com/',
+  other: 'https://',
+};
+
+const PROVIDER_LABEL: Record<RepoProvider, string> = {
+  bitbucket: 'Bitbucket',
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  azure: 'Azure DevOps',
+  other: 'Other',
+};
+
 const newRepo = (): Repository => ({
   id: generateId(),
   name: 'new-repo',
-  url: 'https://github.com/org/repo',
+  provider: 'bitbucket',
+  url: 'https://bitbucket.org/org/repo',
   description: '',
   visibility: 'private',
   projectIds: [],
@@ -89,8 +106,11 @@ export const Repositories: React.FC<Props> = ({ state, currentUser, update }) =>
                   <GitBranch className="w-4 h-4 text-brand" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-bold uppercase tracking-tight">{r.name}</p>
+                    {r.provider && r.provider !== 'other' && (
+                      <Badge tone="muted">{PROVIDER_LABEL[r.provider]}</Badge>
+                    )}
                     <Badge tone={r.visibility === 'public' ? 'green' : 'muted'}>
                       {r.visibility}
                     </Badge>
@@ -154,6 +174,18 @@ const RepoEditor: React.FC<{
   onDelete: () => void;
 }> = ({ r, state, onClose, onSave, onDelete }) => {
   const [d, setD] = useState<Repository>(r);
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const handleProviderChange = (p: RepoProvider) => {
+    const base = PROVIDER_BASE[p];
+    setD({ ...d, provider: p, url: d.url.startsWith('http') ? base : d.url });
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="surface border w-full max-w-xl animate-slide-up">
@@ -164,22 +196,17 @@ const RepoEditor: React.FC<{
           </button>
         </div>
         <div className="p-5 space-y-3">
-          <div className="space-y-1.5">
-            <label className="label-xs">Name</label>
-            <Input value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <label className="label-xs">URL</label>
-            <Input value={d.url} onChange={(e) => setD({ ...d, url: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <label className="label-xs">Description</label>
-            <Textarea value={d.description} onChange={(e) => setD({ ...d, description: e.target.value })} />
-          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="label-xs">Language</label>
-              <Input value={d.language || ''} onChange={(e) => setD({ ...d, language: e.target.value })} />
+              <label className="label-xs">Platform</label>
+              <Select
+                value={d.provider || 'bitbucket'}
+                onChange={(e) => handleProviderChange(e.target.value as RepoProvider)}
+              >
+                {(Object.keys(PROVIDER_LABEL) as RepoProvider[]).map((p) => (
+                  <option key={p} value={p}>{PROVIDER_LABEL[p]}</option>
+                ))}
+              </Select>
             </div>
             <div className="space-y-1.5">
               <label className="label-xs">Visibility</label>
@@ -192,6 +219,22 @@ const RepoEditor: React.FC<{
                 <option value="internal">Internal</option>
               </Select>
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="label-xs">Name</label>
+            <Input value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="label-xs">URL</label>
+            <Input value={d.url} onChange={(e) => setD({ ...d, url: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="label-xs">Description</label>
+            <Textarea value={d.description} onChange={(e) => setD({ ...d, description: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="label-xs">Language</label>
+            <Input value={d.language || ''} onChange={(e) => setD({ ...d, language: e.target.value })} />
           </div>
           <div className="space-y-1.5">
             <label className="label-xs">Linked projects</label>

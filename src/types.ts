@@ -137,9 +137,12 @@ export interface Technology {
   createdAt: string;
 }
 
+export type RepoProvider = 'bitbucket' | 'github' | 'gitlab' | 'azure' | 'other';
+
 export interface Repository {
   id: string;
   name: string;
+  provider?: RepoProvider;
   url: string;
   description: string;
   language?: string;

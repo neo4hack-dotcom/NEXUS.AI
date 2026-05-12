@@ -221,7 +221,7 @@ const App: React.FC = () => {
     );
   }
 
-  const renderView = () => {
+  const renderView = useMemo(() => () => {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard state={filteredState} currentUser={currentUser} setActiveTab={setActiveTab} onOpenAi={() => setAiInsightOpen(true)} />;
@@ -250,7 +250,7 @@ const App: React.FC = () => {
       default:
         return null;
     }
-  };
+  }, [activeTab, filteredState, appState, currentUser, update, setActiveTab]);
 
   return (
     <div className="min-h-screen flex bg-neutral-50 dark:bg-ink-950 transition-colors">

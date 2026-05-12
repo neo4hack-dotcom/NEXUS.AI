@@ -11,17 +11,26 @@ import {
   Trash2,
   RotateCcw,
   Database,
+  Download,
+  Upload,
+  AlertTriangle,
 } from 'lucide-react';
 import { AppState, LlmConfig } from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
 import { testConnection, DEFAULT_PROMPTS } from '../../services/llmService';
-import { clearState } from '../../services/storage';
+import { clearState, exportBackup, importBackup } from '../../services/storage';
 
 interface Props {
   state: AppState;
   update: (m: (s: AppState) => AppState) => void;
+}
+
+// Passed to DataSection so it can trigger a full state replacement
+interface DataProps {
+  state: AppState;
+  replaceState: (s: AppState) => void;
 }
 
 type Tab = 'llm' | 'prompts' | 'security' | 'data';
@@ -76,7 +85,12 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
       {tab === 'llm' && <LlmSection state={state} update={update} />}
       {tab === 'prompts' && <PromptsSection state={state} update={update} />}
       {tab === 'security' && <SecuritySection state={state} update={update} />}
-      {tab === 'data' && <DataSection />}
+      {tab === 'data' && (
+        <DataSection
+          state={state}
+          replaceState={(next) => update(() => next)}
+        />
+      )}
     </div>
   );
 };
@@ -324,33 +338,165 @@ const SecuritySection: React.FC<Props> = ({ state, update }) => {
 
 /* === Data === */
 
-const DataSection: React.FC = () => {
+const DataSection: React.FC<DataProps> = ({ state, replaceState }) => {
+  const [importStep, setImportStep] = useState<'idle' | 'confirm'>('idle');
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importError, setImportError] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const doImport = () => {
+    if (!importFile) return;
+    importBackup(
+      importFile,
+      (next) => {
+        replaceState(next);
+        setImportStep('idle');
+        setImportFile(null);
+      },
+      (msg) => {
+        setImportError(msg);
+        setImportStep('idle');
+      }
+    );
+  };
+
   return (
-    <div className="surface border">
-      <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
-        <Database className="w-5 h-5 text-brand" />
-        <div>
-          <h3 className="text-lg font-black uppercase tracking-tight">Data management</h3>
-          <p className="text-xs text-muted mt-1">
-            Storage stack: localStorage (instant) + db.json via /api/data (canonical).
+    <div className="space-y-4">
+      {/* Backup export */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <Download className="w-5 h-5 text-brand" />
+          <div>
+            <h3 className="text-lg font-black uppercase tracking-tight">Export backup</h3>
+            <p className="text-xs text-muted mt-1">
+              Download the entire NEXUS.AI dataset as a timestamped JSON file.
+            </p>
+          </div>
+        </div>
+        <div className="p-5">
+          <p className="text-sm text-muted mb-4">
+            The backup includes all projects, users, technologies, repositories, check-ins,
+            communications, and settings. It does not include your session token or theme preference.
           </p>
+          <Button onClick={() => exportBackup(state)}>
+            <Download className="w-4 h-4 mr-2" />
+            Download backup (.json)
+          </Button>
         </div>
       </div>
-      <div className="p-5 space-y-4">
-        <p className="text-sm text-muted">
-          NEXUS.AI persists state in <span className="font-mono text-brand">db.json</span> on the backend.
-          Local cache uses the key <span className="font-mono">nexus_ai_data_v1</span>. A version mismatch
-          will automatically purge the cache. Conflicts are resolved via the X-Base-Version header.
-        </p>
-        <Button
-          variant="danger"
-          onClick={() => {
-            if (window.confirm('Wipe local cache? Server data is preserved.')) clearState();
-          }}
-        >
-          <Trash2 className="w-4 h-4 mr-2" />
-          Wipe local cache & reload
-        </Button>
+
+      {/* Backup restore */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <Upload className="w-5 h-5 text-brand" />
+          <div>
+            <h3 className="text-lg font-black uppercase tracking-tight">Restore backup</h3>
+            <p className="text-xs text-muted mt-1">
+              Replace all current data with a previously exported backup file.
+            </p>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          {importStep === 'idle' && (
+            <>
+              <div className="border-2 border-dashed border-neutral-300 dark:border-ink-500 p-6 text-center">
+                <p className="text-xs text-muted mb-3">
+                  {importFile ? (
+                    <span className="text-brand font-bold">{importFile.name}</span>
+                  ) : (
+                    'Select a nexus-ai-backup-*.json file'
+                  )}
+                </p>
+                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="w-3 h-3 mr-2" />
+                  Choose file
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] || null;
+                    setImportFile(f);
+                    setImportError('');
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+              {importError && (
+                <p className="text-red-500 text-xs flex items-center gap-1">
+                  <XCircle className="w-3 h-3" /> {importError}
+                </p>
+              )}
+              {importFile && (
+                <Button
+                  variant="danger"
+                  onClick={() => setImportStep('confirm')}
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Restore this backup…
+                </Button>
+              )}
+            </>
+          )}
+
+          {importStep === 'confirm' && (
+            <div className="border border-red-500/40 bg-red-500/5 p-5 space-y-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-red-500 uppercase tracking-tight">
+                    All current data will be permanently replaced
+                  </p>
+                  <p className="text-xs text-muted mt-1">
+                    This will purge every project, user, technology, check-in and communication
+                    currently in NEXUS.AI and replace them with the content of{' '}
+                    <span className="font-mono text-brand">{importFile?.name}</span>.{' '}
+                    There is no undo.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="danger" onClick={doImport}>
+                  Yes, wipe and restore
+                </Button>
+                <Button variant="outline" onClick={() => setImportStep('idle')}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Cache management */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <Database className="w-5 h-5 text-brand" />
+          <div>
+            <h3 className="text-lg font-black uppercase tracking-tight">Local cache</h3>
+            <p className="text-xs text-muted mt-1">
+              Storage stack: localStorage (instant) + db.json via /api/data (canonical).
+            </p>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-sm text-muted">
+            Wipes only the browser cache (key <span className="font-mono">nexus_ai_data_v1</span>).
+            Server data in <span className="font-mono text-brand">db.json</span> is preserved and
+            reloaded on next boot.
+          </p>
+          <Button
+            variant="danger"
+            onClick={() => {
+              if (window.confirm('Wipe local cache? Server data is preserved.')) clearState();
+            }}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Wipe local cache & reload
+          </Button>
+        </div>
       </div>
     </div>
   );
