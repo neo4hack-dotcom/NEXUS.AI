@@ -17,6 +17,7 @@ import {
   Hackathon,
   WorkingGroup,
   ProjectTemplate,
+  SmartTodo,
   Theme,
 } from '../types';
 
@@ -83,6 +84,7 @@ export const getDefaultState = (): AppState => {
     notifications: [],
     hackathons: [],
     workingGroups: [],
+    smartTodos: [],
     projectTemplates: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
@@ -117,6 +119,7 @@ export const sanitizeAppState = (data: any): AppState => {
       tags: arr(h.tags),
     })),
     projectTemplates: arr<ProjectTemplate>(data.projectTemplates),
+    smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,
       members: arr(wg.members),
@@ -157,6 +160,8 @@ export const sanitizeAppState = (data: any): AppState => {
     repoIds: arr(p.repoIds),
     tags: arr(p.tags),
     auditLog: arr(p.auditLog),
+    presentations: arr(p.presentations),
+    linkedApps: arr(p.linkedApps),
   }));
 
   // Seed empty state to ensure UX

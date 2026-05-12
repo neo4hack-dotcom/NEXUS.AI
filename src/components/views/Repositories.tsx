@@ -546,7 +546,7 @@ const BitbucketImportModal: React.FC<{
                     <div className="flex items-center gap-1.5 shrink-0">
                       {p.language && <Badge tone="brand">{p.language}</Badge>}
                       <Badge tone={p.visibility === 'public' ? 'green' : 'muted'}>{p.visibility}</Badge>
-                      {p.alreadyExists && <Badge tone="muted">already in NEXUS</Badge>}
+                      {p.alreadyExists && <Badge tone="muted">already in DOINg</Badge>}
                     </div>
                   </div>
                 ))}

@@ -151,7 +151,7 @@ const Generator: React.FC<{
     const list = state.mailingLists.find((l) => l.id === mailingListId);
     const subject =
       output.match(/^Subject:\s*(.*)$/m)?.[1].trim() ||
-      `[${type.toUpperCase()}] ${title || 'NEXUS.AI update'}`;
+      `[${type.toUpperCase()}] ${title || 'DOINg.AI update'}`;
     const body = output.replace(/^Subject:.*\n?/m, '').trim();
     exportEML(subject, body, list?.emails || []);
   };
@@ -651,7 +651,7 @@ const History: React.FC<{ state: AppState; currentUser: User }> = ({ state, curr
           state={state}
           onClose={() => setPreviewItem(null)}
           onEmail={() => {
-            const subject = previewItem.subject || previewItem.title || 'NEXUS.AI';
+            const subject = previewItem.subject || previewItem.title || 'DOINg.AI';
             const body = previewItem.content.replace(/^Subject:.*\n?/m, '').trim();
             exportEML(subject, body, []);
             setPreviewItem(null);

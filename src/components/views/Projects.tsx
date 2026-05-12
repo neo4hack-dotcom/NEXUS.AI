@@ -33,6 +33,8 @@ import {
   User,
   ProjectRole,
   AuditEntry,
+  ProjectPresentation,
+  ProjectLinkedApp,
 } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -85,6 +87,8 @@ const newProject = (managerId: string): Project => {
         action: 'Project created',
       },
     ],
+    presentations: [],
+    linkedApps: [],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
@@ -637,12 +641,60 @@ const ProjectDetailModal: React.FC<{
   onDelete: () => void;
   onAudit: (action: string, details?: string) => void;
 }> = ({ project, state, currentUser, onClose, onSave, onDelete, onAudit }) => {
-  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit' | 'presentations'>('overview');
   const [draft, setDraft] = useState<Project>(project);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
   const [showPdf, setShowPdf] = useState(false);
+  const [showInfographic, setShowInfographic] = useState(false);
+  const [infographicHtml, setInfographicHtml] = useState('');
+  const [infographicLoading, setInfographicLoading] = useState(false);
+  // Linked Apps form state
+  const [newAppName, setNewAppName] = useState('');
+  const [newAppRole, setNewAppRole] = useState<'impacted' | 'contributor' | 'both'>('impacted');
+  const [newAppDesc, setNewAppDesc] = useState('');
+  const [newAppUrl, setNewAppUrl] = useState('');
+  // Presentations form state
+  const [newPptName, setNewPptName] = useState('');
+  const [newPptUrl, setNewPptUrl] = useState('');
+  const [viewingPresentation, setViewingPresentation] = useState<{ name: string; url: string } | null>(null);
   const canEdit = currentUser.role !== 'viewer';
+
+  const generateInfographic = async () => {
+    setInfographicLoading(true);
+    setShowInfographic(true);
+    setInfographicHtml('');
+    const prompt = `You are creating a 5-section HTML committee brief for the project "${draft.name}".
+Project description: ${draft.description || '(none)'}
+Status: ${draft.status} | Budget: ${draft.budget ?? 'N/A'} | Deadline: ${draft.deadline?.slice(0, 10) ?? 'N/A'}
+Tasks: ${draft.tasks.length} total, ${draft.tasks.filter(t => t.status === 'Done').length} done
+Context: ${draft.context || '(none)'}
+
+Produce a SINGLE self-contained HTML document (no external deps) with inline CSS only, using colors #FF3E00 (brand orange) and #0a0a0a (dark) on white.
+5 sections: 1-Executive Summary, 2-Objectives & Scope, 3-Progress & Milestones, 4-Risks & Blockers, 5-Recommendations.
+Each section should have a coloured header bar, concise bullet points, and professional layout.
+Return ONLY valid HTML — no markdown fences, no commentary.`;
+    try {
+      const html = await runPrompt(prompt, state.llmConfig);
+      setInfographicHtml(html || '<p>No output generated.</p>');
+    } catch (e) {
+      setInfographicHtml('<p style="color:red">Failed to generate infographic.</p>');
+    }
+    setInfographicLoading(false);
+  };
+
+  const convertToEmbedUrl = (url: string): string => {
+    // Google Slides: convert /pub to /embed
+    const gsMatch = url.match(/docs\.google\.com\/presentation\/d\/([^/]+)/);
+    if (gsMatch) {
+      return `https://docs.google.com/presentation/d/${gsMatch[1]}/embed?start=false&loop=false&delayms=3000`;
+    }
+    // OneDrive: convert share link to embed
+    if (url.includes('1drv.ms') || url.includes('sharepoint.com')) {
+      return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`;
+    }
+    return url;
+  };
 
   React.useEffect(() => setDraft(project), [project.id]);
 
@@ -726,7 +778,7 @@ const ProjectDetailModal: React.FC<{
 
           {/* Tabs */}
           <div className="flex items-center gap-1 mt-4 border-b border-neutral-200 dark:border-ink-600 -mb-5">
-            {(['overview', 'kanban', 'notes', 'audit'] as const).map((t) => (
+            {(['overview', 'kanban', 'presentations', 'notes', 'audit'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -925,6 +977,90 @@ const ProjectDetailModal: React.FC<{
                   </p>
                 )}
               </div>
+
+              {/* Linked Applications */}
+              <div className="md:col-span-2 mt-2 surface-flat border p-4">
+                <h4 className="text-sm font-bold uppercase tracking-tight mb-3">Linked Applications</h4>
+                <div className="space-y-2 mb-3">
+                  {(draft.linkedApps || []).map((app) => (
+                    <div key={app.id} className="flex items-start justify-between gap-3 border border-neutral-200 dark:border-ink-600 p-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold">{app.name}</span>
+                          <span className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest border ${
+                            app.role === 'impacted' ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-400 text-amber-700 dark:text-amber-300' :
+                            app.role === 'contributor' ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-400 text-emerald-700 dark:text-emerald-300' :
+                            'bg-brand/10 border-brand text-brand'
+                          }`}>{app.role}</span>
+                          {app.url && <a href={app.url} target="_blank" rel="noreferrer" className="text-[10px] text-brand underline truncate max-w-[160px]">{app.url}</a>}
+                        </div>
+                        {app.description && <p className="text-[11px] text-muted mt-0.5">{app.description}</p>}
+                      </div>
+                      {canEdit && (
+                        <button onClick={() => setDraft(d => ({ ...d, linkedApps: (d.linkedApps || []).filter(a => a.id !== app.id) }))} className="text-muted hover:text-red-500 flex-shrink-0">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {!(draft.linkedApps || []).length && <p className="text-xs text-muted">No linked applications yet.</p>}
+                </div>
+                {canEdit && (
+                  <div className="grid grid-cols-2 gap-2 border-t border-neutral-200 dark:border-ink-600 pt-3">
+                    <Input placeholder="App name" value={newAppName} onChange={e => setNewAppName(e.target.value)} />
+                    <select value={newAppRole} onChange={e => setNewAppRole(e.target.value as 'impacted' | 'contributor' | 'both')} className="input-base text-xs">
+                      <option value="impacted">Impacted</option>
+                      <option value="contributor">Contributor</option>
+                      <option value="both">Both</option>
+                    </select>
+                    <Input placeholder="Description (optional)" value={newAppDesc} onChange={e => setNewAppDesc(e.target.value)} />
+                    <Input placeholder="URL (optional)" value={newAppUrl} onChange={e => setNewAppUrl(e.target.value)} />
+                    <div className="col-span-2">
+                      <Button size="sm" variant="outline" onClick={() => {
+                        if (!newAppName.trim()) return;
+                        setDraft(d => ({ ...d, linkedApps: [...(d.linkedApps || []), { id: generateId(), name: newAppName.trim(), role: newAppRole, description: newAppDesc.trim() || undefined, url: newAppUrl.trim() || undefined }] }));
+                        setNewAppName(''); setNewAppDesc(''); setNewAppUrl(''); setNewAppRole('impacted');
+                      }}>
+                        <Plus className="w-3 h-3 mr-1" /> Add App
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Presentations Tab */}
+          {tab === 'presentations' && (
+            <div className="space-y-3">
+              {(draft.presentations || []).map((p) => (
+                <div key={p.id} className="surface-flat border p-3 flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium truncate flex-1">{p.name}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Button size="sm" variant="outline" onClick={() => setViewingPresentation({ name: p.name, url: convertToEmbedUrl(p.url) })}>View</Button>
+                    <a href={p.url} target="_blank" rel="noreferrer" className="text-[10px] text-brand underline">Open</a>
+                    {canEdit && (
+                      <button onClick={() => setDraft(d => ({ ...d, presentations: (d.presentations || []).filter(x => x.id !== p.id) }))} className="text-muted hover:text-red-500">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {!(draft.presentations || []).length && <p className="text-xs text-muted py-4 text-center">No presentations linked yet.</p>}
+              {canEdit && (
+                <div className="border-t border-neutral-200 dark:border-ink-600 pt-4 flex items-center gap-2 flex-wrap">
+                  <Input placeholder="Presentation name" value={newPptName} onChange={e => setNewPptName(e.target.value)} className="flex-1 min-w-[160px]" />
+                  <Input placeholder="URL (Google Slides, OneDrive, etc.)" value={newPptUrl} onChange={e => setNewPptUrl(e.target.value)} className="flex-1 min-w-[220px]" />
+                  <Button size="sm" variant="outline" onClick={() => {
+                    if (!newPptName.trim() || !newPptUrl.trim()) return;
+                    setDraft(d => ({ ...d, presentations: [...(d.presentations || []), { id: generateId(), name: newPptName.trim(), url: newPptUrl.trim(), addedAt: new Date().toISOString(), addedByUserId: currentUser.id }] }));
+                    setNewPptName(''); setNewPptUrl('');
+                  }}>
+                    <Plus className="w-3 h-3 mr-1" /> Add
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1000,6 +1136,12 @@ const ProjectDetailModal: React.FC<{
               <FileDown className="w-4 h-4 mr-2" />
               Export PDF
             </Button>
+            {canEdit && state.llmConfig?.provider && (
+              <Button variant="outline" size="md" onClick={generateInfographic} disabled={infographicLoading}>
+                <Sparkles className="w-4 h-4 mr-2" />
+                {infographicLoading ? 'Generating…' : 'AI Infographic'}
+              </Button>
+            )}
             {canEdit && currentUser.role === 'admin' && (
               <Button
                 variant="outline" size="md"
@@ -1044,6 +1186,63 @@ const ProjectDetailModal: React.FC<{
         aiSynthesis={aiOutput}
         onClose={() => setShowPdf(false)}
       />
+    )}
+
+    {/* AI Infographic Modal */}
+    {showInfographic && (
+      <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-ink-900 w-full max-w-5xl h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-ink-600">
+            <h3 className="text-sm font-bold uppercase tracking-widest">AI Infographic — {draft.name}</h3>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => {
+                const w = window.open('', '_blank');
+                if (w) { w.document.write(infographicHtml); w.document.close(); w.print(); }
+              }} disabled={infographicLoading}>
+                <Printer className="w-3.5 h-3.5 mr-1" /> Print
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => navigator.clipboard?.writeText(infographicHtml)} disabled={infographicLoading}>
+                <Clipboard className="w-3.5 h-3.5 mr-1" /> Copy HTML
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => { setShowInfographic(false); setInfographicHtml(''); }}>
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            {infographicLoading ? (
+              <div className="h-full flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-brand animate-spin" />
+                <span className="ml-3 text-sm text-muted">Generating infographic…</span>
+              </div>
+            ) : (
+              <iframe srcDoc={infographicHtml} className="w-full h-full border-0" title="AI Infographic" sandbox="allow-same-origin" />
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Presentation Viewer Modal */}
+    {viewingPresentation && (
+      <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-ink-900 w-full max-w-5xl h-[90vh] flex flex-col">
+          <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-ink-600">
+            <h3 className="text-sm font-bold uppercase tracking-widest truncate">{viewingPresentation.name}</h3>
+            <button onClick={() => setViewingPresentation(null)} className="text-muted hover:text-neutral-900 dark:hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <iframe
+              src={viewingPresentation.url}
+              className="w-full h-full border-0"
+              title={viewingPresentation.name}
+              allowFullScreen
+            />
+          </div>
+        </div>
+      </div>
     )}
     </>
   );
