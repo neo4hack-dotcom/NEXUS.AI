@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Mail,
   Sparkles,
@@ -12,6 +12,13 @@ import {
   Trash2,
   Download,
   Send,
+  Edit2,
+  Eye,
+  Printer,
+  Maximize2,
+  Minimize2,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import {
   AppState,
@@ -23,6 +30,7 @@ import {
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
+import { MarkdownView } from '../ui/MarkdownView';
 import { generateId } from '../../services/storage';
 import {
   DEFAULT_PROMPTS,
@@ -31,7 +39,7 @@ import {
   buildPortfolioSummaryData,
   buildProjectBriefData,
 } from '../../services/llmService';
-import { exportEML, exportCommunicationPDF } from '../../services/exports';
+import { exportEML, buildCommunicationHTML } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -102,6 +110,8 @@ const Generator: React.FC<{
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState('');
   const [copied, setCopied] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [showPdf, setShowPdf] = useState(false);
 
   const promptKey =
     type === 'weekly' ? 'weekly_email' : type === 'newsletter' ? 'newsletter' : 'exco_update';
@@ -109,6 +119,7 @@ const Generator: React.FC<{
   const generate = async () => {
     setLoading(true);
     setOutput('');
+    setEditMode(false);
     try {
       const project = state.projects.find((p) => p.id === projectId);
       const dataBlock = project
@@ -116,12 +127,11 @@ const Generator: React.FC<{
         : buildPortfolioSummaryData(state);
       const author = `${currentUser.firstName} ${currentUser.lastName}`;
       const tpl = state.prompts[promptKey] || DEFAULT_PROMPTS[promptKey];
-      const prompt =
-        fillTemplate(tpl, {
-          DATA: `${dataBlock}\n\nADDITIONAL CONTEXT FROM AUTHOR:\n${extra}`,
-          TITLE: title || project?.name || 'Portfolio',
-          AUTHOR: author,
-        });
+      const prompt = fillTemplate(tpl, {
+        DATA: `${dataBlock}\n\nADDITIONAL CONTEXT FROM AUTHOR:\n${extra}`,
+        TITLE: title || project?.name || 'Portfolio',
+        AUTHOR: author,
+      });
       const out = await runPrompt(prompt, state.llmConfig);
       setOutput(out);
     } catch (e: any) {
@@ -164,121 +174,146 @@ const Generator: React.FC<{
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div className="surface border">
-        <div className="p-5 border-b border-neutral-200 dark:border-ink-600">
-          <div className="flex items-center gap-2 mb-1">
-            <Sparkles className="w-4 h-4 text-brand" />
-            <p className="label-xs">AI Generator</p>
+    <>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left: form */}
+        <div className="surface border">
+          <div className="p-5 border-b border-neutral-200 dark:border-ink-600">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-brand" />
+              <p className="label-xs">AI Generator</p>
+            </div>
+            <h2 className="text-lg font-black uppercase tracking-tight">Draft your message</h2>
           </div>
-          <h2 className="text-lg font-black uppercase tracking-tight">Draft your message</h2>
-        </div>
-        <div className="p-5 space-y-4">
-          <Field label="Type">
-            <div className="grid grid-cols-3 gap-2">
-              {(['weekly', 'newsletter', 'exco'] as const).map((t) => (
-                <Button
-                  key={t}
-                  variant={type === t ? 'primary' : 'outline'}
-                  onClick={() => setType(t)}
-                  size="sm"
-                >
-                  {t}
-                </Button>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="Focus project (optional)">
-            <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-              <option value="">— Portfolio overview —</option>
-              {state.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Title / focus">
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. November highlights"
-            />
-          </Field>
-
-          <Field label="Additional context (free text)">
-            <Textarea
-              value={extra}
-              onChange={(e) => setExtra(e.target.value)}
-              placeholder="Anything the AI should know in addition to your project data..."
-            />
-          </Field>
-
-          <Field label="Mailing list for export">
-            <Select
-              value={mailingListId}
-              onChange={(e) => setMailingListId(e.target.value)}
-            >
-              <option value="">— pick a list —</option>
-              {state.mailingLists.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name} ({l.emails.length})
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Button size="lg" className="w-full" onClick={generate} disabled={loading}>
-            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-            {loading ? 'Generating…' : 'Generate'}
-          </Button>
-        </div>
-      </div>
-
-      <div className="surface border flex flex-col">
-        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
-          <h2 className="text-lg font-black uppercase tracking-tight">Draft</h2>
-          {output && (
-            <div className="flex gap-1">
-              <Button size="sm" variant="outline" onClick={copy}>
-                {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />}
-                {copied ? 'Copied' : 'Copy'}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => exportCommunicationPDF(type, title || 'Communication', output, state)}>
-                <FileDown className="w-3 h-3 mr-1" />
-                PDF
-              </Button>
-              <Button size="sm" variant="outline" onClick={toEml}>
-                <Download className="w-3 h-3 mr-1" />
-                .eml
-              </Button>
-              <Button size="sm" onClick={saveAsCommunication}>
-                <Send className="w-3 h-3 mr-1" />
-                Save
-              </Button>
-            </div>
-          )}
-        </div>
-        <div className="flex-1 p-5">
-          {output ? (
-            <Textarea
-              value={output}
-              onChange={(e) => setOutput(e.target.value)}
-              className="min-h-[500px] font-mono text-sm leading-relaxed"
-            />
-          ) : (
-            <div className="h-full min-h-[400px] flex items-center justify-center text-center text-muted">
-              <div>
-                <Sparkles className="w-10 h-10 mx-auto opacity-30 mb-3" />
-                <p className="text-xs uppercase tracking-[0.18em]">Draft preview</p>
+          <div className="p-5 space-y-4">
+            <Field label="Type">
+              <div className="grid grid-cols-3 gap-2">
+                {(['weekly', 'newsletter', 'exco'] as const).map((t) => (
+                  <Button
+                    key={t}
+                    variant={type === t ? 'primary' : 'outline'}
+                    onClick={() => setType(t)}
+                    size="sm"
+                  >
+                    {t}
+                  </Button>
+                ))}
               </div>
-            </div>
-          )}
+            </Field>
+            <Field label="Focus project (optional)">
+              <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">— Portfolio overview —</option>
+                {state.projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Title / focus">
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. November highlights"
+              />
+            </Field>
+            <Field label="Additional context">
+              <Textarea
+                value={extra}
+                onChange={(e) => setExtra(e.target.value)}
+                placeholder="Anything the AI should know in addition to your project data..."
+              />
+            </Field>
+            <Field label="Mailing list for .eml export">
+              <Select value={mailingListId} onChange={(e) => setMailingListId(e.target.value)}>
+                <option value="">— pick a list —</option>
+                {state.mailingLists.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name} ({l.emails.length})</option>
+                ))}
+              </Select>
+            </Field>
+            <Button size="lg" className="w-full" onClick={generate} disabled={loading}>
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+              {loading ? 'Generating…' : 'Generate'}
+            </Button>
+          </div>
+        </div>
+
+        {/* Right: rich draft preview */}
+        <div className="surface border flex flex-col min-h-[600px]">
+          <div className="p-4 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-black uppercase tracking-tight">Draft</h2>
+            {output && (
+              <div className="flex items-center gap-1 flex-wrap justify-end">
+                {/* Preview / Edit toggle */}
+                <button
+                  onClick={() => setEditMode((v) => !v)}
+                  title={editMode ? 'Switch to preview' : 'Switch to edit'}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] border transition-colors ${
+                    editMode
+                      ? 'border-amber-500 text-amber-500'
+                      : 'border-brand text-brand'
+                  }`}
+                >
+                  {editMode ? <><Eye className="w-3 h-3" />Preview</> : <><Edit2 className="w-3 h-3" />Edit</>}
+                </button>
+                <Button size="sm" variant="outline" onClick={copy}>
+                  {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowPdf(true)} title="Preview & Export PDF">
+                  <FileDown className="w-3 h-3 mr-1" />
+                  PDF
+                </Button>
+                <Button size="sm" variant="outline" onClick={toEml}>
+                  <Download className="w-3 h-3 mr-1" />
+                  .eml
+                </Button>
+                <Button size="sm" onClick={saveAsCommunication}>
+                  <Send className="w-3 h-3 mr-1" />
+                  Save
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {output ? (
+              editMode ? (
+                <Textarea
+                  value={output}
+                  onChange={(e) => setOutput(e.target.value)}
+                  className="w-full h-full min-h-[540px] border-0 resize-none font-mono text-sm leading-relaxed p-5 focus:ring-0 bg-transparent"
+                />
+              ) : (
+                <div className="p-5 prose prose-sm max-w-none dark:prose-invert
+                  prose-headings:font-black prose-headings:uppercase prose-headings:tracking-tight
+                  prose-h3:text-brand prose-strong:font-bold
+                  prose-ul:my-2 prose-li:my-0.5">
+                  <MarkdownView content={output} />
+                </div>
+              )
+            ) : (
+              <div className="h-full flex items-center justify-center text-center text-muted p-8">
+                <div>
+                  <Sparkles className="w-12 h-12 mx-auto opacity-20 mb-4" />
+                  <p className="text-xs uppercase tracking-[0.2em]">Your draft will appear here</p>
+                  <p className="text-[10px] text-muted mt-1">Fill the form and click Generate</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {showPdf && (
+        <PDFPreviewModal
+          type={type}
+          title={title || 'Communication'}
+          content={output}
+          state={state}
+          onClose={() => setShowPdf(false)}
+          onEmail={toEml}
+        />
+      )}
+    </>
   );
 };
 
@@ -576,46 +611,161 @@ const History: React.FC<{ state: AppState; currentUser: User }> = ({ state, curr
   const visible = isPrivileged
     ? state.communications
     : state.communications.filter((c) => c.authorId === currentUser.id);
+  const [previewItem, setPreviewItem] = useState<Communication | null>(null);
 
   return (
-    <div className="space-y-2">
-      {visible.length === 0 && (
-        <p className="text-center text-sm text-muted py-12">No saved drafts yet.</p>
-      )}
-      {visible.map((c) => {
-        const author = state.users.find((u) => u.id === c.authorId);
-        return (
-          <div key={c.id} className="surface border p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-bold uppercase tracking-tight text-sm">{c.title}</p>
-                <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted mt-0.5">
-                  {new Date(c.createdAt).toLocaleString()} • {c.type}
-                  {author && isPrivileged && ` • ${author.firstName} ${author.lastName}`}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge tone={c.status === 'sent' ? 'green' : 'muted'}>{c.status}</Badge>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    exportCommunicationPDF(
-                      c.type as 'weekly' | 'newsletter' | 'exco',
-                      c.title || c.subject || 'Communication',
-                      c.content,
-                      state
-                    )
-                  }
-                >
-                  <FileDown className="w-3 h-3 mr-1" />
-                  PDF
-                </Button>
+    <>
+      <div className="space-y-2">
+        {visible.length === 0 && (
+          <p className="text-center text-sm text-muted py-12">No saved drafts yet.</p>
+        )}
+        {visible.map((c) => {
+          const author = state.users.find((u) => u.id === c.authorId);
+          return (
+            <div key={c.id} className="surface border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold uppercase tracking-tight text-sm">{c.title}</p>
+                  <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted mt-0.5">
+                    {new Date(c.createdAt).toLocaleString()} • {c.type}
+                    {author && isPrivileged && ` • ${author.firstName} ${author.lastName}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone={c.status === 'sent' ? 'green' : 'muted'}>{c.status}</Badge>
+                  <Button size="sm" variant="outline" onClick={() => setPreviewItem(c)}>
+                    <FileDown className="w-3 h-3 mr-1" />
+                    PDF
+                  </Button>
+                </div>
               </div>
             </div>
+          );
+        })}
+      </div>
+      {previewItem && (
+        <PDFPreviewModal
+          type={previewItem.type}
+          title={previewItem.title || previewItem.subject || 'Communication'}
+          content={previewItem.content}
+          state={state}
+          onClose={() => setPreviewItem(null)}
+          onEmail={() => {
+            const subject = previewItem.subject || previewItem.title || 'NEXUS.AI';
+            const body = previewItem.content.replace(/^Subject:.*\n?/m, '').trim();
+            exportEML(subject, body, []);
+            setPreviewItem(null);
+          }}
+        />
+      )}
+    </>
+  );
+};
+
+/* === PDF Preview Modal === */
+
+const PDFPreviewModal: React.FC<{
+  type: string;
+  title: string;
+  content: string;
+  state: AppState;
+  onClose: () => void;
+  onEmail: () => void;
+}> = ({ type, title, content, state, onClose, onEmail }) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [landscape, setLandscape] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const html = buildCommunicationHTML(type, title, content, state, landscape);
+
+  const handlePrint = () => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  };
+
+  // Close on Escape
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div
+        className={`surface border flex flex-col transition-all duration-200 ${
+          fullscreen ? 'w-full h-full' : landscape ? 'w-full max-w-6xl h-[92vh]' : 'w-full max-w-4xl h-[92vh]'
+        }`}
+      >
+        {/* Modal toolbar */}
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <FileDown className="w-4 h-4 text-brand shrink-0" />
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] truncate">{title}</p>
+            <span className="text-[9px] font-mono uppercase tracking-[0.16em] px-1.5 py-0.5 bg-brand/10 text-brand border border-brand/20">
+              {type}
+            </span>
           </div>
-        );
-      })}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Orientation toggle */}
+            <button
+              onClick={() => setLandscape((v) => !v)}
+              title={landscape ? 'Portrait' : 'Landscape'}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] border transition-colors ${
+                landscape ? 'border-brand text-brand bg-brand/5' : 'border-neutral-300 dark:border-ink-500 text-muted hover:text-brand hover:border-brand'
+              }`}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {landscape ? 'Landscape' : 'Portrait'}
+            </button>
+            {/* Fullscreen */}
+            <button
+              onClick={() => setFullscreen((v) => !v)}
+              title={fullscreen ? 'Restore' : 'Fullscreen'}
+              className="w-8 h-8 flex items-center justify-center border border-neutral-300 dark:border-ink-500 text-muted hover:text-brand hover:border-brand transition-colors"
+            >
+              {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+            <div className="w-px h-5 bg-neutral-200 dark:bg-ink-600 mx-0.5" />
+            {/* Print */}
+            <Button size="sm" onClick={handlePrint}>
+              <Printer className="w-3 h-3 mr-1.5" />
+              Print / Save PDF
+            </Button>
+            {/* Email */}
+            <Button size="sm" variant="outline" onClick={onEmail}>
+              <Download className="w-3 h-3 mr-1.5" />
+              Export .eml
+            </Button>
+            {/* Close */}
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center text-muted hover:text-red-500 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* iframe preview */}
+        <div className="flex-1 overflow-hidden bg-neutral-100 dark:bg-ink-900">
+          <iframe
+            ref={iframeRef}
+            srcDoc={html}
+            title="PDF Preview"
+            className="w-full h-full border-0 bg-white"
+            sandbox="allow-same-origin allow-scripts allow-modals allow-popups"
+          />
+        </div>
+
+        <div className="px-4 py-2 border-t border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 shrink-0">
+          <p className="text-[9px] font-mono uppercase tracking-[0.16em] text-muted text-center">
+            Click "Print / Save PDF" to open the print dialog — choose "Save as PDF" in your browser
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

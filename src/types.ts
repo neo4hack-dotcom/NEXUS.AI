@@ -39,6 +39,7 @@ export interface User {
   lastName: string;
   email: string;
   team: string;
+  squadTeam?: string;
   functionTitle: string;           // job title / role on org
   role: Role;                      // app-level role
   expectations?: string;
@@ -92,6 +93,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  context?: string;
   status: ProjectStatus;
   managerId?: string;              // user id of owner/PM
   startDate: string;
@@ -135,6 +137,7 @@ export interface Technology {
   url?: string;
   license?: string;
   internalOwner?: string;
+  technicalArchitect?: string;
   tags: string[];
   createdAt: string;
 }
@@ -281,9 +284,63 @@ export interface AppState {
   weeklyCheckIns: WeeklyCheckIn[];
   notifications: AppNotification[];
   hackathons: Hackathon[];
+  workingGroups: WorkingGroup[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;
   currentUserId: string | null;
   lastUpdated: number;
+}
+
+/* === Working Groups === */
+
+export type WGStatus = 'active' | 'paused' | 'closed';
+export type WGMemberRole = 'lead' | 'contributor' | 'observer';
+export type WGTaskStatus = 'todo' | 'doing' | 'review' | 'done';
+export type WGTaskPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface WGMember {
+  userId: string;
+  role: WGMemberRole;
+}
+
+export interface WGTask {
+  id: string;
+  title: string;
+  description?: string;
+  status: WGTaskStatus;
+  priority: WGTaskPriority;
+  assigneeId?: string;
+  dueDate?: string;
+  labels?: string[];
+  checklist?: ChecklistItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WGMeetingNote {
+  id: string;
+  date: string;
+  title: string;
+  attendeeIds: string[];
+  agenda?: string;
+  notes: string;
+  decisions: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkingGroup {
+  id: string;
+  name: string;
+  description: string;
+  objective: string;
+  status: WGStatus;
+  ownerId?: string;
+  members: WGMember[];
+  tasks: WGTask[];
+  meetings: WGMeetingNote[];
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
 }

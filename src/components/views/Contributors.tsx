@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Briefcase, Mail, Plus, Trash2, X } from 'lucide-react';
+import { Briefcase, Mail, Plus, Trash2, X, Users, LayoutGrid } from 'lucide-react';
 import { AppState, User, Role } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -29,16 +29,20 @@ const newUser = (): User => ({
 
 export const Contributors: React.FC<Props> = ({ state, currentUser, update }) => {
   const [edit, setEdit] = useState<User | null>(null);
+  const [groupBy, setGroupBy] = useState<'team' | 'squad'>('team');
   const canEdit = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   const byTeam = useMemo(() => {
     const out: Record<string, User[]> = {};
     state.users.forEach((u) => {
-      if (!out[u.team]) out[u.team] = [];
-      out[u.team].push(u);
+      const key = groupBy === 'squad'
+        ? (u.squadTeam?.trim() || '— No Squad —')
+        : (u.team?.trim() || '— No Team —');
+      if (!out[key]) out[key] = [];
+      out[key].push(u);
     });
     return out;
-  }, [state.users]);
+  }, [state.users, groupBy]);
 
   const upsert = (u: User) =>
     update((s) => ({
@@ -55,21 +59,37 @@ export const Contributors: React.FC<Props> = ({ state, currentUser, update }) =>
           <p className="label-xs">People</p>
           <h1 className="display-xl">Contributors</h1>
           <p className="text-sm text-muted mt-2">
-            {state.users.length} contributors across {Object.keys(byTeam).length} teams.
+            {state.users.length} contributors across {Object.keys(byTeam).length} {groupBy === 'squad' ? 'squads' : 'teams'}.
           </p>
         </div>
-        {canEdit && (
-          <Button
-            onClick={() => {
-              const u = newUser();
-              upsert(u);
-              setEdit(u);
-            }}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add contributor
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <div className="flex border border-neutral-300 dark:border-ink-500 overflow-hidden">
+            <button
+              onClick={() => setGroupBy('team')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors ${groupBy === 'team' ? 'bg-brand text-white' : 'text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+            >
+              <LayoutGrid className="w-3 h-3" /> Team
+            </button>
+            <button
+              onClick={() => setGroupBy('squad')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors border-l border-neutral-300 dark:border-ink-500 ${groupBy === 'squad' ? 'bg-brand text-white border-brand' : 'text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+            >
+              <Users className="w-3 h-3" /> Squad
+            </button>
+          </div>
+          {canEdit && (
+            <Button
+              onClick={() => {
+                const u = newUser();
+                upsert(u);
+                setEdit(u);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add contributor
+            </Button>
+          )}
+        </div>
       </div>
 
       {Object.entries(byTeam).map(([team, members]) => (
@@ -115,6 +135,12 @@ export const Contributors: React.FC<Props> = ({ state, currentUser, update }) =>
                     <Briefcase className="w-3 h-3" />
                     UID: <span className="font-mono">{u.uid}</span>
                   </p>
+                  {u.squadTeam && (
+                    <p className="flex items-center gap-2">
+                      <Users className="w-3 h-3" />
+                      Squad: <span className="font-bold text-brand">{u.squadTeam}</span>
+                    </p>
+                  )}
                 </div>
                 {u.expectations && (
                   <p className="mt-3 pt-3 border-t border-neutral-200 dark:border-ink-600 text-xs italic text-muted line-clamp-2">
@@ -194,6 +220,13 @@ const ContributorEditor: React.FC<{
           </Field>
           <Field label="Team">
             <Input value={d.team} onChange={(e) => setD({ ...d, team: e.target.value })} />
+          </Field>
+          <Field label="Squad team">
+            <Input
+              value={d.squadTeam || ''}
+              onChange={(e) => setD({ ...d, squadTeam: e.target.value })}
+              placeholder="e.g. Platform Squad, Data Squad…"
+            />
           </Field>
           <Field label="Job title">
             <Input

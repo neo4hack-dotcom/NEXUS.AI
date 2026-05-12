@@ -12,6 +12,10 @@ import {
   History,
   CheckCircle2,
   Save,
+  Printer,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
@@ -29,7 +33,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
-import { exportPDF } from '../../services/exports';
+import { buildProjectHTML } from '../../services/exports';
 import {
   buildProjectBriefData,
   DEFAULT_PROMPTS,
@@ -277,6 +281,7 @@ const ProjectDetailModal: React.FC<{
   const [draft, setDraft] = useState<Project>(project);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
+  const [showPdf, setShowPdf] = useState(false);
   const canEdit = currentUser.role !== 'viewer';
 
   React.useEffect(() => setDraft(project), [project.id]);
@@ -328,27 +333,9 @@ const ProjectDetailModal: React.FC<{
     }
   };
 
-  const toPDF = () => {
-    exportPDF(`Project Brief — ${draft.name}`, [
-      {
-        heading: 'Overview',
-        body:
-          `**Status:** ${draft.status}\n\n` +
-          `**Owner:** ${state.users.find((u) => u.id === draft.managerId)?.firstName || '—'}\n\n` +
-          `**Deadline:** ${new Date(draft.deadline).toLocaleDateString()}\n\n` +
-          (draft.description || ''),
-      },
-      ...(aiOutput ? [{ heading: 'AI Synthesis', body: aiOutput }] : []),
-      {
-        heading: 'Tasks',
-        body: draft.tasks
-          .map((t) => `- **${t.title}** — ${t.status} · ${t.priority}`)
-          .join('\n'),
-      },
-    ]);
-  };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="surface border w-full max-w-5xl max-h-[92vh] flex flex-col animate-slide-up">
         {/* Header */}
@@ -487,6 +474,18 @@ const ProjectDetailModal: React.FC<{
               </Field>
 
               <div className="md:col-span-2">
+                <Field label="Context (background, constraints, notes — paste freely)">
+                  <Textarea
+                    value={draft.context || ''}
+                    onChange={(e) => setDraft({ ...draft, context: e.target.value })}
+                    disabled={!canEdit}
+                    placeholder="Paste any context: business background, constraints, decisions, references, links…"
+                    rows={5}
+                  />
+                </Field>
+              </div>
+
+              <div className="md:col-span-2">
                 <Field label="Technologies">
                   <div className="flex flex-wrap gap-2">
                     {state.technologies.map((t) => {
@@ -619,7 +618,7 @@ const ProjectDetailModal: React.FC<{
 
         {/* Footer */}
         <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex items-center justify-between gap-2">
-          <Button variant="outline" size="md" onClick={toPDF}>
+          <Button variant="outline" size="md" onClick={() => setShowPdf(true)}>
             <FileDown className="w-4 h-4 mr-2" />
             Export PDF
           </Button>
@@ -641,6 +640,85 @@ const ProjectDetailModal: React.FC<{
             )}
           </div>
         </div>
+      </div>
+    </div>
+
+    {showPdf && (
+      <ProjectPDFModal
+        project={draft}
+        state={state}
+        aiSynthesis={aiOutput}
+        onClose={() => setShowPdf(false)}
+      />
+    )}
+    </>
+  );
+};
+
+const ProjectPDFModal: React.FC<{
+  project: Project;
+  state: AppState;
+  aiSynthesis: string;
+  onClose: () => void;
+}> = ({ project, state, aiSynthesis, onClose }) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [landscape, setLandscape] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+
+  const html = buildProjectHTML(project, state, aiSynthesis, landscape);
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const handlePrint = () => iframeRef.current?.contentWindow?.print();
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
+      <div className={`bg-white dark:bg-ink-900 flex flex-col border border-neutral-200 dark:border-ink-700 shadow-2xl transition-all ${fullscreen ? 'w-full h-full' : 'w-full max-w-5xl h-[90vh]'}`}>
+        {/* Toolbar */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-ink-700 shrink-0 bg-neutral-50 dark:bg-ink-800">
+          <div className="flex items-center gap-2">
+            <FileDown className="w-4 h-4 text-brand" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em]">Project Brief PDF</span>
+            <span className="text-[10px] text-muted ml-2">{project.name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setLandscape((v) => !v)}
+              title={landscape ? 'Switch to portrait' : 'Switch to landscape'}
+              className={`px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] border transition-colors ${landscape ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand hover:text-brand'}`}
+            >
+              {landscape ? '⬛ Landscape' : '▭ Portrait'}
+            </button>
+            <button
+              onClick={() => setFullscreen((v) => !v)}
+              className="w-8 h-8 flex items-center justify-center border border-neutral-300 dark:border-ink-500 text-muted hover:border-brand hover:text-brand transition-colors"
+            >
+              {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-2 px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90 transition-colors"
+            >
+              <Printer className="w-3.5 h-3.5" /> Print / Save PDF
+            </button>
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-muted hover:text-red-500 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* iframe preview */}
+        <iframe
+          ref={iframeRef}
+          srcDoc={html}
+          className="flex-1 w-full border-0 bg-white"
+          sandbox="allow-same-origin allow-scripts allow-modals allow-popups"
+          title="Project Brief PDF Preview"
+        />
       </div>
     </div>
   );

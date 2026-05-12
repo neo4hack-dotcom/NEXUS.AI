@@ -2,7 +2,7 @@
 /* PDF: opens a self-contained print window styled for paper.
    EML: builds an RFC-822 .eml file the user can double-click to open in Outlook. */
 
-import { AppState, Hackathon } from '../types';
+import { AppState, Hackathon, Project } from '../types';
 
 export const exportEML = (subject: string, body: string, recipients: string[]): void => {
   const safeSubj = (subject || 'NEXUS.AI Update').replace(/[\r\n]+/g, ' ').trim();
@@ -217,39 +217,50 @@ const pdfFooter = (type: string) =>
     NEXUS.AI • AI Project Operations Platform • ${esc(type)} Report
   </div>`;
 
-const openPrintWindow = (title: string, body: string): void => {
-  const w = window.open('', '_blank', 'width=960,height=1200');
-  if (!w) { alert('Allow pop-ups to export PDF.'); return; }
-  w.document.write(`<!DOCTYPE html>
+const PDF_BASE_STYLES = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; color: #0a0a0b; background: #fff; font-size: 10pt; line-height: 1.5; }
+  p { margin: 5pt 0; }
+  ul { padding-left: 18pt; } li { margin: 3pt 0; }
+  h1 { font-size: 18pt; font-weight: 900; text-transform: uppercase; letter-spacing: -0.02em; margin: 0 0 8pt; }
+  h2 { font-size: 12pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; margin: 14pt 0 6pt; color: #111; }
+  h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.1em; color: #FF3E00; margin: 10pt 0 4pt; }
+  strong { font-weight: 700; }
+  .ai-content p { margin: 5pt 0; }
+  .ai-content ul { padding-left: 16pt; }
+  .ai-content li { margin: 2pt 0; }
+`;
+
+export const wrapHtmlDoc = (
+  title: string,
+  body: string,
+  landscape = false,
+  autoprint = false
+): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <title>${esc(title)}</title>
   <style>
-    @page { size: A4; margin: 15mm 16mm 20mm; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; color: #0a0a0b; background: #fff; font-size: 10pt; line-height: 1.5; }
-    p { margin: 5pt 0; }
-    ul { padding-left: 18pt; } li { margin: 3pt 0; }
-    h1 { font-size: 18pt; font-weight: 900; text-transform: uppercase; letter-spacing: -0.02em; margin: 0 0 8pt; }
-    h2 { font-size: 12pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; margin: 14pt 0 6pt; color: #111; }
-    h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.1em; color: #FF3E00; margin: 10pt 0 4pt; }
-    strong { font-weight: 700; }
-    .ai-content p { margin: 5pt 0; }
-    .ai-content ul { padding-left: 16pt; }
-    .ai-content li { margin: 2pt 0; }
+    @page { size: A4${landscape ? ' landscape' : ''}; margin: 15mm 16mm 20mm; }
+    ${PDF_BASE_STYLES}
   </style>
 </head>
 <body>
   ${body}
-  <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+  ${autoprint ? `<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>` : ''}
 </body>
-</html>`);
+</html>`;
+
+const openPrintWindow = (title: string, body: string): void => {
+  const w = window.open('', '_blank', 'width=960,height=1200');
+  if (!w) { alert('Allow pop-ups to export PDF.'); return; }
+  w.document.write(wrapHtmlDoc(title, body, false, true));
   w.document.close();
 };
 
 /* --- Weekly Status Report --- */
-const buildWeeklyPDF = (title: string, content: string, state: AppState): void => {
+const buildWeeklyBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
   const now = Date.now();
 
@@ -353,12 +364,13 @@ const buildWeeklyPDF = (title: string, content: string, state: AppState): void =
     </div>
 
     ${pdfFooter('Weekly')}`;
-
-  openPrintWindow(`Weekly Status — ${title}`, body);
+  return body;
 };
+const buildWeeklyPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Weekly Status — ${t}`, buildWeeklyBody(t, c, s));
 
 /* --- Newsletter --- */
-const buildNewsletterPDF = (title: string, content: string, state: AppState): void => {
+const buildNewsletterBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
   const done = projects.filter((p) => p.status === 'Done').length;
   const active = projects.filter((p) => p.status === 'Active').length;
@@ -444,12 +456,13 @@ const buildNewsletterPDF = (title: string, content: string, state: AppState): vo
     </div>
 
     ${pdfFooter('Newsletter')}`;
-
-  openPrintWindow(`Newsletter — ${title}`, body);
+  return body;
 };
+const buildNewsletterPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Newsletter — ${t}`, buildNewsletterBody(t, c, s));
 
 /* --- Executive Brief --- */
-const buildExcoPDF = (title: string, content: string, state: AppState): void => {
+const buildExcoBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
   const now = Date.now();
 
@@ -545,9 +558,10 @@ const buildExcoPDF = (title: string, content: string, state: AppState): void => 
     </div>` : ''}
 
     ${pdfFooter('Executive Brief')}`;
-
-  openPrintWindow(`Executive Brief — ${title}`, body);
+  return body;
 };
+const buildExcoPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Executive Brief — ${t}`, buildExcoBody(t, c, s));
 
 export const exportCommunicationPDF = (
   type: 'weekly' | 'newsletter' | 'exco' | 'info',
@@ -561,10 +575,25 @@ export const exportCommunicationPDF = (
   else buildInfoPDF(title, content, state);
 };
 
+export const buildCommunicationHTML = (
+  type: string,
+  title: string,
+  content: string,
+  state: AppState,
+  landscape = false
+): string => {
+  let body = '';
+  if (type === 'weekly') body = buildWeeklyBody(title, content, state);
+  else if (type === 'newsletter') body = buildNewsletterBody(title, content, state);
+  else if (type === 'exco') body = buildExcoBody(title, content, state);
+  else body = buildInfoBody(title, content, state);
+  return wrapHtmlDoc(title || 'Communication', body, landscape, false);
+};
+
 /* --- Info / general PDF --- */
-const buildInfoPDF = (title: string, content: string, state: AppState): void => {
+const buildInfoBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
-  const body = `
+  return `
     ${pdfHeader('Information Note', esc(title || 'Note'), new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), COL_BLUE)}
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px">
       ${kpiTile('Projects', projects.length, COL_BLUE)}
@@ -576,8 +605,9 @@ const buildInfoPDF = (title: string, content: string, state: AppState): void => 
       ${renderMarkdownLite(content)}
     </div>
     ${pdfFooter('Info')}`;
-  openPrintWindow(`Info — ${title}`, body);
 };
+const buildInfoPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Info — ${t}`, buildInfoBody(t, c, s));
 
 /* ===== Hackathon Candidate Kit PDF ===== */
 
@@ -758,4 +788,292 @@ export const exportHackathonCandidatePDF = (hackathon: Hackathon, state: AppStat
     ${pdfFooter('Hackathon Candidate Kit')}`;
 
   openPrintWindow(`${hackathon.title} — Candidate Kit`, body);
+};
+
+/* ===== Project Brief PDF ===== */
+
+export const buildProjectHTML = (
+  project: Project,
+  state: AppState,
+  aiSynthesis: string,
+  landscape = false
+): string => {
+  const now = Date.now();
+  const tasks = project.tasks || [];
+  const totalW = tasks.reduce((s, t) => s + (t.weight || 1), 0);
+  const doneW = tasks.filter((t) => t.status === 'Done').reduce((s, t) => s + (t.weight || 1), 0);
+  const progress = totalW ? Math.round((doneW / totalW) * 100) : 0;
+
+  const taskCounts = {
+    todo: tasks.filter((t) => t.status === 'To Do').length,
+    inProgress: tasks.filter((t) => t.status === 'In Progress').length,
+    paused: tasks.filter((t) => t.status === 'Paused').length,
+    blocked: tasks.filter((t) => t.status === 'Blocked').length,
+    done: tasks.filter((t) => t.status === 'Done').length,
+  };
+
+  const owner = state.users.find((u) => u.id === project.managerId);
+  const members = project.members
+    .map((m) => state.users.find((u) => u.id === m.userId))
+    .filter(Boolean) as (typeof state.users)[0][];
+  const techs = project.technologyIds
+    .map((id) => state.technologies.find((t) => t.id === id))
+    .filter(Boolean) as (typeof state.technologies)[0][];
+  const repos = project.repoIds
+    .map((id) => state.repositories.find((r) => r.id === id))
+    .filter(Boolean) as (typeof state.repositories)[0][];
+
+  const deadlineDate = new Date(project.deadline);
+  const daysLeft = Math.ceil((deadlineDate.getTime() - now) / 86400000);
+  const overdue = daysLeft < 0 && project.status !== 'Done';
+  const hasSlipped =
+    project.initialDeadline &&
+    new Date(project.deadline).getTime() > new Date(project.initialDeadline).getTime();
+  const slipDays = hasSlipped
+    ? Math.round(
+        (new Date(project.deadline).getTime() - new Date(project.initialDeadline!).getTime()) / 86400000
+      )
+    : 0;
+
+  const statusColor: Record<string, string> = {
+    Planning: '#6366f1',
+    Active: COL_GREEN,
+    Paused: COL_AMBER,
+    Done: '#64748b',
+  };
+  const accentColor = statusColor[project.status] || BRAND;
+
+  // SVG donut for task status
+  const taskTotal = tasks.length || 1;
+  const C = 2 * Math.PI * 28;
+  const mkSeg = (count: number, color: string, startFrac: number) => {
+    const f = count / taskTotal;
+    const arc = f * C;
+    if (arc < 0.5) return '';
+    const rot = startFrac * 360 - 90;
+    return `<circle cx="35" cy="35" r="28" fill="none" stroke="${color}" stroke-width="10"
+      stroke-dasharray="${arc.toFixed(2)} ${(C - arc).toFixed(2)}"
+      transform="rotate(${rot.toFixed(2)} 35 35)"/>`;
+  };
+  const f0 = 0;
+  const f1 = f0 + taskCounts.done / taskTotal;
+  const f2 = f1 + taskCounts.inProgress / taskTotal;
+  const f3 = f2 + taskCounts.todo / taskTotal;
+  const f4 = f3 + taskCounts.paused / taskTotal;
+  const taskDonut = `<svg viewBox="0 0 70 70" width="90" height="90" style="display:block">
+    <circle cx="35" cy="35" r="28" fill="none" stroke="#e5e7eb" stroke-width="10"/>
+    ${mkSeg(taskCounts.done, COL_GREEN, f0)}
+    ${mkSeg(taskCounts.inProgress, COL_BLUE, f1)}
+    ${mkSeg(taskCounts.todo, '#94a3b8', f2)}
+    ${mkSeg(taskCounts.paused, COL_AMBER, f3)}
+    ${mkSeg(taskCounts.blocked, COL_RED, f4)}
+    <text x="35" y="31" text-anchor="middle" font-size="14" font-weight="900" fill="#111" font-family="system-ui">${tasks.length}</text>
+    <text x="35" y="43" text-anchor="middle" font-size="7" fill="#888" font-family="system-ui">TASKS</text>
+  </svg>`;
+
+  // Milestone roadmap SVG (horizontal timeline)
+  const milestones = project.milestones || [];
+  const sortedMs = [...milestones].sort((a, b) => a.date.localeCompare(b.date));
+  let roadmapSvg = '';
+  if (sortedMs.length > 0) {
+    const msWidth = 560;
+    const msHeight = 80;
+    const padX = 30;
+    const usableW = msWidth - padX * 2;
+    const first = new Date(sortedMs[0].date).getTime();
+    const last = new Date(sortedMs[sortedMs.length - 1].date).getTime();
+    const range = last - first || 1;
+    const toX = (d: string) => padX + ((new Date(d).getTime() - first) / range) * usableW;
+    const nowX = Math.max(padX, Math.min(msWidth - padX, padX + ((now - first) / range) * usableW));
+    roadmapSvg = `<svg viewBox="0 0 ${msWidth} ${msHeight}" style="width:100%;display:block;overflow:visible">
+      <!-- baseline -->
+      <line x1="${padX}" y1="40" x2="${msWidth - padX}" y2="40" stroke="#e5e7eb" stroke-width="2"/>
+      <!-- today marker -->
+      <line x1="${nowX}" y1="24" x2="${nowX}" y2="56" stroke="${BRAND}" stroke-width="1.5" stroke-dasharray="3,2"/>
+      <text x="${nowX}" y="20" text-anchor="middle" font-size="7" fill="${BRAND}" font-family="system-ui" font-weight="700">TODAY</text>
+      ${sortedMs.map((m, i) => {
+        const x = toX(m.date);
+        const color = m.done ? COL_GREEN : now > new Date(m.date).getTime() ? COL_RED : '#64748b';
+        const above = i % 2 === 0;
+        return `
+          <circle cx="${x}" cy="40" r="5" fill="${color}" stroke="#fff" stroke-width="1.5"/>
+          <line x1="${x}" y1="${above ? 40 : 40}" x2="${x}" y2="${above ? 22 : 58}" stroke="${color}" stroke-width="1" stroke-dasharray="2,2"/>
+          <text x="${x}" y="${above ? 18 : 68}" text-anchor="middle" font-size="6.5" fill="${color}" font-family="system-ui" font-weight="700">${esc(m.label.slice(0, 14))}</text>
+          <text x="${x}" y="${above ? 10 : 76}" text-anchor="middle" font-size="6" fill="#aaa" font-family="system-ui">${new Date(m.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</text>`;
+      }).join('')}
+    </svg>`;
+  }
+
+  const body = `
+    <!-- Header -->
+    <div style="padding-bottom:16px;margin-bottom:20px;border-bottom:3px solid ${accentColor}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:8pt;font-weight:900;text-transform:uppercase;letter-spacing:0.22em;color:${accentColor};font-family:system-ui;margin-bottom:4px">Project Brief</div>
+          <div style="font-size:26pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.03em;line-height:1;font-family:system-ui;overflow:hidden;text-overflow:ellipsis">${esc(project.name)}</div>
+          ${project.description ? `<div style="font-size:10pt;color:#777;margin-top:6px;font-family:system-ui">${esc(project.description)}</div>` : ''}
+        </div>
+        <div style="text-align:right;flex-shrink:0;margin-left:20px">
+          <div style="font-size:22pt;font-weight:900;font-family:system-ui;color:#111">NEXUS<span style="color:${BRAND}">.AI</span></div>
+          <div style="font-size:8pt;color:#aaa;text-transform:uppercase;letter-spacing:0.12em;font-family:system-ui;margin-top:2px">Confidential</div>
+          <div style="font-size:8pt;color:#888;font-family:system-ui;margin-top:2px">${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+          <div style="margin-top:8px;background:${accentColor}20;color:${accentColor};font-size:8pt;font-weight:900;text-transform:uppercase;padding:4px 12px;border-radius:2px;font-family:system-ui">${esc(project.status)}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI row -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">
+      ${kpiTile('Progress', `${progress}%`, progress >= 70 ? COL_GREEN : progress >= 40 ? COL_AMBER : COL_BLUE)}
+      ${kpiTile('Tasks', tasks.length, COL_BLUE, `${taskCounts.done} done`)}
+      ${kpiTile('Blocked', taskCounts.blocked, taskCounts.blocked > 0 ? COL_RED : '#94a3b8', taskCounts.blocked > 0 ? 'needs attention' : 'clear')}
+      ${kpiTile('Team', members.length, '#8b5cf6', 'contributors')}
+      ${overdue
+        ? kpiTile('Deadline', `${Math.abs(daysLeft)}d`, COL_RED, 'OVERDUE')
+        : kpiTile('Days left', daysLeft > 0 ? daysLeft : 0, daysLeft <= 7 ? COL_AMBER : COL_GREEN, deadlineDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}
+    </div>
+
+    <!-- Deadline slip warning -->
+    ${hasSlipped ? `
+    <div style="background:#fff7ed;border:1px solid #fed7aa;border-left:4px solid ${COL_AMBER};padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+      <div style="font-size:14pt">⚠️</div>
+      <div>
+        <div style="font-size:8pt;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:${COL_AMBER};font-family:system-ui">Deadline Slipped</div>
+        <div style="font-size:9pt;color:#92400e;font-family:system-ui">Current deadline is ${slipDays} day${slipDays !== 1 ? 's' : ''} later than original target (${new Date(project.initialDeadline!).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})</div>
+      </div>
+    </div>` : ''}
+
+    <!-- Task distribution + roadmap -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <!-- Task breakdown -->
+      <div style="border:1px solid #e5e7eb;padding:16px">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:#aaa;font-weight:700;font-family:system-ui;margin-bottom:12px">Task Distribution</div>
+        <div style="display:flex;align-items:center;gap:16px">
+          ${taskDonut}
+          <div style="flex:1">
+            ${ragLegendRow(COL_GREEN, 'Done', taskCounts.done, tasks.length)}
+            ${ragLegendRow(COL_BLUE, 'In Progress', taskCounts.inProgress, tasks.length)}
+            ${ragLegendRow('#94a3b8', 'To Do', taskCounts.todo, tasks.length)}
+            ${taskCounts.paused > 0 ? ragLegendRow(COL_AMBER, 'Paused', taskCounts.paused, tasks.length) : ''}
+            ${taskCounts.blocked > 0 ? ragLegendRow(COL_RED, 'Blocked', taskCounts.blocked, tasks.length) : ''}
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          ${progressBar(progress, accentColor)}
+          <div style="font-size:7.5pt;color:#aaa;margin-top:4px;font-family:system-ui">${progress}% complete (weighted)</div>
+        </div>
+      </div>
+
+      <!-- Team -->
+      <div style="border:1px solid #e5e7eb;padding:16px">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:#aaa;font-weight:700;font-family:system-ui;margin-bottom:12px">Project Team</div>
+        ${owner ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #f1f5f9">
+          <div style="width:28px;height:28px;background:${BRAND};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9pt;font-weight:900;font-family:system-ui;flex-shrink:0">${esc(owner.firstName[0] + (owner.lastName[0] || ''))}</div>
+          <div>
+            <div style="font-size:9pt;font-weight:700;font-family:system-ui">${esc(owner.firstName + ' ' + owner.lastName)}</div>
+            <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.1em;color:${BRAND};font-family:system-ui">Project Manager</div>
+          </div>
+        </div>` : ''}
+        ${members.filter((m) => m.id !== project.managerId).slice(0, 6).map((m) => `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div style="width:22px;height:22px;background:${m.avatarColor || '#6366f1'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:7pt;font-weight:900;font-family:system-ui;flex-shrink:0">${esc(m.firstName[0] + (m.lastName[0] || ''))}</div>
+            <div>
+              <div style="font-size:8.5pt;font-weight:600;font-family:system-ui">${esc(m.firstName + ' ' + m.lastName)}</div>
+              <div style="font-size:7pt;color:#888;font-family:system-ui">${esc(m.functionTitle || m.team)}</div>
+            </div>
+          </div>`).join('')}
+        ${members.length > 7 ? `<div style="font-size:7.5pt;color:#aaa;font-family:system-ui;margin-top:4px">+ ${members.length - 7} more</div>` : ''}
+      </div>
+    </div>
+
+    <!-- Milestones roadmap -->
+    ${sortedMs.length > 0 ? `
+    ${sectionHeader('Milestone Roadmap', accentColor)}
+    <div style="border:1px solid #e5e7eb;padding:16px;margin-bottom:20px;overflow:hidden">
+      ${roadmapSvg}
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px">
+        ${sortedMs.map((m) => {
+          const isPast = now > new Date(m.date).getTime();
+          const color = m.done ? COL_GREEN : isPast ? COL_RED : '#64748b';
+          return `<div style="border-left:3px solid ${color};padding:4px 8px">
+            <div style="font-size:8.5pt;font-weight:700;font-family:system-ui;color:${color}">${esc(m.label)}</div>
+            <div style="font-size:7pt;color:#aaa;font-family:system-ui">${new Date(m.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</div>
+            ${m.done ? `<div style="font-size:7pt;color:${COL_GREEN};font-family:system-ui;font-weight:700">✓ Done</div>` : isPast ? `<div style="font-size:7pt;color:${COL_RED};font-family:system-ui;font-weight:700">Overdue</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- Context -->
+    ${project.context ? `
+    ${sectionHeader('Context & Background', '#6366f1')}
+    <div style="border:1px solid #e5e7eb;border-left:4px solid #6366f1;padding:14px 18px;background:#fafbff;margin-bottom:20px;white-space:pre-wrap;font-family:system-ui;font-size:9.5pt;line-height:1.6;color:#374151">${esc(project.context)}</div>` : ''}
+
+    <!-- Tasks table -->
+    ${tasks.length > 0 ? `
+    ${sectionHeader('Task Board', accentColor)}
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-family:system-ui;font-size:8.5pt">
+      <thead>
+        <tr style="background:#0a0a0b;color:#fff">
+          <th style="text-align:left;padding:8px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Task</th>
+          <th style="text-align:center;padding:8px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Status</th>
+          <th style="text-align:center;padding:8px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Priority</th>
+          <th style="text-align:left;padding:8px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Assignee</th>
+          <th style="text-align:right;padding:8px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">ETA</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tasks.map((t, i) => {
+          const assignee = state.users.find((u) => u.id === t.assigneeId);
+          const statusC: Record<string, string> = { 'To Do': '#94a3b8', 'In Progress': COL_BLUE, Paused: COL_AMBER, Blocked: COL_RED, Done: COL_GREEN };
+          const prioC: Record<string, string> = { Low: '#94a3b8', Medium: COL_BLUE, High: COL_AMBER, Urgent: COL_RED };
+          const eta = t.currentEta || t.originalEta;
+          return `<tr style="background:${i % 2 === 0 ? '#fff' : '#f9fafb'};border-bottom:1px solid #e5e7eb">
+            <td style="padding:7px 12px;font-weight:600">${esc(t.title)}</td>
+            <td style="padding:7px 12px;text-align:center">
+              <span style="background:${(statusC[t.status] || '#94a3b8')}18;color:${statusC[t.status] || '#94a3b8'};font-size:7pt;font-weight:700;text-transform:uppercase;padding:2px 7px">${esc(t.status)}</span>
+            </td>
+            <td style="padding:7px 12px;text-align:center">
+              <span style="color:${prioC[t.priority] || '#94a3b8'};font-size:7.5pt;font-weight:700;text-transform:uppercase">${esc(t.priority)}</span>
+            </td>
+            <td style="padding:7px 12px;color:#666">${assignee ? esc(assignee.firstName + ' ' + assignee.lastName) : '—'}</td>
+            <td style="padding:7px 12px;text-align:right;color:#888;font-size:7.5pt">${eta ? new Date(eta).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>` : ''}
+
+    <!-- Technologies -->
+    ${techs.length > 0 ? `
+    ${sectionHeader('Technology Stack', '#8b5cf6')}
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+      ${techs.map((t) => `
+        <div style="border:1px solid #e2e8f0;padding:8px 14px;background:#fff">
+          <div style="font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;font-family:system-ui">${esc(t.name)}</div>
+          <div style="font-size:7pt;color:${accentColor};text-transform:uppercase;letter-spacing:0.1em;font-family:system-ui">${esc(t.category)}${t.layer ? ` · ${t.layer}` : ''}</div>
+        </div>`).join('')}
+    </div>` : ''}
+
+    <!-- Repositories -->
+    ${repos.length > 0 ? `
+    ${sectionHeader('Code Repositories', '#1e1b4b')}
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px">
+      ${repos.map((r) => `
+        <div style="border:1px solid #e5e7eb;padding:10px 12px">
+          <div style="font-size:9pt;font-weight:700;font-family:system-ui">${esc(r.name)}</div>
+          <div style="font-size:7.5pt;color:#888;font-family:system-ui;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.url)}</div>
+          ${r.description ? `<div style="font-size:8pt;color:#666;margin-top:4px;font-family:system-ui">${esc(r.description.slice(0, 80))}</div>` : ''}
+        </div>`).join('')}
+    </div>` : ''}
+
+    <!-- AI Synthesis -->
+    ${aiSynthesis ? `
+    ${sectionHeader('AI Project Brief', '#8b5cf6')}
+    <div class="ai-content" style="border:1px solid #e5e7eb;border-left:4px solid #8b5cf6;padding:16px 20px;background:#faf9ff;margin-bottom:20px">
+      ${renderMarkdownLite(aiSynthesis)}
+    </div>` : ''}
+
+    ${pdfFooter('Project Brief')}`;
+
+  return wrapHtmlDoc(`Project Brief — ${project.name}`, body, landscape, false);
 };

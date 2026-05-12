@@ -17,6 +17,7 @@ import {
   Sparkles,
   CircleDot,
   Zap,
+  Network,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 
@@ -31,6 +32,7 @@ export type TabId =
   | 'tech'
   | 'repos'
   | 'hackathons'
+  | 'workinggroups'
   | 'settings';
 
 interface Props {
@@ -69,6 +71,7 @@ const NAV: NavItem[] = [
   { id: 'tech', label: 'Technologies', icon: Cpu },
   { id: 'repos', label: 'Code Repositories', icon: GitBranch },
   { id: 'hackathons', label: 'Hackathons', icon: Zap },
+  { id: 'workinggroups', label: 'Working Groups', icon: Network },
 ];
 
 export const Sidebar: React.FC<Props> = ({

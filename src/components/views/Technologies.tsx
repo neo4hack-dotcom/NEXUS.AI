@@ -147,6 +147,11 @@ export const Technologies: React.FC<Props> = ({ state, currentUser, update }) =>
                   Owner: <span className="text-neutral-700 dark:text-neutral-300">{t.internalOwner}</span>
                 </p>
               )}
+              {t.technicalArchitect && (
+                <p className="text-[10px] text-muted mt-1">
+                  Architect: <span className="text-neutral-700 dark:text-neutral-300">{t.technicalArchitect}</span>
+                </p>
+              )}
               {t.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">
                   {t.tags.map((tag) => (
@@ -282,6 +287,14 @@ const Editor: React.FC<{
                 value={d.internalOwner || ''}
                 onChange={(e) => setD({ ...d, internalOwner: e.target.value })}
                 placeholder="Platform team, John Doe…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">Technical architect</label>
+              <Input
+                value={d.technicalArchitect || ''}
+                onChange={(e) => setD({ ...d, technicalArchitect: e.target.value })}
+                placeholder="Name of the responsible architect…"
               />
             </div>
             <div className="col-span-2 space-y-1.5">

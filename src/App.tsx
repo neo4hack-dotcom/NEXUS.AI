@@ -25,6 +25,8 @@ import { Technologies } from './components/views/Technologies';
 import { Repositories } from './components/views/Repositories';
 import { Settings } from './components/views/Settings';
 import { HackathonsView } from './components/views/Hackathon';
+import { WorkingGroupsView } from './components/views/WorkingGroups';
+import { NexusAssistant } from './components/NexusAssistant';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -119,6 +121,7 @@ const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(true);
   const [notifOpen, setNotifOpen] = useState(false);
   const [aiInsightOpen, setAiInsightOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [syncFlash, setSyncFlash] = useState(false);
 
   // Initial load
@@ -247,6 +250,8 @@ const App: React.FC = () => {
         return <Repositories state={filteredState} currentUser={currentUser} update={update} />;
       case 'hackathons':
         return <HackathonsView state={filteredState} currentUser={currentUser} update={update} />;
+      case 'workinggroups':
+        return <WorkingGroupsView state={filteredState} currentUser={currentUser} update={update} />;
       case 'settings':
         return currentUser.role === 'admin' ? (
           <Settings state={appState} update={update} />
@@ -305,7 +310,13 @@ const App: React.FC = () => {
               NEXUS Workspace
             </h2>
           </div>
-          <div />
+          <button
+            onClick={() => setAssistantOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] border border-brand/40 text-brand hover:bg-brand hover:text-white transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            Nexus Assistant
+          </button>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8">{activeView}</div>
@@ -322,6 +333,12 @@ const App: React.FC = () => {
         open={aiInsightOpen}
         onClose={() => setAiInsightOpen(false)}
         state={appState}
+      />
+      <NexusAssistant
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+        state={filteredState}
+        llmConfig={appState.llmConfig}
       />
     </div>
   );
