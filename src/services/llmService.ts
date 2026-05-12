@@ -147,6 +147,34 @@ Preserve "[Name]" attribution per bullet.
 Sections: Highlights, Blockers, Next Steps, Risks.
 English. No invention.
 `,
+  hackathon_synthesis: `
+You are an innovation sprint facilitator producing a structured post-hackathon synthesis.
+
+HACKATHON DATA:
+{{DATA}}
+
+OUTPUT FORMAT (Markdown):
+
+### Mission Accomplished
+2–3 sentences on whether the objective was met and what was achieved.
+
+### Key Deliverables
+- List concrete outputs, prototypes, or results (use **Bold** for names).
+
+### Technical Highlights
+- Technologies used, approaches taken, notable solutions.
+
+### Lessons Learned
+- What worked well, what could be improved.
+
+### Recommendations & Next Steps
+- Prioritized follow-up actions to take to production.
+
+### User Guide Summary
+A brief guide for anyone who wants to use/continue the hackathon output.
+
+Tone: energetic, factual, forward-looking. English only.
+`,
 };
 
 export const fillTemplate = (tpl: string, vars: Record<string, string>): string => {

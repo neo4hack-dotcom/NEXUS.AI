@@ -14,6 +14,7 @@ import {
   Communication,
   WeeklyCheckIn,
   AppNotification,
+  Hackathon,
   Theme,
 } from '../types';
 
@@ -78,6 +79,7 @@ export const getDefaultState = (): AppState => {
     mailingLists: [],
     weeklyCheckIns: [],
     notifications: [],
+    hackathons: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -103,6 +105,13 @@ export const sanitizeAppState = (data: any): AppState => {
     mailingLists: arr<MailingList>(data.mailingLists),
     weeklyCheckIns: arr<WeeklyCheckIn>(data.weeklyCheckIns),
     notifications: arr<AppNotification>(data.notifications),
+    hackathons: arr<Hackathon>(data.hackathons).map((h) => ({
+      ...h,
+      participants: arr(h.participants),
+      documents: arr(h.documents),
+      messages: arr(h.messages),
+      tags: arr(h.tags),
+    })),
     llmConfig: { ...DEFAULT_LLM_CONFIG, ...(data.llmConfig || {}) },
     prompts: data.prompts && typeof data.prompts === 'object' ? data.prompts : {},
     theme: (data.theme === 'light' ? 'light' : 'dark') as Theme,
