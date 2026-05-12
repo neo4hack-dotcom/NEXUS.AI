@@ -2,7 +2,7 @@ import { LlmConfig, Project, User, AppState, WeeklyCheckIn, TaskStatus, TaskPrio
 
 export const DEFAULT_PROMPTS: Record<string, string> = {
   portfolio_summary: `
-You are NEXUS.AI, a Chief AI Officer's executive assistant.
+You are DOINg.AI, a Chief AI Officer's executive assistant.
 Produce a concise, professional executive overview of the AI project portfolio.
 
 DATA:
@@ -108,7 +108,7 @@ What's next
 
 Call to action: ...
 Best,
-The NEXUS.AI team
+The DOINg.AI team
 `,
   exco_update: `
 You are a senior consultant briefing the Executive Committee.

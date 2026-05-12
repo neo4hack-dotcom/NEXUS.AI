@@ -84,7 +84,7 @@ const buildContext = (state: AppState): string => {
     .filter(Boolean);
 
   const sections: string[] = [
-    `=== NEXUS.AI CONTEXT (${new Date().toLocaleDateString('en-GB')} — ${projects.length} projects, ${users.length} users) ===`,
+    `=== DOINg.AI CONTEXT (${new Date().toLocaleDateString('en-GB')} — ${projects.length} projects, ${users.length} users) ===`,
     '',
     '--- PROJECTS ---',
     ...projectLines,
@@ -178,7 +178,7 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
         .join('\n\n');
 
       const systemPrompt =
-        `You are NEXUS.AI, an expert AI Operations assistant. ` +
+        `You are DOINg.AI, an expert AI Operations assistant. ` +
         `Answer questions precisely using ONLY the data provided below. ` +
         `When asked for charts or graphs, produce clean ASCII/Unicode diagrams or SVG-style text tables. ` +
         `When asked for analysis, be concrete and cite project names, numbers, and dates. ` +
@@ -246,7 +246,7 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
               </svg>
             </div>
             <div>
-              <h2 className="text-[12px] font-bold uppercase tracking-[0.14em]">Nexus Assistant</h2>
+              <h2 className="text-[12px] font-bold uppercase tracking-[0.14em]">DOINg Assistant</h2>
               <p className="text-[9px] text-muted uppercase tracking-[0.14em]">
                 {state ? `${(state.projects || []).length} projects · ${(state.users || []).length} users` : 'No data'} · {llmConfig.model}
               </p>
@@ -306,7 +306,7 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className={`flex items-center gap-2 mb-1 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                 <span className={`text-[8px] font-bold uppercase tracking-[0.14em] ${msg.role === 'user' ? 'text-brand' : 'text-muted'}`}>
-                  {msg.role === 'user' ? 'You' : 'Nexus AI'}
+                  {msg.role === 'user' ? 'You' : 'DOINg AI'}
                 </span>
                 <span className="text-[8px] text-muted">{fmtTime(msg.ts)}</span>
               </div>

@@ -27,6 +27,9 @@ import { Settings } from './components/views/Settings';
 import { HackathonsView } from './components/views/Hackathon';
 import { WorkingGroupsView } from './components/views/WorkingGroups';
 import { NexusAssistant } from './components/NexusAssistant';
+import { CommandPalette } from './components/CommandPalette';
+import { UserGuide } from './components/views/UserGuide';
+import { OnboardingModal } from './components/OnboardingModal';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -123,6 +126,10 @@ const App: React.FC = () => {
   const [aiInsightOpen, setAiInsightOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [syncFlash, setSyncFlash] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [seenNotifIds, setSeenNotifIds] = useState<Set<string>>(new Set());
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -192,9 +199,46 @@ const App: React.FC = () => {
     saveState(appState);
   }, [appState]);
 
+  // ⌘K / Ctrl+K → command palette
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setCmdOpen((v) => !v); }
+    };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, []);
+
   const update = useCallback((mutator: (s: AppState) => AppState) => {
     setAppState((curr) => (curr ? mutator(curr) : curr));
   }, []);
+
+  // Save project template (must be after update declaration)
+  useEffect(() => {
+    const fn = (e: Event) => {
+      const p = (e as CustomEvent).detail?.project;
+      if (!p) return;
+      update((s) => {
+        const exists = (s.projectTemplates || []).find((t) => t.name === p.name);
+        const tpl = {
+          id: exists?.id ?? generateId(),
+          name: p.name,
+          description: p.description,
+          tasks: (p.tasks || []).map(({ id: _id, assigneeId: _a, ...rest }: any) => rest),
+          milestones: (p.milestones || []).map(({ id: _id, done: _d, ...rest }: any) => rest),
+          tags: p.tags || [],
+          createdAt: exists?.createdAt ?? new Date().toISOString(),
+        };
+        return {
+          ...s,
+          projectTemplates: exists
+            ? (s.projectTemplates || []).map((t) => (t.id === tpl.id ? tpl : t))
+            : [...(s.projectTemplates || []), tpl],
+        };
+      });
+    };
+    window.addEventListener('doing_save_template', fn);
+    return () => window.removeEventListener('doing_save_template', fn);
+  }, [update]);
 
   const toggleTheme = useCallback(() => {
     update((s) => {
@@ -221,9 +265,25 @@ const App: React.FC = () => {
     [appState]
   );
 
+  // Show onboarding popup on first login per user
+  useEffect(() => {
+    if (!currentUser) return;
+    const key = `doing_ai_onboarded_${currentUser.id}`;
+    if (!localStorage.getItem(key)) {
+      setOnboardingOpen(true);
+    }
+  }, [currentUser?.id]);
+
   const filteredState = useMemo(() => (appState ? getFilteredState(appState) : null), [appState]);
 
   const notifications = useMemo(() => (appState ? computeNotifications(appState) : []), [appState]);
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !seenNotifIds.has(n.id)).length,
+    [notifications, seenNotifIds]
+  );
+  const markAllRead = useCallback(() => {
+    setSeenNotifIds(new Set(notifications.map((n) => n.id)));
+  }, [notifications]);
 
   // renderView MUST be defined before any conditional returns to satisfy Rules of Hooks.
   // Null-guard inside keeps it safe when appState / filteredState aren't ready yet.
@@ -258,6 +318,8 @@ const App: React.FC = () => {
         ) : (
           <div className="p-10 text-center text-muted">Admin only.</div>
         );
+      case 'guide':
+        return <UserGuide currentUser={currentUser} />;
       default:
         return null;
     }
@@ -268,7 +330,7 @@ const App: React.FC = () => {
   if (!appState) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-xs uppercase tracking-[0.18em] text-muted">Loading NEXUS.AI…</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-muted">Loading DOINg.AI…</p>
       </div>
     );
   }
@@ -295,7 +357,7 @@ const App: React.FC = () => {
         onLogout={onLogout}
         onOpenAiInsight={() => setAiInsightOpen(true)}
         onOpenNotifications={() => setNotifOpen(true)}
-        notificationCount={notifications.length}
+        notificationCount={unreadCount}
         isOnline={isOnline}
         syncFlash={syncFlash}
       />
@@ -307,16 +369,27 @@ const App: React.FC = () => {
               {currentUser.role === 'admin' ? 'admin view' : `${currentUser.role} view`}
             </span>
             <h2 className="text-sm font-bold uppercase tracking-[0.14em]">
-              NEXUS Workspace
+              DOINg Workspace
             </h2>
           </div>
-          <button
-            onClick={() => setAssistantOpen(true)}
-            className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] border border-brand/40 text-brand hover:bg-brand hover:text-white transition-colors"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-            Nexus Assistant
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCmdOpen(true)}
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 text-[10px] text-muted border border-neutral-200 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors"
+              title="Command palette (⌘K)"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <span>Search</span>
+              <span className="font-mono text-[9px] border border-neutral-300 dark:border-ink-500 px-1 rounded">⌘K</span>
+            </button>
+            <button
+              onClick={() => setAssistantOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] border border-brand/40 text-brand hover:bg-brand hover:text-white transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+              DOINg Assistant
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8">{activeView}</div>
@@ -324,10 +397,17 @@ const App: React.FC = () => {
 
       <NotificationCenter
         open={notifOpen}
-        onClose={() => setNotifOpen(false)}
+        onClose={() => { setNotifOpen(false); markAllRead(); }}
         notifications={notifications}
-        onDismiss={() => {/* notifications are derived */}}
-        onMarkAllRead={() => {/* derived */}}
+        onDismiss={() => {}}
+        onMarkAllRead={markAllRead}
+      />
+      <CommandPalette
+        open={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        state={filteredState!}
+        setActiveTab={(t) => { setActiveTab(t); }}
+        onOpenProject={(id) => setPendingProjectId(id)}
       />
       <AiInsightModal
         open={aiInsightOpen}
@@ -340,6 +420,15 @@ const App: React.FC = () => {
         state={filteredState}
         llmConfig={appState.llmConfig}
       />
+      {onboardingOpen && currentUser && (
+        <OnboardingModal
+          currentUser={currentUser}
+          onClose={() => {
+            localStorage.setItem(`doing_ai_onboarded_${currentUser.id}`, '1');
+            setOnboardingOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };

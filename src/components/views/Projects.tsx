@@ -106,6 +106,27 @@ const addAudit = (p: Project, user: User, action: string, details?: string): Pro
   ],
 });
 
+/* ── RAG health helper ── */
+type RAGTone = 'green' | 'amber' | 'red' | 'muted';
+const RAG_STYLE: Record<RAGTone, string> = {
+  green: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  red: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  muted: 'bg-neutral-100 text-neutral-500 dark:bg-ink-700 dark:text-neutral-400',
+};
+const ragHealth = (p: Project): { label: string; tone: RAGTone } => {
+  if (p.isArchived || p.status === ProjectStatus.DONE) return { label: 'Done', tone: 'muted' };
+  const tasks = p.tasks || [];
+  const blocked = tasks.filter((t) => t.status === TaskStatus.BLOCKED).length;
+  const total = tasks.length;
+  const overdue = new Date(p.deadline).getTime() < Date.now();
+  const daysLeft = (new Date(p.deadline).getTime() - Date.now()) / 86400000;
+  if (overdue || (total > 0 && blocked / total > 0.4)) return { label: 'Off Track', tone: 'red' };
+  if (blocked > 0 || daysLeft < 14 || (p.initialDeadline && new Date(p.deadline) > new Date(p.initialDeadline)))
+    return { label: 'At Risk', tone: 'amber' };
+  return { label: 'On Track', tone: 'green' };
+};
+
 const projectProgress = (p: Project): number => {
   if (!p.tasks?.length) return 0;
   const totalW = p.tasks.reduce((s, t) => s + (t.weight || 1), 0);
@@ -374,6 +395,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const canEdit = currentUser.role !== 'viewer';
   const canUseAI = currentUser.role === 'admin' || currentUser.role === 'manager';
 
@@ -400,8 +422,22 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         : [p, ...s.projects],
     }));
 
-  const handleCreate = () => {
+  const handleCreate = (templateId?: string) => {
+    const template = templateId ? (state.projectTemplates || []).find((t) => t.id === templateId) : null;
     const p = newProject(currentUser.id);
+    if (template) {
+      p.name = template.name + ' (copy)';
+      p.description = template.description;
+      p.tags = [...template.tags];
+      p.tasks = template.tasks.map((t) => ({
+        ...t,
+        id: generateId(),
+        assigneeId: undefined,
+        checklist: [],
+        dependencies: [],
+      }));
+      p.milestones = template.milestones.map((m) => ({ ...m, id: generateId(), done: false }));
+    }
     upsertProject(p);
     setSelectedId(p.id);
   };
@@ -437,10 +473,18 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             </Button>
           )}
           {canEdit && (
-            <Button onClick={handleCreate}>
-              <Plus className="w-4 h-4 mr-2" />
-              New
-            </Button>
+            <>
+              {(state.projectTemplates || []).length > 0 && (
+                <Button variant="outline" size="md" onClick={() => setShowTemplatePicker(true)}>
+                  <Clipboard className="w-4 h-4 mr-2" />
+                  From template
+                </Button>
+              )}
+              <Button onClick={() => handleCreate()}>
+                <Plus className="w-4 h-4 mr-2" />
+                New
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -454,6 +498,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             p.initialDeadline &&
             p.deadline &&
             new Date(p.deadline).getTime() > new Date(p.initialDeadline).getTime();
+          const rag = ragHealth(p);
           return (
             <button
               key={p.id}
@@ -463,9 +508,10 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
               <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex-1">
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <h3 className="text-lg font-black uppercase tracking-tight">{p.name}</h3>
-                  {p.isImportant && (
-                    <Star className="w-4 h-4 text-brand fill-brand shrink-0" />
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${RAG_STYLE[rag.tone]}`}>{rag.label}</span>
+                    {p.isImportant && <Star className="w-4 h-4 text-brand fill-brand" />}
+                  </div>
                 </div>
                 <p className="text-xs text-muted line-clamp-2 min-h-[2.5rem]">
                   {p.description || 'No description.'}
@@ -533,6 +579,37 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         />
       )}
 
+      {showTemplatePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatePicker(false)}>
+          <div className="bg-white dark:bg-ink-900 w-full max-w-lg border border-neutral-200 dark:border-ink-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200 dark:border-ink-700">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.14em]">Start from template</h2>
+              <button onClick={() => setShowTemplatePicker(false)} className="text-muted hover:text-red-500"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+              {(state.projectTemplates || []).map((tpl) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => { handleCreate(tpl.id); setShowTemplatePicker(false); }}
+                  className="w-full text-left border border-neutral-200 dark:border-ink-700 p-4 hover:border-brand transition-colors"
+                >
+                  <p className="text-[12px] font-bold">{tpl.name}</p>
+                  <p className="text-[10px] text-muted mt-0.5">{tpl.description}</p>
+                  <div className="flex items-center gap-3 mt-2 text-[9px] text-muted font-mono">
+                    <span>{tpl.tasks.length} tasks</span>
+                    <span>{tpl.milestones.length} milestones</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="px-5 py-3 border-t border-neutral-200 dark:border-ink-700 flex justify-between items-center">
+              <p className="text-[9px] text-muted">Templates are saved by admin from project "Save as template"</p>
+              <button onClick={() => { handleCreate(); setShowTemplatePicker(false); }} className="text-[10px] text-brand font-bold">Blank project →</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAiBot && (
         <AIProjectBot
           llmConfig={state.llmConfig}
@@ -560,7 +637,7 @@ const ProjectDetailModal: React.FC<{
   onDelete: () => void;
   onAudit: (action: string, details?: string) => void;
 }> = ({ project, state, currentUser, onClose, onSave, onDelete, onAudit }) => {
-  const [tab, setTab] = useState<'overview' | 'kanban' | 'audit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit'>('overview');
   const [draft, setDraft] = useState<Project>(project);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
@@ -649,7 +726,7 @@ const ProjectDetailModal: React.FC<{
 
           {/* Tabs */}
           <div className="flex items-center gap-1 mt-4 border-b border-neutral-200 dark:border-ink-600 -mb-5">
-            {(['overview', 'kanban', 'audit'] as const).map((t) => (
+            {(['overview', 'kanban', 'notes', 'audit'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -873,6 +950,23 @@ const ProjectDetailModal: React.FC<{
             />
           )}
 
+          {tab === 'notes' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Project Notes — scratchpad</p>
+                <span className="text-[9px] text-muted">(auto-saved with project)</span>
+              </div>
+              <textarea
+                className="w-full input-base resize-none text-[12px] leading-relaxed"
+                rows={18}
+                placeholder="Free-form notes, decisions, context, links, meeting takeaways…"
+                value={draft.notes || ''}
+                onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+                disabled={!canEdit}
+              />
+            </div>
+          )}
+
           {tab === 'audit' && (
             <div className="space-y-2">
               {[...(draft.auditLog || [])].reverse().map((e) => (
@@ -900,11 +994,28 @@ const ProjectDetailModal: React.FC<{
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex items-center justify-between gap-2">
-          <Button variant="outline" size="md" onClick={() => setShowPdf(true)}>
-            <FileDown className="w-4 h-4 mr-2" />
-            Export PDF
-          </Button>
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="md" onClick={() => setShowPdf(true)}>
+              <FileDown className="w-4 h-4 mr-2" />
+              Export PDF
+            </Button>
+            {canEdit && currentUser.role === 'admin' && (
+              <Button
+                variant="outline" size="md"
+                onClick={() => {
+                  onSave({ ...draft });
+                  onAudit('Saved as template', draft.name);
+                  // signal parent to save template
+                  window.dispatchEvent(new CustomEvent('doing_save_template', { detail: { project: draft } }));
+                }}
+                title="Save current project structure as a reusable template"
+              >
+                <Clipboard className="w-4 h-4 mr-2" />
+                Save as template
+              </Button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {canEdit && (
               <Button variant="danger" size="md" onClick={onDelete}>
