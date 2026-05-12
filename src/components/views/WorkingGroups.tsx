@@ -1250,6 +1250,41 @@ const OverviewTab: React.FC<{
           ))}
         </div>
       )}
+
+      {/* Session Timeline */}
+      {wg.meetings.length > 0 && (
+        <div className="p-4 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
+          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-4">Sessions Timeline</p>
+          <div className="relative pl-5">
+            <div className="absolute left-2 top-0 bottom-0 w-px bg-neutral-200 dark:bg-ink-700" />
+            <div className="space-y-4">
+              {[...wg.meetings].sort((a, b) => a.date.localeCompare(b.date)).map((m, i, arr) => {
+                const openCount = (m.actionItems ?? []).filter((a) => a.status !== 'done').length;
+                const doneCount = (m.actionItems ?? []).filter((a) => a.status === 'done').length;
+                const isLast = i === arr.length - 1;
+                return (
+                  <div key={m.id} className="relative flex items-start gap-3">
+                    <div className={`absolute -left-3 top-1 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-ink-900 ${isLast ? 'bg-brand' : 'bg-neutral-400 dark:bg-ink-500'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-mono text-muted">{fmtDate(m.date)}</span>
+                        <span className="text-[11px] font-bold">{m.title}</span>
+                        {isLast && <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-brand text-white">Latest</span>}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[9px] text-muted">{m.attendeeIds.length} attendees</span>
+                        {m.decisions.length > 0 && <span className="text-[9px] text-brand font-bold">{m.decisions.length} decisions</span>}
+                        {openCount > 0 && <span className="text-[9px] text-amber-600 font-bold">{openCount} open</span>}
+                        {doneCount > 0 && <span className="text-[9px] text-emerald-600">{doneCount} closed</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

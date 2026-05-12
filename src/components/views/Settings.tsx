@@ -53,7 +53,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
         <div>
           <p className="text-sm font-bold uppercase tracking-tight">Admin view</p>
           <p className="text-xs text-muted mt-1">
-            Changes here affect the entire NEXUS.AI instance and all users.
+            Changes here affect the entire DOINg.AI instance and all users.
           </p>
         </div>
       </div>
@@ -369,7 +369,7 @@ const DataSection: React.FC<DataProps> = ({ state, replaceState }) => {
           <div>
             <h3 className="text-lg font-black uppercase tracking-tight">Export backup</h3>
             <p className="text-xs text-muted mt-1">
-              Download the entire NEXUS.AI dataset as a timestamped JSON file.
+              Download the entire DOINg.AI dataset as a timestamped JSON file.
             </p>
           </div>
         </div>
@@ -404,7 +404,7 @@ const DataSection: React.FC<DataProps> = ({ state, replaceState }) => {
                   {importFile ? (
                     <span className="text-brand font-bold">{importFile.name}</span>
                   ) : (
-                    'Select a nexus-ai-backup-*.json file'
+                    'Select a doing-ai-backup-*.json file'
                   )}
                 </p>
                 <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
@@ -451,7 +451,7 @@ const DataSection: React.FC<DataProps> = ({ state, replaceState }) => {
                   </p>
                   <p className="text-xs text-muted mt-1">
                     This will purge every project, user, technology, check-in and communication
-                    currently in NEXUS.AI and replace them with the content of{' '}
+                    currently in DOINg.AI and replace them with the content of{' '}
                     <span className="font-mono text-brand">{importFile?.name}</span>.{' '}
                     There is no undo.
                   </p>

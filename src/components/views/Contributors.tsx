@@ -102,7 +102,15 @@ export const Contributors: React.FC<Props> = ({ state, currentUser, update }) =>
             <div className="flex-1 h-px bg-neutral-200 dark:bg-ink-600" />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {members.map((u) => (
+            {members.map((u) => {
+              const activeProjects = state.projects.filter(
+                (p) => !p.isArchived && p.status !== 'Done' && p.members.some((m) => m.userId === u.id)
+              ).length;
+              const wlTone = activeProjects >= 5 ? 'red' : activeProjects >= 3 ? 'amber' : 'green';
+              const wlStyle = wlTone === 'red' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                : wlTone === 'amber' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+              return (
               <button
                 key={u.id}
                 onClick={() => canEdit && setEdit(u)}
@@ -110,7 +118,7 @@ export const Contributors: React.FC<Props> = ({ state, currentUser, update }) =>
               >
                 <div className="flex items-start gap-3">
                   <div
-                    className="w-12 h-12 flex items-center justify-center text-white font-bold uppercase"
+                    className="w-12 h-12 flex items-center justify-center text-white font-bold uppercase shrink-0"
                     style={{ backgroundColor: u.avatarColor || '#FF3E00' }}
                   >
                     {u.firstName.charAt(0)}
@@ -124,7 +132,12 @@ export const Contributors: React.FC<Props> = ({ state, currentUser, update }) =>
                       {u.functionTitle}
                     </p>
                   </div>
-                  <Badge tone="muted">{u.role}</Badge>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <Badge tone="muted">{u.role}</Badge>
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${wlStyle}`} title="Active projects">
+                      {activeProjects} proj
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-3 space-y-1.5 text-xs text-muted">
                   <p className="flex items-center gap-2">
@@ -148,7 +161,8 @@ export const Contributors: React.FC<Props> = ({ state, currentUser, update }) =>
                   </p>
                 )}
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       ))}

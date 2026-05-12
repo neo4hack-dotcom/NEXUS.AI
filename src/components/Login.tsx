@@ -46,7 +46,7 @@ export const Login: React.FC<Props> = ({ users, onLogin, theme, toggleTheme }) =
             <Shield className="w-7 h-7" />
           </div>
           <h1 className="display-lg">
-            NEXUS<span className="text-brand">.AI</span>
+            DOINg<span className="text-brand">.AI</span>
           </h1>
           <p className="text-[10px] uppercase tracking-[0.2em] text-muted mt-3 font-mono">
             AI Project Operations Platform

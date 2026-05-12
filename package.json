@@ -1,9 +1,9 @@
 {
-  "name": "nexus-ai",
+  "name": "doing-ai",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "NEXUS.AI — AI Project Operations Platform",
+  "description": "DOINg.AI — AI Project Operations Platform",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

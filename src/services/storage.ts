@@ -16,6 +16,7 @@ import {
   AppNotification,
   Hackathon,
   WorkingGroup,
+  ProjectTemplate,
   Theme,
 } from '../types';
 
@@ -39,7 +40,7 @@ const DEFAULT_LLM_CONFIG: LlmConfig = {
   apiKey: '',
   model: 'llama3',
   systemPrompt:
-    'You are NEXUS.AI, an expert AI Operations assistant for AI project portfolios. ' +
+    'You are DOINg.AI, an expert AI Operations assistant for AI project portfolios. ' +
     'You produce concise, professional, executive-grade summaries in English.',
 };
 
@@ -61,7 +62,7 @@ export const getDefaultState = (): AppState => {
     password: 'MM@2026',
     firstName: 'Admin',
     lastName: '',
-    email: 'admin@nexus.ai',
+    email: 'admin@doing.ai',
     team: '',
     functionTitle: 'Administrator',
     role: 'admin',
@@ -82,6 +83,7 @@ export const getDefaultState = (): AppState => {
     notifications: [],
     hackathons: [],
     workingGroups: [],
+    projectTemplates: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -114,6 +116,7 @@ export const sanitizeAppState = (data: any): AppState => {
       messages: arr(h.messages),
       tags: arr(h.tags),
     })),
+    projectTemplates: arr<ProjectTemplate>(data.projectTemplates),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,
       members: arr(wg.members),
@@ -170,7 +173,7 @@ export const loadState = (): AppState => {
   try {
     const storedVersion = localStorage.getItem(VERSION_KEY);
     if (storedVersion !== CURRENT_APP_VERSION) {
-      console.warn(`[NEXUS] Version mismatch (was=${storedVersion}, now=${CURRENT_APP_VERSION}). Purging local cache.`);
+      console.warn(`[DOINg] Version mismatch (was=${storedVersion}, now=${CURRENT_APP_VERSION}). Purging local cache.`);
       localStorage.clear();
       localStorage.setItem(VERSION_KEY, CURRENT_APP_VERSION);
       return getDefaultState();
@@ -178,7 +181,7 @@ export const loadState = (): AppState => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return sanitizeAppState(JSON.parse(raw));
   } catch (e) {
-    console.error('[NEXUS] Local load failed', e);
+    console.error('[DOINg] Local load failed', e);
     localStorage.clear();
     localStorage.setItem(VERSION_KEY, CURRENT_APP_VERSION);
   }
@@ -245,7 +248,7 @@ export const saveState = (state: AppState): void => {
             );
           }
         } catch (err) {
-          console.warn('[NEXUS] Server save failed', err);
+          console.warn('[DOINg] Server save failed', err);
         }
       });
     }, 400);
@@ -253,7 +256,7 @@ export const saveState = (state: AppState): void => {
     // tab and trigger the subscribeToStoreUpdates callback, causing a save loop that
     // produces rapid-fire 409s. Real cross-tab sync is handled natively by the browser.
   } catch (e: any) {
-    console.error('[NEXUS] Save error', e);
+    console.error('[DOINg] Save error', e);
     if (e.name === 'QuotaExceededError') {
       alert('Local storage full. Export your data and reset to recover.');
     }
@@ -307,7 +310,7 @@ export const exportBackup = (state: AppState): void => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `nexus-ai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `doing-ai-backup-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

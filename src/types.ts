@@ -89,11 +89,22 @@ export interface Milestone {
   done: boolean;
 }
 
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  tasks: Omit<Task, 'id' | 'assigneeId'>[];
+  milestones: Omit<Milestone, 'id'>[];
+  tags: string[];
+  createdAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   description: string;
   context?: string;
+  notes?: string;
   status: ProjectStatus;
   managerId?: string;              // user id of owner/PM
   startDate: string;
@@ -276,6 +287,7 @@ export interface Hackathon {
 export interface AppState {
   users: User[];
   projects: Project[];
+  projectTemplates: ProjectTemplate[];
   technologies: Technology[];
   repositories: Repository[];
   communications: Communication[];

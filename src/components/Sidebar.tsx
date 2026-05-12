@@ -97,7 +97,7 @@ export const Sidebar: React.FC<Props> = ({
     <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col border-r border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
       <div className="px-6 pt-8 pb-6 border-b border-neutral-200 dark:border-ink-700">
         <h1 className="display-lg mb-3">
-          NEXUS<span className="text-brand">.AI</span>
+          DOINg<span className="text-brand">.AI</span>
         </h1>
         {/* Server sync indicator — DOINg-style live badge */}
         <div className="flex items-center gap-2">

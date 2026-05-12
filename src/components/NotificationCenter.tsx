@@ -42,13 +42,13 @@ export const NotificationCenter: React.FC<Props> = ({
           <div>
             <h2 className="text-lg font-black uppercase tracking-tight">Notifications</h2>
             <p className="text-[10px] text-muted uppercase tracking-[0.16em]">
-              {notifications.length} active
+              {notifications.length} alert{notifications.length !== 1 ? 's' : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
             {notifications.length > 0 && (
               <Button variant="outline" size="sm" onClick={onMarkAllRead}>
-                Clear all
+                Mark all read
               </Button>
             )}
             <button
