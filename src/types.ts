@@ -39,6 +39,7 @@ export interface User {
   lastName: string;
   email: string;
   team: string;
+  squadTeam?: string;
   functionTitle: string;           // job title / role on org
   role: Role;                      // app-level role
   expectations?: string;
@@ -92,6 +93,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  context?: string;
   status: ProjectStatus;
   managerId?: string;              // user id of owner/PM
   startDate: string;
@@ -135,6 +137,7 @@ export interface Technology {
   url?: string;
   license?: string;
   internalOwner?: string;
+  technicalArchitect?: string;
   tags: string[];
   createdAt: string;
 }
