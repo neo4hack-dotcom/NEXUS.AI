@@ -189,6 +189,11 @@ const Editor: React.FC<{
   onDelete: () => void;
 }> = ({ t, onClose, onSave, onDelete }) => {
   const [d, setD] = useState<Technology>(t);
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="surface border w-full max-w-xl animate-slide-up">

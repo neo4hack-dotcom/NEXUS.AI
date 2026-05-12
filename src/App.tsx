@@ -5,6 +5,8 @@ import {
   saveState,
   fetchFromServer,
   subscribeToStoreUpdates,
+  startPolling,
+  stopPolling,
   generateId,
   getFilteredState,
 } from './services/storage';
@@ -157,8 +159,22 @@ const App: React.FC = () => {
     };
     window.addEventListener('nexus_conflict', onConflict);
 
+    // Real-time collaboration: poll server for remote changes every 5 s
+    startPolling(async () => {
+      const serverState = await fetchFromServer();
+      if (serverState) {
+        setAppState((curr) =>
+          curr
+            ? { ...serverState, currentUserId: curr.currentUserId, theme: curr.theme }
+            : curr
+        );
+        setIsOnline(true);
+      }
+    });
+
     return () => {
       unsub();
+      stopPolling();
       window.removeEventListener('nexus_conflict', onConflict);
     };
   }, []);
@@ -221,7 +237,7 @@ const App: React.FC = () => {
     );
   }
 
-  const renderView = () => {
+  const renderView = useMemo(() => () => {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard state={filteredState} currentUser={currentUser} setActiveTab={setActiveTab} onOpenAi={() => setAiInsightOpen(true)} />;
@@ -250,7 +266,7 @@ const App: React.FC = () => {
       default:
         return null;
     }
-  };
+  }, [activeTab, filteredState, appState, currentUser, update, setActiveTab]);
 
   return (
     <div className="min-h-screen flex bg-neutral-50 dark:bg-ink-950 transition-colors">

@@ -149,6 +149,12 @@ async def save_data(
     return JSONResponse({"ok": True, "timestamp": new_data["lastUpdated"]})
 
 
+@app.get("/api/version")
+async def get_version() -> Dict[str, Any]:
+    data = _read_db()
+    return {"lastUpdated": data.get("lastUpdated", 0)}
+
+
 @app.get("/api/config/db-path")
 async def get_db_path_endpoint() -> Dict[str, Any]:
     return {"path": str(DB_FILE)}

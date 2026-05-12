@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Sparkles, Loader2, Copy, Check, FileDown } from 'lucide-react';
+import { MarkdownView } from './ui/MarkdownView';
 import { AppState } from '../types';
 import { Button } from './ui/Button';
 import {
@@ -21,6 +22,13 @@ export const AiInsightModal: React.FC<Props> = ({ open, onClose, state }) => {
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -113,9 +121,9 @@ export const AiInsightModal: React.FC<Props> = ({ open, onClose, state }) => {
           )}
 
           {result && (
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed surface-flat border p-5">
-              {result}
-            </pre>
+            <div className="surface-flat border p-5">
+              <MarkdownView content={result} />
+            </div>
           )}
         </div>
 

@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { DEFAULT_PROMPTS, fillTemplate, runPrompt, buildPortfolioSummaryData } from '../../services/llmService';
 import { exportPDF } from '../../services/exports';
+import { MarkdownView } from '../ui/MarkdownView';
 
 interface Props {
   state: AppState;
@@ -186,9 +187,7 @@ export const RiskHeatmap: React.FC<Props> = ({ state }) => {
       {aiOutput && (
         <div className="surface-flat border p-5">
           <p className="label-xs mb-2">AI Assessment</p>
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-            {aiOutput}
-          </pre>
+          <MarkdownView content={aiOutput} />
         </div>
       )}
     </div>

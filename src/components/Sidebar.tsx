@@ -17,7 +17,7 @@ import {
   Sparkles,
   CircleDot,
 } from 'lucide-react';
-import { User, Theme } from '../types';
+import { User, Theme, Role } from '../types';
 
 export type TabId =
   | 'dashboard'
@@ -44,21 +44,25 @@ interface Props {
   isOnline: boolean;
 }
 
+type MinRole = Role;
+
 interface NavItem {
   id: TabId;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  adminOnly?: boolean;
+  minRole?: MinRole;
 }
+
+const ROLE_LEVEL: Record<Role, number> = { viewer: 0, contributor: 1, manager: 2, admin: 3 };
 
 const NAV: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'projects', label: 'Projects', icon: Target },
   { id: 'timeline', label: 'Timeline', icon: Calendar },
-  { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle },
-  { id: 'contributors', label: 'Contributors', icon: Users },
-  { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList },
-  { id: 'communications', label: 'Communications', icon: Mail },
+  { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'contributor' },
+  { id: 'contributors', label: 'Contributors', icon: Users, minRole: 'manager' },
+  { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList, minRole: 'contributor' },
+  { id: 'communications', label: 'Communications', icon: Mail, minRole: 'contributor' },
   { id: 'tech', label: 'Technologies', icon: Cpu },
   { id: 'repos', label: 'Code Repositories', icon: GitBranch },
 ];
@@ -76,6 +80,11 @@ export const Sidebar: React.FC<Props> = ({
   isOnline,
 }) => {
   const isAdmin = currentUser?.role === 'admin';
+  const userLevel = ROLE_LEVEL[currentUser?.role ?? 'viewer'];
+  const visibleNav = NAV.filter(
+    (item) => !item.minRole || userLevel >= ROLE_LEVEL[item.minRole]
+  );
+
   return (
     <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col border-r border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
       <div className="px-6 pt-8 pb-6 border-b border-neutral-200 dark:border-ink-700">
@@ -94,7 +103,7 @@ export const Sidebar: React.FC<Props> = ({
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-        {NAV.map((item) => {
+        {visibleNav.map((item) => {
           const Icon = item.icon;
           const active = activeTab === item.id;
           return (

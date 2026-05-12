@@ -27,6 +27,9 @@ const API_URL = '/api/data';
 let _serverVersion = 0;
 // Serialises server POSTs so rapid mutations never race each other.
 let _saveQueue: Promise<void> = Promise.resolve();
+// Debounces the server POST: localStorage updates are instant, network only after idle.
+let _postTimer: ReturnType<typeof setTimeout> | null = null;
+let _pendingPayload: Record<string, unknown> | null = null;
 
 const DEFAULT_LLM_CONFIG: LlmConfig = {
   provider: 'ollama',
@@ -179,35 +182,43 @@ export const saveState = (state: AppState): void => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stamped));
     localStorage.setItem(VERSION_KEY, CURRENT_APP_VERSION);
 
-    // 2. Server: serialise POSTs to prevent rapid-click 409s.
-    //    Read _serverVersion INSIDE the chained .then so it reflects
-    //    the version confirmed by the previous save, not the one at
-    //    the time this save was queued.
+    // 2. Server POST: debounced (400 ms idle) + serialised.
+    //    localStorage is always written immediately above; the network call waits.
+    //    Reading _serverVersion INSIDE the chained .then ensures we use the version
+    //    confirmed by the previous save, not the queued-time snapshot.
     const { currentUserId, theme, ...serverPayload } = stamped;
-    _saveQueue = _saveQueue.then(async () => {
-      const baseVersion = _serverVersion;
-      try {
-        const response = await fetch(API_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Base-Version': String(baseVersion),
-          },
-          body: JSON.stringify(serverPayload),
-        });
-        if (response.ok) {
-          const result = await response.json();
-          _serverVersion = result.timestamp ?? timestamp;
-        } else if (response.status === 409) {
-          const conflictData = await response.json();
-          window.dispatchEvent(
-            new CustomEvent('nexus_conflict', { detail: { serverData: conflictData.serverData } })
-          );
+    _pendingPayload = serverPayload as Record<string, unknown>;
+
+    if (_postTimer) clearTimeout(_postTimer);
+    _postTimer = setTimeout(() => {
+      const payload = _pendingPayload;
+      _pendingPayload = null;
+      _saveQueue = _saveQueue.then(async () => {
+        if (!payload) return;
+        const baseVersion = _serverVersion;
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Base-Version': String(baseVersion),
+            },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok) {
+            const result = await response.json();
+            _serverVersion = result.timestamp ?? timestamp;
+          } else if (response.status === 409) {
+            const conflictData = await response.json();
+            window.dispatchEvent(
+              new CustomEvent('nexus_conflict', { detail: { serverData: conflictData.serverData } })
+            );
+          }
+        } catch (err) {
+          console.warn('[NEXUS] Server save failed', err);
         }
-      } catch (err) {
-        console.warn('[NEXUS] Server save failed', err);
-      }
-    });
+      });
+    }, 400);
     // NOTE: do NOT dispatch a synthetic StorageEvent here — it would fire in the same
     // tab and trigger the subscribeToStoreUpdates callback, causing a save loop that
     // produces rapid-fire 409s. Real cross-tab sync is handled natively by the browser.
@@ -216,6 +227,31 @@ export const saveState = (state: AppState): void => {
     if (e.name === 'QuotaExceededError') {
       alert('Local storage full. Export your data and reset to recover.');
     }
+  }
+};
+
+let _pollTimer: ReturnType<typeof setInterval> | null = null;
+
+export const startPolling = (onNewVersion: () => void, intervalMs = 5000): void => {
+  if (_pollTimer) return;
+  _pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/api/version');
+      if (!res.ok) return;
+      const { lastUpdated } = await res.json();
+      if (lastUpdated > _serverVersion) {
+        onNewVersion();
+      }
+    } catch {
+      // ignore network errors silently
+    }
+  }, intervalMs);
+};
+
+export const stopPolling = (): void => {
+  if (_pollTimer) {
+    clearInterval(_pollTimer);
+    _pollTimer = null;
   }
 };
 
@@ -231,6 +267,42 @@ export const clearState = () => {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.setItem(VERSION_KEY, CURRENT_APP_VERSION);
   window.location.reload();
+};
+
+/* ===== Backup helpers ===== */
+
+export const exportBackup = (state: AppState): void => {
+  const { currentUserId, theme, ...payload } = state;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nexus-ai-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+export const importBackup = (
+  file: File,
+  onDone: (state: AppState) => void,
+  onError: (msg: string) => void
+): void => {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const raw = JSON.parse(e.target?.result as string);
+      const imported = sanitizeAppState(raw);
+      // Force-write to server without version check so we can overwrite
+      _serverVersion = 0;
+      onDone(imported);
+    } catch {
+      onError('Invalid backup file — could not parse JSON.');
+    }
+  };
+  reader.onerror = () => onError('Failed to read file.');
+  reader.readAsText(file);
 };
 
 /* ===== Permission helper ===== */

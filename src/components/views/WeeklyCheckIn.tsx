@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { ClipboardList, Sparkles, Loader2, Save, Smile, AlertCircle, AlertTriangle, FileDown } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ClipboardList, Sparkles, Loader2, Save, Smile, AlertCircle, AlertTriangle, FileDown, ChevronLeft, ChevronRight, History } from 'lucide-react';
+import { MarkdownView } from '../ui/MarkdownView';
 import { AppState, User, WeeklyCheckIn as CheckIn } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -27,25 +28,56 @@ const mondayOf = (d = new Date()): string => {
   return monday.toISOString().slice(0, 10);
 };
 
+const newDraftFor = (userId: string, week: string): CheckIn => ({
+  id: generateId(),
+  userId,
+  weekOf: week,
+  accomplishments: '',
+  blockers: '',
+  nextSteps: '',
+  mood: 'green',
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
+
+const formatWeek = (weekOf: string): string => {
+  const d = new Date(weekOf + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) => {
-  const weekOf = mondayOf();
-  const existing = state.weeklyCheckIns.find(
-    (c) => c.userId === currentUser.id && c.weekOf === weekOf
+  const currentWeek = mondayOf();
+
+  // Build list of all weeks that have any check-in, plus current week
+  const allWeeks = useMemo(() => {
+    const weeks = new Set<string>([currentWeek]);
+    state.weeklyCheckIns.forEach((c) => weeks.add(c.weekOf));
+    return Array.from(weeks).sort((a, b) => b.localeCompare(a)); // newest first
+  }, [state.weeklyCheckIns, currentWeek]);
+
+  const [selectedWeek, setSelectedWeek] = useState(currentWeek);
+
+  const checkInForSelected = useMemo(
+    () =>
+      state.weeklyCheckIns.find(
+        (c) => c.userId === currentUser.id && c.weekOf === selectedWeek
+      ),
+    [state.weeklyCheckIns, currentUser.id, selectedWeek]
   );
 
   const [draft, setDraft] = useState<CheckIn>(
-    existing || {
-      id: generateId(),
-      userId: currentUser.id,
-      weekOf,
-      accomplishments: '',
-      blockers: '',
-      nextSteps: '',
-      mood: 'green',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+    () => checkInForSelected ?? newDraftFor(currentUser.id, currentWeek)
   );
+
+  // Reset draft whenever the selected week changes
+  useEffect(() => {
+    const existing = state.weeklyCheckIns.find(
+      (c) => c.userId === currentUser.id && c.weekOf === selectedWeek
+    );
+    setDraft(existing ?? newDraftFor(currentUser.id, selectedWeek));
+    setAiOutput('');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWeek]);
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
@@ -63,9 +95,9 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
   const teamCheckIns = useMemo(
     () =>
       state.weeklyCheckIns
-        .filter((c) => c.weekOf === weekOf)
+        .filter((c) => c.weekOf === selectedWeek)
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [state.weeklyCheckIns, weekOf]
+    [state.weeklyCheckIns, selectedWeek]
   );
 
   const consolidate = async () => {
@@ -84,7 +116,7 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
   };
 
   const toPDF = () => {
-    exportPDF(`Weekly Consolidation — Week of ${weekOf}`, [
+    exportPDF(`Weekly Consolidation — Week of ${selectedWeek}`, [
       {
         heading: 'Submissions',
         body: buildWeeklyCheckInData(teamCheckIns, state.users)
@@ -96,6 +128,9 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
     ]);
   };
 
+  const isCurrentWeek = selectedWeek === currentWeek;
+  const weekIdx = allWeeks.indexOf(selectedWeek);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -103,8 +138,8 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
           <p className="label-xs">Status</p>
           <h1 className="display-xl">Weekly Check-in</h1>
           <p className="text-sm text-muted mt-2">
-            Week of <span className="font-mono text-brand">{weekOf}</span>. Share your status to keep the
-            team aligned.
+            Week of <span className="font-mono text-brand">{selectedWeek}</span>.{' '}
+            {isCurrentWeek ? 'Share your status to keep the team aligned.' : 'Viewing historical entry.'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -123,15 +158,83 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        {/* Week selector */}
+        <div className="surface border">
+          <div className="p-4 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-2">
+            <History className="w-4 h-4 text-brand" />
+            <h3 className="text-sm font-black uppercase tracking-tight">History</h3>
+          </div>
+          <div className="divide-y divide-neutral-200 dark:divide-ink-600 max-h-[480px] overflow-y-auto">
+            {allWeeks.map((week) => {
+              const hasMyEntry = state.weeklyCheckIns.some(
+                (c) => c.userId === currentUser.id && c.weekOf === week
+              );
+              const teamCount = state.weeklyCheckIns.filter((c) => c.weekOf === week).length;
+              const isSelected = week === selectedWeek;
+              return (
+                <button
+                  key={week}
+                  onClick={() => setSelectedWeek(week)}
+                  className={`w-full text-left p-3 transition-colors ${
+                    isSelected
+                      ? 'bg-brand text-white'
+                      : 'hover:bg-neutral-50 dark:hover:bg-ink-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-[0.12em]">
+                      {formatWeek(week)}
+                    </span>
+                    {week === currentWeek && (
+                      <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 ${isSelected ? 'bg-white/20 text-white' : 'bg-brand/10 text-brand'}`}>
+                        Now
+                      </span>
+                    )}
+                  </div>
+                  <div className={`flex items-center gap-2 text-[9px] uppercase tracking-[0.1em] ${isSelected ? 'text-white/70' : 'text-muted'}`}>
+                    <span>{teamCount} submission{teamCount !== 1 ? 's' : ''}</span>
+                    {hasMyEntry && <span>• mine ✓</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {allWeeks.length > 1 && (
+            <div className="p-2 border-t border-neutral-200 dark:border-ink-600 flex gap-1">
+              <button
+                onClick={() => weekIdx > 0 && setSelectedWeek(allWeeks[weekIdx - 1])}
+                disabled={weekIdx === 0}
+                className="flex-1 h-8 flex items-center justify-center border border-neutral-300 dark:border-ink-500 disabled:opacity-30 hover:border-brand hover:text-brand transition-colors"
+              >
+                <ChevronLeft className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => weekIdx < allWeeks.length - 1 && setSelectedWeek(allWeeks[weekIdx + 1])}
+                disabled={weekIdx === allWeeks.length - 1}
+                className="flex-1 h-8 flex items-center justify-center border border-neutral-300 dark:border-ink-500 disabled:opacity-30 hover:border-brand hover:text-brand transition-colors"
+              >
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* My check-in form */}
         <div className="lg:col-span-2 surface border">
           <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <ClipboardList className="w-5 h-5 text-brand" />
-              <h2 className="text-lg font-black uppercase tracking-tight">
-                My status — {currentUser.firstName}
-              </h2>
+              <div>
+                <h2 className="text-lg font-black uppercase tracking-tight">
+                  My status — {currentUser.firstName}
+                </h2>
+                {!isCurrentWeek && (
+                  <p className="text-[9px] uppercase tracking-[0.14em] text-amber-500 font-bold mt-0.5">
+                    Editing past week
+                  </p>
+                )}
+              </div>
             </div>
             <MoodSelector value={draft.mood} onChange={(m) => setDraft({ ...draft, mood: m })} />
           </div>
@@ -166,7 +269,7 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
           </div>
         </div>
 
-        {/* Team check-ins */}
+        {/* Team check-ins for selected week */}
         <div className="surface border">
           <div className="p-4 border-b border-neutral-200 dark:border-ink-600">
             <p className="label-xs">Team</p>
@@ -201,8 +304,8 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
 
       {aiOutput && (
         <div className="surface-flat border p-5">
-          <p className="label-xs mb-2">AI Consolidation</p>
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{aiOutput}</pre>
+          <p className="label-xs mb-2">AI Consolidation — Week of {selectedWeek}</p>
+          <MarkdownView content={aiOutput} />
         </div>
       )}
     </div>
