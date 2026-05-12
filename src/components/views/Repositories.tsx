@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GitBranch, ExternalLink, Plus, Trash2, X, Search } from 'lucide-react';
+import { GitBranch, ExternalLink, Plus, Trash2, X, Search, Download, Loader2, Check } from 'lucide-react';
 import { AppState, Repository, RepoProvider, User } from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
@@ -42,7 +42,9 @@ const newRepo = (): Repository => ({
 export const Repositories: React.FC<Props> = ({ state, currentUser, update }) => {
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<Repository | null>(null);
+  const [showBitbucketImport, setShowBitbucketImport] = useState(false);
   const canEdit = currentUser.role !== 'viewer';
+  const canAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   const filtered = state.repositories.filter(
     (r) =>
@@ -78,6 +80,12 @@ export const Repositories: React.FC<Props> = ({ state, currentUser, update }) =>
               className="pl-9"
             />
           </div>
+          {canAdmin && (
+            <Button variant="outline" onClick={() => setShowBitbucketImport(true)}>
+              <Download className="w-4 h-4 mr-2" />
+              Import Bitbucket
+            </Button>
+          )}
           {canEdit && (
             <Button
               onClick={() => {
@@ -159,6 +167,16 @@ export const Repositories: React.FC<Props> = ({ state, currentUser, update }) =>
           onDelete={() => {
             update((s) => ({ ...s, repositories: s.repositories.filter((x) => x.id !== edit.id) }));
             setEdit(null);
+          }}
+        />
+      )}
+      {showBitbucketImport && (
+        <BitbucketImportModal
+          existingUrls={state.repositories.map((r) => r.url)}
+          onClose={() => setShowBitbucketImport(false)}
+          onImport={(repos) => {
+            update((s) => ({ ...s, repositories: [...s.repositories, ...repos] }));
+            setShowBitbucketImport(false);
           }}
         />
       )}
@@ -273,6 +291,284 @@ const RepoEditor: React.FC<{
               Cancel
             </Button>
             <Button onClick={() => onSave(d)}>Save</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ===== Bitbucket Import Modal ===== */
+
+interface BitbucketRepoPreview {
+  name: string;
+  url: string;
+  description: string;
+  language?: string;
+  visibility: 'public' | 'private' | 'internal';
+  alreadyExists: boolean;
+  selected: boolean;
+}
+
+const BitbucketImportModal: React.FC<{
+  existingUrls: string[];
+  onClose: () => void;
+  onImport: (repos: Repository[]) => void;
+}> = ({ existingUrls, onClose, onImport }) => {
+  const [mode, setMode] = useState<'cloud' | 'server'>('server');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [workspace, setWorkspace] = useState('');
+  const [projectKey, setProjectKey] = useState('');
+  const [username, setUsername] = useState('');
+  const [token, setToken] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [previews, setPreviews] = useState<BitbucketRepoPreview[]>([]);
+  const [fetched, setFetched] = useState(false);
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const toggleAll = () => {
+    const available = previews.filter((p) => !p.alreadyExists);
+    const allSelected = available.every((p) => p.selected);
+    setPreviews(previews.map((p) => p.alreadyExists ? p : { ...p, selected: !allSelected }));
+  };
+
+  const fetchRepos = async () => {
+    setLoading(true);
+    setError('');
+    setPreviews([]);
+    setFetched(false);
+    try {
+      const headers: Record<string, string> = {};
+      if (username && token) {
+        headers['Authorization'] = `Basic ${btoa(`${username}:${token}`)}`;
+      } else if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      let repos: BitbucketRepoPreview[] = [];
+
+      if (mode === 'cloud') {
+        // Bitbucket Cloud: GET /2.0/repositories/{workspace}
+        const ws = workspace || username;
+        const url = `https://api.bitbucket.org/2.0/repositories/${ws}?pagelen=100&sort=-updated_on`;
+        const res = await fetch(url, { headers });
+        if (!res.ok) throw new Error(`Bitbucket API error: HTTP ${res.status}`);
+        const data = await res.json();
+        const values = data.values || [];
+        repos = values.map((r: any) => ({
+          name: r.slug || r.name,
+          url: r.links?.html?.href || `https://bitbucket.org/${ws}/${r.slug}`,
+          description: r.description || '',
+          language: r.language || undefined,
+          visibility: r.is_private ? 'private' : 'public',
+          alreadyExists: false,
+          selected: true,
+        }));
+      } else {
+        // Bitbucket Server / Data Center
+        const base = baseUrl.replace(/\/$/, '');
+        const url = projectKey
+          ? `${base}/rest/api/1.0/projects/${projectKey}/repos?limit=100`
+          : `${base}/rest/api/1.0/repos?limit=100`;
+        const res = await fetch(url, { headers });
+        if (!res.ok) throw new Error(`Bitbucket Server error: HTTP ${res.status}`);
+        const data = await res.json();
+        const values = data.values || [];
+        repos = values.map((r: any) => {
+          const cloneLinks: any[] = r.links?.clone || [];
+          const httpClone = cloneLinks.find((l: any) => l.name === 'http')?.href;
+          const browseHref = r.links?.self?.[0]?.href || httpClone || `${base}/projects/${r.project?.key}/repos/${r.slug}`;
+          return {
+            name: r.slug || r.name,
+            url: browseHref,
+            description: r.description || '',
+            language: undefined,
+            visibility: r.public ? 'public' : 'private',
+            alreadyExists: false,
+            selected: true,
+          };
+        });
+      }
+
+      const withExists = repos.map((r) => ({
+        ...r,
+        alreadyExists: existingUrls.some((u) => u === r.url || u.includes(r.name)),
+        selected: !existingUrls.some((u) => u === r.url || u.includes(r.name)),
+      }));
+      setPreviews(withExists);
+      setFetched(true);
+    } catch (e: any) {
+      setError(e.message || 'Failed to fetch repositories.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doImport = () => {
+    const toImport: Repository[] = previews
+      .filter((p) => p.selected && !p.alreadyExists)
+      .map((p) => ({
+        id: generateId(),
+        name: p.name,
+        provider: mode === 'cloud' ? 'bitbucket' : 'bitbucket',
+        url: p.url,
+        description: p.description,
+        language: p.language,
+        visibility: p.visibility,
+        projectIds: [],
+        createdAt: new Date().toISOString(),
+      }));
+    onImport(toImport);
+  };
+
+  const selectedCount = previews.filter((p) => p.selected && !p.alreadyExists).length;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-2xl max-h-[92vh] flex flex-col animate-slide-up">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-black uppercase tracking-tight">Import from Bitbucket</h2>
+            <p className="text-xs text-muted mt-0.5">Fetch repositories automatically from your Bitbucket instance</p>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Mode toggle */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant={mode === 'server' ? 'primary' : 'outline'} onClick={() => setMode('server')}>
+              Bitbucket Server / DC
+            </Button>
+            <Button variant={mode === 'cloud' ? 'primary' : 'outline'} onClick={() => setMode('cloud')}>
+              Bitbucket Cloud
+            </Button>
+          </div>
+
+          {mode === 'server' && (
+            <>
+              <div className="space-y-1.5">
+                <label className="label-xs">Base URL</label>
+                <Input
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="https://bitbucket.company.com"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="label-xs">Project Key (optional — leave empty for all)</label>
+                <Input
+                  value={projectKey}
+                  onChange={(e) => setProjectKey(e.target.value)}
+                  placeholder="PROJ"
+                />
+              </div>
+            </>
+          )}
+
+          {mode === 'cloud' && (
+            <div className="space-y-1.5">
+              <label className="label-xs">Workspace</label>
+              <Input
+                value={workspace}
+                onChange={(e) => setWorkspace(e.target.value)}
+                placeholder="my-workspace-slug"
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="label-xs">{mode === 'cloud' ? 'Username' : 'Username (optional)'}</label>
+              <Input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="username"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">{mode === 'cloud' ? 'App Password' : 'Personal Access Token'}</label>
+              <Input
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="••••••••"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-500 surface-flat border border-red-300 p-3">{error}</p>
+          )}
+
+          <Button className="w-full" onClick={fetchRepos} disabled={loading}>
+            {loading
+              ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Fetching…</>
+              : <><GitBranch className="w-4 h-4 mr-2" />Fetch Repositories</>
+            }
+          </Button>
+
+          {fetched && previews.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="label-xs">{previews.length} repositories found</p>
+                <button
+                  onClick={toggleAll}
+                  className="text-[9px] font-bold uppercase tracking-[0.12em] text-brand hover:underline"
+                >
+                  Toggle all
+                </button>
+              </div>
+              <div className="surface-flat border divide-y divide-neutral-200 dark:divide-ink-600 max-h-64 overflow-y-auto">
+                {previews.map((p, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-3 p-3 text-xs ${p.alreadyExists ? 'opacity-50' : 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-ink-700'}`}
+                    onClick={p.alreadyExists ? undefined : () =>
+                      setPreviews(previews.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))
+                    }
+                  >
+                    <div className={`w-4 h-4 border-2 flex items-center justify-center shrink-0 ${p.selected && !p.alreadyExists ? 'bg-brand border-brand' : 'border-neutral-300 dark:border-ink-500'}`}>
+                      {(p.selected && !p.alreadyExists) && <Check className="w-2.5 h-2.5 text-white" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold uppercase tracking-tight truncate">{p.name}</p>
+                      <p className="text-muted truncate">{p.description || p.url}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {p.language && <Badge tone="brand">{p.language}</Badge>}
+                      <Badge tone={p.visibility === 'public' ? 'green' : 'muted'}>{p.visibility}</Badge>
+                      {p.alreadyExists && <Badge tone="muted">already in NEXUS</Badge>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {fetched && previews.length === 0 && (
+            <p className="text-center text-sm text-muted py-6">No repositories found.</p>
+          )}
+        </div>
+
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-between items-center">
+          <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">
+            {selectedCount > 0 ? `${selectedCount} repo${selectedCount > 1 ? 's' : ''} to import` : 'None selected'}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={doImport} disabled={selectedCount === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Import {selectedCount > 0 ? `(${selectedCount})` : ''}
+            </Button>
           </div>
         </div>
       </div>

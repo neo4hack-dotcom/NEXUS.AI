@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Zap, Plus, ArrowLeft, Users, FileText, MessageSquare, Trophy, Eye,
   Trash2, X, Save, Sparkles, Loader2, Send, BookOpen, Presentation,
-  Award, File, Tag, MapPin, Calendar, Edit3, Check,
+  Award, File, Tag, MapPin, Calendar, Edit3, Check, FileDown,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
@@ -14,6 +14,7 @@ import { Badge } from '../ui/Badge';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
 import { DEFAULT_PROMPTS, fillTemplate, runPrompt } from '../../services/llmService';
+import { exportHackathonCandidatePDF } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -345,26 +346,32 @@ const HackathonDetail: React.FC<{
           <ArrowLeft className="w-4 h-4" />
           All sessions
         </button>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-              <Edit3 className="w-3 h-3 mr-1" />
-              Edit
-            </Button>
-            {confirmDelete ? (
-              <>
-                <span className="text-[10px] text-red-500 uppercase tracking-[0.1em]">Confirm?</span>
-                <Button size="sm" variant="danger" onClick={onDelete}>Yes, delete</Button>
-                <Button size="sm" variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-              </>
-            ) : (
-              <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
-                <Trash2 className="w-3 h-3 mr-1" />
-                Delete
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => exportHackathonCandidatePDF(hackathon, state)}>
+            <FileDown className="w-3 h-3 mr-1" />
+            Candidate Kit PDF
+          </Button>
+          {canManage && (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                <Edit3 className="w-3 h-3 mr-1" />
+                Edit
               </Button>
-            )}
-          </div>
-        )}
+              {confirmDelete ? (
+                <>
+                  <span className="text-[10px] text-red-500 uppercase tracking-[0.1em]">Confirm?</span>
+                  <Button size="sm" variant="danger" onClick={onDelete}>Yes, delete</Button>
+                  <Button size="sm" variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+                </>
+              ) : (
+                <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
+                  <Trash2 className="w-3 h-3 mr-1" />
+                  Delete
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Hero header */}

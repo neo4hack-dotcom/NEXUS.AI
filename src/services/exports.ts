@@ -2,7 +2,7 @@
 /* PDF: opens a self-contained print window styled for paper.
    EML: builds an RFC-822 .eml file the user can double-click to open in Outlook. */
 
-import { AppState } from '../types';
+import { AppState, Hackathon } from '../types';
 
 export const exportEML = (subject: string, body: string, recipients: string[]): void => {
   const safeSubj = (subject || 'NEXUS.AI Update').replace(/[\r\n]+/g, ' ').trim();
@@ -550,12 +550,212 @@ const buildExcoPDF = (title: string, content: string, state: AppState): void => 
 };
 
 export const exportCommunicationPDF = (
-  type: 'weekly' | 'newsletter' | 'exco',
+  type: 'weekly' | 'newsletter' | 'exco' | 'info',
   title: string,
   content: string,
   state: AppState
 ): void => {
   if (type === 'weekly') buildWeeklyPDF(title, content, state);
   else if (type === 'newsletter') buildNewsletterPDF(title, content, state);
-  else buildExcoPDF(title, content, state);
+  else if (type === 'exco') buildExcoPDF(title, content, state);
+  else buildInfoPDF(title, content, state);
+};
+
+/* --- Info / general PDF --- */
+const buildInfoPDF = (title: string, content: string, state: AppState): void => {
+  const projects = state.projects.filter((p) => !p.isArchived);
+  const body = `
+    ${pdfHeader('Information Note', esc(title || 'Note'), new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), COL_BLUE)}
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px">
+      ${kpiTile('Projects', projects.length, COL_BLUE)}
+      ${kpiTile('Team Size', state.users.length, BRAND, 'contributors')}
+      ${kpiTile('Technologies', state.technologies.length, '#8b5cf6', 'in stack')}
+    </div>
+    ${sectionHeader('Content', COL_BLUE)}
+    <div class="ai-content" style="border:1px solid #e5e7eb;padding:16px;background:#fafafa">
+      ${renderMarkdownLite(content)}
+    </div>
+    ${pdfFooter('Info')}`;
+  openPrintWindow(`Info — ${title}`, body);
+};
+
+/* ===== Hackathon Candidate Kit PDF ===== */
+
+export const exportHackathonCandidatePDF = (hackathon: Hackathon, state: AppState): void => {
+  const startFmt = new Date(hackathon.startDate).toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const endFmt = new Date(hackathon.endDate).toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const durationMs = new Date(hackathon.endDate).getTime() - new Date(hackathon.startDate).getTime();
+  const durationDays = Math.ceil(durationMs / 86400000);
+
+  // Role distribution
+  const roleCounts: Record<string, number> = {};
+  hackathon.participants.forEach((p) => {
+    roleCounts[p.role] = (roleCounts[p.role] || 0) + 1;
+  });
+
+  // Linked repos from projects that reference this hackathon (by tag or id)
+  // We surface the state.repositories for linking
+  const allRepos = state.repositories || [];
+
+  // Documents by type
+  const briefs = hackathon.documents.filter((d) => d.type === 'brief');
+  const guides = hackathon.documents.filter((d) => d.type === 'guide');
+  const resources = hackathon.documents.filter((d) => d.type === 'resource');
+
+  const roleColors: Record<string, string> = {
+    dev: '#3b82f6', sme: '#f97316', expert: '#8b5cf6',
+    pm: '#22c55e', designer: '#ec4899', other: '#94a3b8',
+  };
+  const roleLabel: Record<string, string> = {
+    dev: 'Developer', sme: 'Subject Matter Expert', expert: 'Technical Expert',
+    pm: 'Project Manager', designer: 'Designer', other: 'Other',
+  };
+
+  const statusColor: Record<string, string> = {
+    upcoming: '#3b82f6', active: '#FF3E00', completed: '#22c55e', archived: '#94a3b8',
+  };
+
+  const participantRows = hackathon.participants.map((p) => `
+    <tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:8px 12px;font-weight:700;font-family:system-ui;font-size:9pt">${esc(p.name)}</td>
+      <td style="padding:8px 12px;font-family:system-ui;font-size:8.5pt">
+        <span style="background:${roleColors[p.role] || '#94a3b8'}18;color:${roleColors[p.role] || '#94a3b8'};padding:2px 8px;font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em">${roleLabel[p.role] || p.role}</span>
+      </td>
+      <td style="padding:8px 12px;color:#666;font-family:system-ui;font-size:8.5pt">${esc(p.team || '—')}</td>
+      <td style="padding:8px 12px;color:#666;font-family:system-ui;font-size:8.5pt">${esc(p.email || '—')}</td>
+      <td style="padding:8px 12px;color:#888;font-family:system-ui;font-size:8pt">${esc(p.expertise || '—')}</td>
+    </tr>`).join('');
+
+  const docSection = (docs: typeof hackathon.documents, label: string, color: string) =>
+    docs.length === 0 ? '' : `
+    <div style="margin-bottom:16px">
+      <div style="font-size:8pt;font-weight:900;text-transform:uppercase;letter-spacing:0.14em;color:${color};font-family:system-ui;margin-bottom:8px;border-left:3px solid ${color};padding-left:8px">${esc(label)}</div>
+      ${docs.map((d) => `
+        <div style="border:1px solid #e5e7eb;padding:12px 14px;margin-bottom:6px;page-break-inside:avoid">
+          <div style="font-size:9.5pt;font-weight:700;font-family:system-ui;margin-bottom:4px">${esc(d.title)}</div>
+          ${d.content ? `<div style="font-size:8.5pt;color:#666;font-family:system-ui;white-space:pre-line;line-height:1.5">${esc(d.content.slice(0, 600))}${d.content.length > 600 ? '…' : ''}</div>` : ''}
+        </div>`).join('')}
+    </div>`;
+
+  const repoSection = allRepos.length === 0 ? '' : `
+    ${sectionHeader('Code Repositories & Tools', '#1e1b4b')}
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:20px">
+      ${allRepos.slice(0, 12).map((r) => `
+        <div style="border:1px solid #e5e7eb;padding:10px 12px;page-break-inside:avoid">
+          <div style="font-size:9pt;font-weight:700;font-family:system-ui">${esc(r.name)}</div>
+          <div style="font-size:7.5pt;color:#888;font-family:system-ui;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.url)}</div>
+          ${r.description ? `<div style="font-size:8pt;color:#666;margin-top:4px;font-family:system-ui">${esc(r.description.slice(0, 80))}</div>` : ''}
+        </div>`).join('')}
+    </div>`;
+
+  const tagsHtml = hackathon.tags.length > 0
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+        ${hackathon.tags.map((t) => `<span style="background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 10px;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;font-family:system-ui;color:#475569">${esc(t)}</span>`).join('')}
+       </div>` : '';
+
+  const body = `
+    <!-- Hero -->
+    <div style="background:#0a0a0b;color:#fff;padding:36px 40px;margin-bottom:28px;position:relative;overflow:hidden;page-break-inside:avoid">
+      <div style="position:absolute;top:-20px;right:-20px;width:200px;height:200px;background:${statusColor[hackathon.status] || BRAND};opacity:0.08;border-radius:50%"></div>
+      <div style="position:absolute;bottom:-30px;left:30%;width:120px;height:120px;background:${BRAND};opacity:0.05;border-radius:50%"></div>
+      <div style="font-size:8pt;letter-spacing:0.28em;text-transform:uppercase;color:${statusColor[hackathon.status] || BRAND};font-weight:700;font-family:system-ui;margin-bottom:6px">
+        NEXUS.AI — HACKATHON CANDIDATE KIT
+      </div>
+      <div style="font-size:32pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.03em;line-height:1;font-family:system-ui;margin-bottom:10px">${esc(hackathon.title)}</div>
+      ${hackathon.theme ? `<div style="font-size:13pt;color:#aaa;font-family:system-ui;margin-bottom:12px;font-style:italic">${esc(hackathon.theme)}</div>` : ''}
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:16px">
+        <div>
+          <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.14em;color:#666;font-family:system-ui">Start</div>
+          <div style="font-size:10pt;font-weight:700;font-family:system-ui;color:#fff">${startFmt}</div>
+        </div>
+        <div>
+          <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.14em;color:#666;font-family:system-ui">End</div>
+          <div style="font-size:10pt;font-weight:700;font-family:system-ui;color:#fff">${endFmt}</div>
+        </div>
+        <div>
+          <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.14em;color:#666;font-family:system-ui">Duration</div>
+          <div style="font-size:10pt;font-weight:700;font-family:system-ui;color:#fff">${durationDays} day${durationDays !== 1 ? 's' : ''}</div>
+        </div>
+        ${hackathon.location ? `<div>
+          <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.14em;color:#666;font-family:system-ui">Location</div>
+          <div style="font-size:10pt;font-weight:700;font-family:system-ui;color:#fff">${esc(hackathon.location)}</div>
+        </div>` : ''}
+        <div>
+          <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.14em;color:#666;font-family:system-ui">Participants</div>
+          <div style="font-size:10pt;font-weight:700;font-family:system-ui;color:#fff">${hackathon.participants.length}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mission & Objective -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+      <div style="border:1px solid #e5e7eb;border-top:3px solid ${BRAND};padding:18px 20px">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:#aaa;font-weight:700;font-family:system-ui;margin-bottom:8px">🎯 Objective</div>
+        <div style="font-size:10pt;line-height:1.6;font-family:system-ui;color:#111">${esc(hackathon.objective || '—')}</div>
+      </div>
+      ${hackathon.challenge ? `
+      <div style="border:1px solid #e5e7eb;border-top:3px solid #8b5cf6;padding:18px 20px">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:#aaa;font-weight:700;font-family:system-ui;margin-bottom:8px">⚡ Challenge</div>
+        <div style="font-size:10pt;line-height:1.6;font-family:system-ui;color:#111">${esc(hackathon.challenge)}</div>
+      </div>` : `
+      <div style="border:1px solid #e5e7eb;padding:18px 20px;background:#f9fafb">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:#aaa;font-weight:700;font-family:system-ui;margin-bottom:8px">Team Composition</div>
+        ${Object.entries(roleCounts).map(([role, count]) => `
+          <div style="display:flex;align-items:center;gap:8px;margin:5px 0">
+            <div style="width:8px;height:8px;background:${roleColors[role] || '#94a3b8'};border-radius:50%"></div>
+            <span style="font-size:8.5pt;font-family:system-ui;flex:1">${roleLabel[role] || role}</span>
+            <span style="font-size:10pt;font-weight:900;font-family:system-ui">${count}</span>
+          </div>`).join('')}
+      </div>`}
+    </div>
+
+    ${tagsHtml ? `<div style="margin-bottom:20px">${tagsHtml}</div>` : ''}
+
+    <!-- Documents -->
+    ${(briefs.length + guides.length + resources.length) > 0 ? `
+    ${sectionHeader('Working Documents & Resources', '#3b82f6')}
+    ${docSection(briefs, 'Project Brief', '#3b82f6')}
+    ${docSection(guides, 'User Guides', '#22c55e')}
+    ${docSection(resources, 'Resources', '#f97316')}
+    ` : ''}
+
+    <!-- Participants table -->
+    ${hackathon.participants.length > 0 ? `
+    ${sectionHeader('Team Roster', '#22c55e')}
+    <table style="width:100%;border-collapse:collapse;margin-bottom:24px;font-family:system-ui;font-size:9pt">
+      <thead>
+        <tr style="background:#0a0a0b;color:#fff">
+          <th style="text-align:left;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Name</th>
+          <th style="text-align:left;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Role</th>
+          <th style="text-align:left;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Team</th>
+          <th style="text-align:left;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Contact</th>
+          <th style="text-align:left;padding:9px 12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;font-size:7.5pt">Expertise</th>
+        </tr>
+      </thead>
+      <tbody>${participantRows}</tbody>
+    </table>` : ''}
+
+    ${repoSection}
+
+    <!-- Results if available -->
+    ${hackathon.results ? `
+    ${sectionHeader('Results & Outcomes', '#FF3E00')}
+    <div class="ai-content" style="border:1px solid #e5e7eb;border-left:4px solid ${BRAND};padding:16px 20px;background:#fafafa;margin-bottom:20px">
+      ${renderMarkdownLite(hackathon.results)}
+    </div>` : ''}
+
+    <!-- AI synthesis if available -->
+    ${hackathon.aiSynthesis ? `
+    ${sectionHeader('AI Synthesis', '#8b5cf6')}
+    <div class="ai-content" style="border:1px solid #e5e7eb;border-left:4px solid #8b5cf6;padding:16px 20px;background:#fafafa;margin-bottom:20px">
+      ${renderMarkdownLite(hackathon.aiSynthesis)}
+    </div>` : ''}
+
+    ${pdfFooter('Hackathon Candidate Kit')}`;
+
+  openPrintWindow(`${hackathon.title} — Candidate Kit`, body);
 };

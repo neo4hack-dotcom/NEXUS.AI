@@ -62,7 +62,7 @@ const NAV: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'projects', label: 'Projects', icon: Target },
   { id: 'timeline', label: 'Timeline', icon: Calendar },
-  { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'contributor' },
+  { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'admin' },
   { id: 'contributors', label: 'Contributors', icon: Users, minRole: 'manager' },
   { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList, minRole: 'contributor' },
   { id: 'communications', label: 'Communications', icon: Mail, minRole: 'contributor' },

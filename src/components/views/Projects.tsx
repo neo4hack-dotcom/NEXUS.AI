@@ -45,6 +45,7 @@ interface Props {
 
 const newProject = (managerId: string): Project => {
   const now = new Date();
+  const deadline = new Date(now.getTime() + 30 * 86400000).toISOString();
   return {
     id: generateId(),
     name: 'New project',
@@ -52,7 +53,8 @@ const newProject = (managerId: string): Project => {
     status: ProjectStatus.PLANNING,
     managerId,
     startDate: now.toISOString(),
-    deadline: new Date(now.getTime() + 30 * 86400000).toISOString(),
+    deadline,
+    initialDeadline: deadline,
     isImportant: false,
     isArchived: false,
     budget: 0,
@@ -174,6 +176,10 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           const pct = projectProgress(p);
           const overdue = new Date(p.deadline).getTime() < Date.now() && p.status !== 'Done';
           const owner = state.users.find((u) => u.id === p.managerId);
+          const hasSlipped =
+            p.initialDeadline &&
+            p.deadline &&
+            new Date(p.deadline).getTime() > new Date(p.initialDeadline).getTime();
           return (
             <button
               key={p.id}
@@ -217,6 +223,9 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                   <span className="flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
                     {new Date(p.deadline).toLocaleDateString()}
+                    {hasSlipped && (
+                      <span className="ml-1 text-amber-500 font-bold" title={`Initial deadline: ${new Date(p.initialDeadline!).toLocaleDateString()}`}>⚠ slipped</span>
+                    )}
                   </span>
                   <span>{owner ? `${owner.firstName} ${owner.lastName}` : 'Unassigned'}</span>
                 </div>
@@ -427,7 +436,17 @@ const ProjectDetailModal: React.FC<{
                   disabled={!canEdit}
                 />
               </Field>
-              <Field label="Deadline">
+              <Field label="Initial deadline">
+                <Input
+                  type="date"
+                  value={(draft.initialDeadline || draft.deadline).slice(0, 10)}
+                  onChange={(e) =>
+                    setDraft({ ...draft, initialDeadline: new Date(e.target.value).toISOString() })
+                  }
+                  disabled={!canEdit}
+                />
+              </Field>
+              <Field label="Current deadline">
                 <Input
                   type="date"
                   value={draft.deadline.slice(0, 10)}
@@ -436,6 +455,11 @@ const ProjectDetailModal: React.FC<{
                   }
                   disabled={!canEdit}
                 />
+                {draft.initialDeadline && new Date(draft.deadline).getTime() > new Date(draft.initialDeadline).getTime() && (
+                  <p className="text-[10px] font-mono text-amber-500 mt-1">
+                    ⚠ Slipped {Math.round((new Date(draft.deadline).getTime() - new Date(draft.initialDeadline).getTime()) / 86400000)}d from initial deadline ({draft.initialDeadline.slice(0, 10)})
+                  </p>
+                )}
               </Field>
               <Field label="Tags (comma-separated)">
                 <Input
@@ -660,13 +684,25 @@ const KanbanBoard: React.FC<{
           </Button>
         )}
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {Object.values(TaskStatus).map((status) => {
           const tasks = draft.tasks.filter((t) => t.status === status);
+          const colAccent =
+            status === TaskStatus.BLOCKED
+              ? 'border-red-500/50 bg-red-500/5'
+              : status === TaskStatus.PAUSED
+              ? 'border-orange-500/50 bg-orange-500/5'
+              : '';
+          const labelColor =
+            status === TaskStatus.BLOCKED
+              ? 'text-red-500'
+              : status === TaskStatus.PAUSED
+              ? 'text-orange-500'
+              : '';
           return (
             <div
               key={status}
-              className={`surface-flat border p-3 min-h-[300px] transition-colors ${
+              className={`surface-flat border p-3 min-h-[300px] transition-colors ${colAccent} ${
                 dragOver === status ? 'border-brand bg-brand/5' : ''
               }`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(status); }}
@@ -674,7 +710,7 @@ const KanbanBoard: React.FC<{
               onDrop={(e) => handleDrop(e, status)}
             >
               <div className="flex items-center justify-between mb-3">
-                <p className="label-xs">{status}</p>
+                <p className={`label-xs ${labelColor}`}>{status}</p>
                 <span className="text-[10px] font-mono text-muted">{tasks.length}</span>
               </div>
               <div className="space-y-2">
