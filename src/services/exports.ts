@@ -217,39 +217,50 @@ const pdfFooter = (type: string) =>
     NEXUS.AI • AI Project Operations Platform • ${esc(type)} Report
   </div>`;
 
-const openPrintWindow = (title: string, body: string): void => {
-  const w = window.open('', '_blank', 'width=960,height=1200');
-  if (!w) { alert('Allow pop-ups to export PDF.'); return; }
-  w.document.write(`<!DOCTYPE html>
+const PDF_BASE_STYLES = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; color: #0a0a0b; background: #fff; font-size: 10pt; line-height: 1.5; }
+  p { margin: 5pt 0; }
+  ul { padding-left: 18pt; } li { margin: 3pt 0; }
+  h1 { font-size: 18pt; font-weight: 900; text-transform: uppercase; letter-spacing: -0.02em; margin: 0 0 8pt; }
+  h2 { font-size: 12pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; margin: 14pt 0 6pt; color: #111; }
+  h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.1em; color: #FF3E00; margin: 10pt 0 4pt; }
+  strong { font-weight: 700; }
+  .ai-content p { margin: 5pt 0; }
+  .ai-content ul { padding-left: 16pt; }
+  .ai-content li { margin: 2pt 0; }
+`;
+
+export const wrapHtmlDoc = (
+  title: string,
+  body: string,
+  landscape = false,
+  autoprint = false
+): string => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <title>${esc(title)}</title>
   <style>
-    @page { size: A4; margin: 15mm 16mm 20mm; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; color: #0a0a0b; background: #fff; font-size: 10pt; line-height: 1.5; }
-    p { margin: 5pt 0; }
-    ul { padding-left: 18pt; } li { margin: 3pt 0; }
-    h1 { font-size: 18pt; font-weight: 900; text-transform: uppercase; letter-spacing: -0.02em; margin: 0 0 8pt; }
-    h2 { font-size: 12pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.04em; margin: 14pt 0 6pt; color: #111; }
-    h3 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.1em; color: #FF3E00; margin: 10pt 0 4pt; }
-    strong { font-weight: 700; }
-    .ai-content p { margin: 5pt 0; }
-    .ai-content ul { padding-left: 16pt; }
-    .ai-content li { margin: 2pt 0; }
+    @page { size: A4${landscape ? ' landscape' : ''}; margin: 15mm 16mm 20mm; }
+    ${PDF_BASE_STYLES}
   </style>
 </head>
 <body>
   ${body}
-  <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+  ${autoprint ? `<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>` : ''}
 </body>
-</html>`);
+</html>`;
+
+const openPrintWindow = (title: string, body: string): void => {
+  const w = window.open('', '_blank', 'width=960,height=1200');
+  if (!w) { alert('Allow pop-ups to export PDF.'); return; }
+  w.document.write(wrapHtmlDoc(title, body, false, true));
   w.document.close();
 };
 
 /* --- Weekly Status Report --- */
-const buildWeeklyPDF = (title: string, content: string, state: AppState): void => {
+const buildWeeklyBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
   const now = Date.now();
 
@@ -353,12 +364,13 @@ const buildWeeklyPDF = (title: string, content: string, state: AppState): void =
     </div>
 
     ${pdfFooter('Weekly')}`;
-
-  openPrintWindow(`Weekly Status — ${title}`, body);
+  return body;
 };
+const buildWeeklyPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Weekly Status — ${t}`, buildWeeklyBody(t, c, s));
 
 /* --- Newsletter --- */
-const buildNewsletterPDF = (title: string, content: string, state: AppState): void => {
+const buildNewsletterBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
   const done = projects.filter((p) => p.status === 'Done').length;
   const active = projects.filter((p) => p.status === 'Active').length;
@@ -444,12 +456,13 @@ const buildNewsletterPDF = (title: string, content: string, state: AppState): vo
     </div>
 
     ${pdfFooter('Newsletter')}`;
-
-  openPrintWindow(`Newsletter — ${title}`, body);
+  return body;
 };
+const buildNewsletterPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Newsletter — ${t}`, buildNewsletterBody(t, c, s));
 
 /* --- Executive Brief --- */
-const buildExcoPDF = (title: string, content: string, state: AppState): void => {
+const buildExcoBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
   const now = Date.now();
 
@@ -545,9 +558,10 @@ const buildExcoPDF = (title: string, content: string, state: AppState): void => 
     </div>` : ''}
 
     ${pdfFooter('Executive Brief')}`;
-
-  openPrintWindow(`Executive Brief — ${title}`, body);
+  return body;
 };
+const buildExcoPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Executive Brief — ${t}`, buildExcoBody(t, c, s));
 
 export const exportCommunicationPDF = (
   type: 'weekly' | 'newsletter' | 'exco' | 'info',
@@ -561,10 +575,25 @@ export const exportCommunicationPDF = (
   else buildInfoPDF(title, content, state);
 };
 
+export const buildCommunicationHTML = (
+  type: string,
+  title: string,
+  content: string,
+  state: AppState,
+  landscape = false
+): string => {
+  let body = '';
+  if (type === 'weekly') body = buildWeeklyBody(title, content, state);
+  else if (type === 'newsletter') body = buildNewsletterBody(title, content, state);
+  else if (type === 'exco') body = buildExcoBody(title, content, state);
+  else body = buildInfoBody(title, content, state);
+  return wrapHtmlDoc(title || 'Communication', body, landscape, false);
+};
+
 /* --- Info / general PDF --- */
-const buildInfoPDF = (title: string, content: string, state: AppState): void => {
+const buildInfoBody = (title: string, content: string, state: AppState): string => {
   const projects = state.projects.filter((p) => !p.isArchived);
-  const body = `
+  return `
     ${pdfHeader('Information Note', esc(title || 'Note'), new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }), COL_BLUE)}
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px">
       ${kpiTile('Projects', projects.length, COL_BLUE)}
@@ -576,8 +605,9 @@ const buildInfoPDF = (title: string, content: string, state: AppState): void => 
       ${renderMarkdownLite(content)}
     </div>
     ${pdfFooter('Info')}`;
-  openPrintWindow(`Info — ${title}`, body);
 };
+const buildInfoPDF = (t: string, c: string, s: AppState) =>
+  openPrintWindow(`Info — ${t}`, buildInfoBody(t, c, s));
 
 /* ===== Hackathon Candidate Kit PDF ===== */
 
