@@ -246,6 +246,10 @@ const Generator: React.FC<{
                 {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />}
                 {copied ? 'Copied' : 'Copy'}
               </Button>
+              <Button size="sm" variant="outline" onClick={() => exportCommunicationPDF(type, title || 'Communication', output, state)}>
+                <FileDown className="w-3 h-3 mr-1" />
+                PDF
+              </Button>
               <Button size="sm" variant="outline" onClick={toEml}>
                 <Download className="w-3 h-3 mr-1" />
                 .eml

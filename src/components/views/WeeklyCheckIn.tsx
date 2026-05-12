@@ -48,12 +48,17 @@ const formatWeek = (weekOf: string): string => {
 export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) => {
   const currentWeek = mondayOf();
 
-  // Build list of all weeks that have any check-in, plus current week
+  const isAdmin = currentUser.role === 'admin';
+
+  // Build list of all weeks — admin sees all weeks, others only their own + current
   const allWeeks = useMemo(() => {
     const weeks = new Set<string>([currentWeek]);
-    state.weeklyCheckIns.forEach((c) => weeks.add(c.weekOf));
-    return Array.from(weeks).sort((a, b) => b.localeCompare(a)); // newest first
-  }, [state.weeklyCheckIns, currentWeek]);
+    const source = isAdmin
+      ? state.weeklyCheckIns
+      : state.weeklyCheckIns.filter((c) => c.userId === currentUser.id);
+    source.forEach((c) => weeks.add(c.weekOf));
+    return Array.from(weeks).sort((a, b) => b.localeCompare(a));
+  }, [state.weeklyCheckIns, currentWeek, isAdmin, currentUser.id]);
 
   const [selectedWeek, setSelectedWeek] = useState(currentWeek);
 
@@ -81,6 +86,7 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
+  const [selectedForAi, setSelectedForAi] = useState<Set<string>>(new Set());
 
   const save = () => {
     const updated = { ...draft, updatedAt: new Date().toISOString() };
@@ -92,19 +98,29 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
     }));
   };
 
+  // Admin sees all team check-ins; others see only their own
   const teamCheckIns = useMemo(
     () =>
       state.weeklyCheckIns
-        .filter((c) => c.weekOf === selectedWeek)
+        .filter((c) => c.weekOf === selectedWeek && (isAdmin || c.userId === currentUser.id))
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [state.weeklyCheckIns, selectedWeek]
+    [state.weeklyCheckIns, selectedWeek, isAdmin, currentUser.id]
   );
+
+  // Reset selection when week changes
+  useEffect(() => {
+    setSelectedForAi(new Set());
+  }, [selectedWeek]);
 
   const consolidate = async () => {
     setAiLoading(true);
     setAiOutput('');
     try {
-      const data = buildWeeklyCheckInData(teamCheckIns, state.users);
+      const toConsolidate =
+        isAdmin && selectedForAi.size > 0
+          ? teamCheckIns.filter((c) => selectedForAi.has(c.id))
+          : teamCheckIns;
+      const data = buildWeeklyCheckInData(toConsolidate, state.users);
       const tpl = state.prompts['weekly_consolidation'] || DEFAULT_PROMPTS.weekly_consolidation;
       const out = await runPrompt(fillTemplate(tpl, { DATA: data }), state.llmConfig);
       setAiOutput(out);
@@ -147,7 +163,9 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
             <>
               <Button onClick={consolidate} disabled={aiLoading || teamCheckIns.length === 0}>
                 {aiLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                AI Consolidate
+                {isAdmin && selectedForAi.size > 0
+                  ? `AI Consolidate (${selectedForAi.size})`
+                  : 'AI Consolidate'}
               </Button>
               <Button variant="outline" onClick={toPDF}>
                 <FileDown className="w-4 h-4 mr-2" />
@@ -272,26 +290,63 @@ export const WeeklyCheckIn: React.FC<Props> = ({ state, currentUser, update }) =
         {/* Team check-ins for selected week */}
         <div className="surface border">
           <div className="p-4 border-b border-neutral-200 dark:border-ink-600">
-            <p className="label-xs">Team</p>
+            <p className="label-xs">{isAdmin ? 'Team' : 'My submission'}</p>
             <h3 className="text-lg font-black uppercase tracking-tight">This week</h3>
-            <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted mt-1">
-              {teamCheckIns.length} submission{teamCheckIns.length !== 1 ? 's' : ''}
-            </p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted">
+                {teamCheckIns.length} submission{teamCheckIns.length !== 1 ? 's' : ''}
+              </p>
+              {isAdmin && teamCheckIns.length > 0 && (
+                <button
+                  onClick={() =>
+                    setSelectedForAi(
+                      selectedForAi.size === teamCheckIns.length
+                        ? new Set()
+                        : new Set(teamCheckIns.map((c) => c.id))
+                    )
+                  }
+                  className="text-[9px] font-bold uppercase tracking-[0.12em] text-brand hover:underline"
+                >
+                  {selectedForAi.size === teamCheckIns.length ? 'Deselect all' : 'Select all'}
+                </button>
+              )}
+            </div>
+            {isAdmin && selectedForAi.size > 0 && (
+              <p className="text-[9px] text-amber-500 font-bold uppercase tracking-[0.1em] mt-1">
+                {selectedForAi.size} selected for AI
+              </p>
+            )}
           </div>
           <div className="divide-y divide-neutral-200 dark:divide-ink-600 max-h-[600px] overflow-y-auto">
             {teamCheckIns.map((c) => {
               const u = state.users.find((x) => x.id === c.userId);
+              const isSelected = selectedForAi.has(c.id);
               return (
-                <div key={c.id} className="p-4 text-xs">
+                <div
+                  key={c.id}
+                  className={`p-4 text-xs transition-colors ${isAdmin ? 'cursor-pointer hover:bg-neutral-50 dark:hover:bg-ink-700' : ''} ${isAdmin && isSelected ? 'bg-brand/5 border-l-2 border-brand' : ''}`}
+                  onClick={isAdmin ? () => {
+                    const next = new Set(selectedForAi);
+                    if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                    setSelectedForAi(next);
+                  } : undefined}
+                >
                   <div className="flex items-center justify-between mb-2">
-                    <p className="font-bold uppercase tracking-tight">
-                      {u ? `${u.firstName} ${u.lastName}` : 'Unknown'}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      {isAdmin && (
+                        <div className={`w-3.5 h-3.5 border-2 flex items-center justify-center shrink-0 ${isSelected ? 'bg-brand border-brand' : 'border-neutral-300 dark:border-ink-500'}`}>
+                          {isSelected && <span className="text-white text-[8px]">✓</span>}
+                        </div>
+                      )}
+                      <p className="font-bold uppercase tracking-tight">
+                        {u ? `${u.firstName} ${u.lastName}` : 'Unknown'}
+                      </p>
+                    </div>
                     <Badge tone={c.mood === 'green' ? 'green' : c.mood === 'amber' ? 'amber' : 'red'}>
                       {c.mood}
                     </Badge>
                   </div>
-                  <p className="text-muted line-clamp-2">{c.accomplishments || '—'}</p>
+                  <p className="text-muted line-clamp-2 ml-5">{c.accomplishments || '—'}</p>
                 </div>
               );
             })}

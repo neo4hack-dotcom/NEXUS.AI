@@ -6,6 +6,7 @@ export type Role = 'admin' | 'manager' | 'contributor' | 'viewer';
 export enum TaskStatus {
   TODO = 'To Do',
   ONGOING = 'In Progress',
+  PAUSED = 'Paused',
   BLOCKED = 'Blocked',
   DONE = 'Done',
 }
@@ -95,6 +96,7 @@ export interface Project {
   managerId?: string;              // user id of owner/PM
   startDate: string;
   deadline: string;
+  initialDeadline?: string;
   isImportant?: boolean;
   isArchived?: boolean;
   budget?: number;
