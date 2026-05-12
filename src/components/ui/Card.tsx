@@ -1,29 +1,40 @@
 import React from 'react';
-import { cn } from '../../lib/utils';
 
-const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("border border-border bg-card text-card-foreground", className)} {...props} />
-))
-Card.displayName = "Card"
+type Tone = 'default' | 'accent' | 'flat';
 
-const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("flex flex-col space-y-1.5 p-6 border-b border-border/50", className)} {...props} />
-))
-CardHeader.displayName = "CardHeader"
+export const Card: React.FC<
+  React.HTMLAttributes<HTMLDivElement> & { tone?: Tone }
+> = ({ className = '', tone = 'default', ...rest }) => {
+  const base =
+    tone === 'accent'
+      ? 'bg-brand/5 border border-brand/30'
+      : tone === 'flat'
+      ? 'surface-flat'
+      : 'surface';
+  return <div className={`${base} border ${className}`} {...rest} />;
+};
 
-const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(({ className, ...props }, ref) => (
-  <h3 ref={ref} className={cn("text-lg font-bold uppercase tracking-tight", className)} {...props} />
-))
-CardTitle.displayName = "CardTitle"
+export const CardHeader: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
+  className = '',
+  ...rest
+}) => (
+  <div
+    className={`p-5 border-b border-neutral-200 dark:border-ink-600 ${className}`}
+    {...rest}
+  />
+);
 
-const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(({ className, ...props }, ref) => (
-  <p ref={ref} className={cn("text-[10px] font-bold tracking-widest uppercase text-muted-foreground", className)} {...props} />
-))
-CardDescription.displayName = "CardDescription"
+export const CardTitle: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = ({
+  className = '',
+  ...rest
+}) => (
+  <h3
+    className={`text-lg font-black tracking-tight uppercase ${className}`}
+    {...rest}
+  />
+);
 
-const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("p-6", className)} {...props} />
-))
-CardContent.displayName = "CardContent"
-
-export { Card, CardHeader, CardTitle, CardDescription, CardContent }
+export const CardContent: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
+  className = '',
+  ...rest
+}) => <div className={`p-5 ${className}`} {...rest} />;

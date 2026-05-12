@@ -1,27 +1,24 @@
 import React from 'react';
-import { cn } from '../../lib/utils';
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
-  className?: string;
-  children?: React.ReactNode;
-}
+type Tone = 'default' | 'brand' | 'green' | 'amber' | 'red' | 'muted';
 
-function Badge({ className, variant = "default", ...props }: BadgeProps) {
-  return (
-    <div className={cn(
-      "inline-flex items-center border px-2.5 py-1 text-[9px] font-mono uppercase tracking-widest transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-      {
-        'border-transparent bg-primary text-primary-foreground hover:bg-primary/80': variant === 'default',
-        'border-transparent bg-white text-black hover:bg-white/80': variant === 'secondary',
-        'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80': variant === 'destructive',
-        'text-foreground border-white/20': variant === 'outline',
-        'border-emerald-500/50 bg-emerald-500/10 text-emerald-500': variant === 'success',
-        'border-amber-500/50 bg-amber-500/10 text-amber-500': variant === 'warning',
-      },
-      className
-    )} {...props} />
-  )
-}
+const tones: Record<Tone, string> = {
+  default: 'border-neutral-300 dark:border-ink-500 text-neutral-700 dark:text-neutral-300',
+  brand: 'border-brand text-brand',
+  green: 'border-emerald-500 text-emerald-500',
+  amber: 'border-amber-500 text-amber-500',
+  red: 'border-red-500 text-red-500',
+  muted: 'border-neutral-300 dark:border-ink-600 text-neutral-500',
+};
 
-export { Badge }
+export const Badge: React.FC<{ tone?: Tone; className?: string; children?: React.ReactNode }> = ({
+  tone = 'default',
+  className = '',
+  children,
+}) => (
+  <span
+    className={`inline-flex items-center px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] border ${tones[tone]} ${className}`}
+  >
+    {children}
+  </span>
+);

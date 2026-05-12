@@ -1,23 +1,45 @@
 import React from 'react';
-import { cn } from '../../lib/utils';
 
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {}
+export const Input: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = ({
+  className = '',
+  ...rest
+}) => (
+  <input
+    className={
+      'flex h-10 w-full border bg-white dark:bg-ink-900 border-neutral-300 dark:border-ink-500 ' +
+      'px-4 py-2 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 ' +
+      'focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand/40 transition-colors ' +
+      className
+    }
+    {...rest}
+  />
+);
 
-const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, ...props }, ref) => {
-    return (
-      <input
-        type={type}
-        className={cn(
-          "flex h-10 w-full border border-border bg-[#111] px-4 py-2 text-sm text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary disabled:cursor-not-allowed disabled:opacity-50",
-          className
-        )}
-        ref={ref}
-        {...props}
-      />
-    )
-  }
-)
-Input.displayName = "Input"
+export const Textarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = ({
+  className = '',
+  ...rest
+}) => (
+  <textarea
+    className={
+      'flex min-h-[100px] w-full border bg-white dark:bg-ink-900 border-neutral-300 dark:border-ink-500 ' +
+      'px-4 py-3 text-sm text-neutral-900 dark:text-white placeholder:text-neutral-400 ' +
+      'focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand/40 transition-colors resize-y ' +
+      className
+    }
+    {...rest}
+  />
+);
 
-export { Input }
+export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({
+  className = '',
+  ...rest
+}) => (
+  <select
+    className={
+      'flex h-10 w-full border bg-white dark:bg-ink-900 border-neutral-300 dark:border-ink-500 ' +
+      'px-4 py-2 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-brand transition-colors ' +
+      className
+    }
+    {...rest}
+  />
+);

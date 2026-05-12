@@ -1,6 +1,0 @@
-{
-  "name": "NexusAI - Project OS",
-  "description": "Plateforme complète de gestion de projets IA avec portail contributeur, génération de synthèses, gestion des technologies et intégration LLM local.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
-}

@@ -1,37 +1,35 @@
 import React from 'react';
-import { cn } from '../../lib/utils';
 
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
-  size?: 'default' | 'sm' | 'lg' | 'icon';
+type Variant = 'primary' | 'ghost' | 'outline' | 'subtle' | 'danger';
+type Size = 'sm' | 'md' | 'lg';
+
+interface Props extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant;
+  size?: Size;
 }
 
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'default', size = 'default', ...props }, ref) => {
-    return (
-      <button
-        ref={ref}
-        className={cn(
-          "inline-flex items-center justify-center whitespace-nowrap text-[10px] font-black uppercase tracking-widest ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
-          {
-            'bg-primary text-primary-foreground hover:bg-primary/90': variant === 'default',
-            'bg-destructive text-destructive-foreground hover:bg-destructive/90': variant === 'destructive',
-            'border border-white/20 bg-transparent text-white hover:bg-white/10': variant === 'outline',
-            'bg-white text-black hover:bg-white/90': variant === 'secondary',
-            'hover:bg-white/10 text-white/40 hover:text-white': variant === 'ghost',
-            'text-primary underline-offset-4 hover:underline': variant === 'link',
-            'h-10 px-4 py-2': size === 'default',
-            'h-9 px-3': size === 'sm',
-            'h-11 px-8': size === 'lg',
-            'h-10 w-10': size === 'icon',
-          },
-          className
-        )}
-        {...props}
-      />
-    )
-  }
-)
-Button.displayName = "Button"
+const base =
+  'inline-flex items-center justify-center font-bold uppercase tracking-[0.14em] transition-all duration-150 ' +
+  'disabled:opacity-40 disabled:cursor-not-allowed select-none whitespace-nowrap';
 
-export { Button }
+const variants: Record<Variant, string> = {
+  primary:
+    'bg-brand text-white hover:bg-brand-600 active:bg-brand-700 shadow-[0_0_0_1px_rgba(255,62,0,0.6)]',
+  ghost:
+    'bg-transparent text-neutral-900 dark:text-white hover:bg-neutral-200 dark:hover:bg-ink-700',
+  outline:
+    'border border-neutral-300 dark:border-ink-500 text-neutral-900 dark:text-white hover:border-brand hover:text-brand',
+  subtle:
+    'bg-neutral-200 dark:bg-ink-700 text-neutral-900 dark:text-white hover:bg-neutral-300 dark:hover:bg-ink-600',
+  danger: 'bg-red-600 text-white hover:bg-red-700',
+};
+
+const sizes: Record<Size, string> = {
+  sm: 'h-8 px-3 text-[10px]',
+  md: 'h-10 px-5 text-xs',
+  lg: 'h-12 px-6 text-sm',
+};
+
+export const Button: React.FC<Props> = ({ variant = 'primary', size = 'md', className = '', ...rest }) => (
+  <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest} />
+);
