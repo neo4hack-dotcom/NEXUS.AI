@@ -14,8 +14,13 @@ import {
   Download,
   Upload,
   AlertTriangle,
+  Folders,
+  Plus,
+  Pencil,
+  X,
 } from 'lucide-react';
-import { AppState, LlmConfig } from '../../types';
+import { AppState, LlmConfig, ProjectFamily } from '../../types';
+import { generateId } from '../../services/storage';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
@@ -33,7 +38,7 @@ interface DataProps {
   replaceState: (s: AppState) => void;
 }
 
-type Tab = 'llm' | 'prompts' | 'security' | 'data';
+type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families';
 
 export const Settings: React.FC<Props> = ({ state, update }) => {
   const [tab, setTab] = useState<Tab>('llm');
@@ -63,6 +68,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
           [
             { id: 'llm', label: 'Local LLM', icon: Cpu },
             { id: 'prompts', label: 'AI Prompts', icon: Sparkles },
+            { id: 'families', label: 'Project Families', icon: Folders },
             { id: 'security', label: 'Security', icon: Key },
             { id: 'data', label: 'Data', icon: Database },
           ] as { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[]
@@ -84,6 +90,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
 
       {tab === 'llm' && <LlmSection state={state} update={update} />}
       {tab === 'prompts' && <PromptsSection state={state} update={update} />}
+      {tab === 'families' && <FamiliesSection state={state} update={update} />}
       {tab === 'security' && <SecuritySection state={state} update={update} />}
       {tab === 'data' && (
         <DataSection
@@ -498,6 +505,173 @@ const DataSection: React.FC<DataProps> = ({ state, replaceState }) => {
           </Button>
         </div>
       </div>
+    </div>
+  );
+};
+
+/* ── Project Families ─────────────────────────────────────────────────────── */
+
+const PALETTE = [
+  '#FF3E00', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6',
+  '#EF4444', '#06B6D4', '#84CC16', '#F97316', '#EC4899',
+];
+
+const blankFamily = (): ProjectFamily => ({
+  id: generateId(),
+  name: '',
+  description: '',
+  color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+  createdAt: new Date().toISOString(),
+});
+
+const FamiliesSection: React.FC<{ state: AppState; update: (m: (s: AppState) => AppState) => void }> = ({
+  state,
+  update,
+}) => {
+  const families = state.projectFamilies ?? [];
+  const [editing, setEditing] = useState<ProjectFamily | null>(null);
+  const [isNew, setIsNew] = useState(false);
+
+  const openNew = () => { setEditing(blankFamily()); setIsNew(true); };
+  const openEdit = (f: ProjectFamily) => { setEditing({ ...f }); setIsNew(false); };
+
+  const save = () => {
+    if (!editing || !editing.name.trim()) return;
+    update((s) => ({
+      ...s,
+      projectFamilies: isNew
+        ? [...(s.projectFamilies ?? []), editing]
+        : (s.projectFamilies ?? []).map((f) => (f.id === editing.id ? editing : f)),
+    }));
+    setEditing(null);
+  };
+
+  const remove = (id: string) => {
+    if (!window.confirm('Delete this family? Projects assigned to it will become ungrouped.')) return;
+    update((s) => ({
+      ...s,
+      projectFamilies: (s.projectFamilies ?? []).filter((f) => f.id !== id),
+      projects: s.projects.map((p) => (p.familyId === id ? { ...p, familyId: undefined } : p)),
+    }));
+  };
+
+  const projectCount = (id: string) =>
+    state.projects.filter((p) => p.familyId === id && !p.isArchived).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="label-xs">Classification</p>
+          <h2 className="text-lg font-black uppercase tracking-tight">Project Families</h2>
+          <p className="text-xs text-muted mt-1">
+            Group projects into families for portfolio-level tracking.
+          </p>
+        </div>
+        <Button onClick={openNew}>
+          <Plus className="w-4 h-4 mr-2" />
+          New family
+        </Button>
+      </div>
+
+      {families.length === 0 && (
+        <div className="border border-dashed border-neutral-300 dark:border-ink-500 p-12 text-center text-muted">
+          <Folders className="w-8 h-8 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No families yet. Create one to group your projects.</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {families.map((f) => {
+          const count = projectCount(f.id);
+          return (
+            <div key={f.id} className="surface border p-4 flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-4 h-10 shrink-0" style={{ backgroundColor: f.color || '#FF3E00' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold uppercase tracking-tight truncate">{f.name}</p>
+                  {f.description && (
+                    <p className="text-xs text-muted mt-0.5 line-clamp-2">{f.description}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => openEdit(f)} className="w-7 h-7 flex items-center justify-center text-muted hover:text-brand transition-colors" title="Edit">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => remove(f.id)} className="w-7 h-7 flex items-center justify-center text-muted hover:text-red-500 transition-colors" title="Delete">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">
+                {count} active project{count !== 1 ? 's' : ''}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="surface border w-full max-w-md animate-slide-up">
+            <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+              <h3 className="font-black uppercase tracking-tight text-base">
+                {isNew ? 'New family' : 'Edit family'}
+              </h3>
+              <button onClick={() => setEditing(null)} className="w-8 h-8 flex items-center justify-center text-muted hover:text-brand">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="space-y-1.5">
+                <label className="label-xs">Name *</label>
+                <Input
+                  value={editing.name}
+                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  placeholder="e.g. AI Efficiency, Customer Experience…"
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="label-xs">Description</label>
+                <Input
+                  value={editing.description ?? ''}
+                  onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+                  placeholder="Short description of this family's scope"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="label-xs">Colour</label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setEditing({ ...editing, color: c })}
+                      className={`w-7 h-7 transition-transform hover:scale-110 ${editing.color === c ? 'ring-2 ring-offset-2 ring-neutral-900 dark:ring-white' : ''}`}
+                      style={{ backgroundColor: c }}
+                      title={c}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={editing.color ?? '#FF3E00'}
+                    onChange={(e) => setEditing({ ...editing, color: e.target.value })}
+                    className="w-7 h-7 cursor-pointer border border-neutral-300 dark:border-ink-500 bg-transparent"
+                    title="Custom colour"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button onClick={save} disabled={!editing.name.trim()}>
+                <Save className="w-4 h-4 mr-2" />
+                {isNew ? 'Create' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
