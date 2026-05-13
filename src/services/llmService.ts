@@ -3,25 +3,26 @@ import { LlmConfig, Project, User, AppState, WeeklyCheckIn, TaskStatus, TaskPrio
 export const DEFAULT_PROMPTS: Record<string, string> = {
   portfolio_summary: `
 You are DOINg.AI, a Chief AI Officer's executive assistant.
-Produce a concise, professional executive overview of the AI project portfolio.
+Produce a tight, data-driven portfolio overview.
 
 DATA:
 {{DATA}}
 
 OUTPUT FORMAT (Markdown):
+
 ### Executive Summary
-2–3 powerful sentences on portfolio health.
+1–2 sentences on overall portfolio health with key metrics.
 
 ### Highlights
-- 3 to 5 bullet points (use **Bold** for key wins/numbers).
+- 3–5 bullets. Start each with a number, status, or outcome. **Bold** the key figure.
 
 ### Risks & Attention Points
-- Use **Bold** with "Alert", "Critical", "Warning" only when warranted.
+- State only confirmed risks. Use **Alert** or **Warning** only when justified.
 
 ### Strategic Recommendations
-- 3 prioritized actions.
+- 3 prioritized actions, each actionable in ≤ 1 sprint.
 
-Tone: confident, factual, English only.
+Tone: factual, concise, English. Max 200 words total.
 `,
   project_brief: `
 You are a Senior Program Manager. Produce a clean project brief based on the data.
@@ -89,63 +90,76 @@ Best,
 {{AUTHOR}}
 `,
   newsletter: `
-You are a corporate communications specialist. Draft a broad-audience newsletter.
+You are DOINg.AI, an AI portfolio communications expert.
+Draft a concise, fact-first newsletter for a broad audience.
 
 DATA:
 {{DATA}}
 
-OUTPUT (plain text email, friendly tone, no jargon):
+OUTPUT FORMAT (Markdown):
+
 Subject: {{TITLE}}
 
-Hello everyone,
-<paragraph framing>
+## Key Achievements
+- 3–5 bullets. Lead with the number, metric, or outcome. **Bold** the key figure.
 
-Highlights
-- ...
+## In Progress
+- What is actively being built or tested (2–4 items).
 
-What's next
-- ...
+## What's Coming
+- Near-term priorities (2–3 items).
 
-Call to action: ...
-Best,
-The DOINg.AI team
+Tone: positive, grounded, no hyperbole. English. Max 300 words.
 `,
   exco_update: `
-You are a senior consultant briefing the Executive Committee.
+You are DOINg.AI, a Chief AI Officer's chief-of-staff.
+Produce a fact-first executive committee brief.
 
 DATA:
 {{DATA}}
 
-OUTPUT:
+OUTPUT FORMAT (Markdown):
+
 Subject: [Exco] {{TITLE}}
 
-Dear Exco,
+## Portfolio at a Glance
+One sentence: total projects, active count, overall health.
 
-Headline: <one strong sentence>.
+## Business Value Delivered
+- 2–3 bullets. Quantify impact where possible (time saved, cost, adoption rate).
 
-Business impact / ROI:
-- ...
+## Active Risks
+- State only real risks. Format: **Risk** — likelihood · impact. Skip if none.
 
-Critical risks:
-- ...
+## Decisions Required
+- What does Exco need to decide or unblock? Max 3 items. If none: "None at this stage."
 
-Asks:
-- ...
-
-Regards,
-{{AUTHOR}}
+Tone: direct, confident, no filler. English. Max 250 words.
 `,
   weekly_consolidation: `
-You are a manager consolidating weekly check-ins from your team.
+You are a senior program manager synthesizing team weekly check-ins.
 
 SOURCE DATA:
 {{DATA}}
 
-TASK: Synthesize the input into one structured executive report. Group by project where possible.
+Produce one executive report. Group by project where data allows.
 Preserve "[Name]" attribution per bullet.
 
-Sections: Highlights, Blockers, Next Steps, Risks.
-English. No invention.
+OUTPUT FORMAT (Markdown):
+
+## Highlights
+- What moved forward this week. Facts and outcomes only.
+
+## Blockers
+- What is stuck and who owns it.
+
+## Next Steps
+- Confirmed next actions per project.
+
+## Risks
+- Emerging risks only. Skip section if none.
+
+Max 150 words. No invented information.
 `,
   hackathon_synthesis: `
 You are an innovation sprint facilitator producing a structured post-hackathon synthesis.

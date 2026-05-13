@@ -39,7 +39,7 @@ import {
   buildPortfolioSummaryData,
   buildProjectBriefData,
 } from '../../services/llmService';
-import { exportEML, buildCommunicationHTML } from '../../services/exports';
+import { exportEML, buildCommunicationHTML, NEWSLETTER_SECTIONS } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -675,8 +675,19 @@ const PDFPreviewModal: React.FC<{
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [landscape, setLandscape] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [activeSections, setActiveSections] = useState<string[]>(
+    NEWSLETTER_SECTIONS.map((s) => s.id)
+  );
 
-  const html = buildCommunicationHTML(type, title, content, state, landscape);
+  const toggleSection = (id: string) =>
+    setActiveSections((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    );
+
+  const html = buildCommunicationHTML(
+    type, title, content, state, landscape,
+    type === 'newsletter' ? activeSections : undefined
+  );
 
   const handlePrint = () => {
     const iframe = iframeRef.current;
@@ -748,6 +759,29 @@ const PDFPreviewModal: React.FC<{
             </button>
           </div>
         </div>
+
+        {/* Newsletter section picker */}
+        {type === 'newsletter' && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-200 dark:border-ink-600 bg-white dark:bg-ink-850 shrink-0 flex-wrap">
+            <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted shrink-0">Sections:</span>
+            {NEWSLETTER_SECTIONS.map((s) => {
+              const on = activeSections.includes(s.id);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => toggleSection(s.id)}
+                  className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                    on
+                      ? 'bg-brand text-white border-brand'
+                      : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand hover:text-brand'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* iframe preview */}
         <div className="flex-1 overflow-hidden bg-neutral-100 dark:bg-ink-900">
