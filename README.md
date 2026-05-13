@@ -1,17 +1,25 @@
-# NEXUS.AI
+# DOINg.AI
 
-**An end-to-end AI Project Operations platform — projects, contributors, communications, technologies, repositories, and AI-assisted reporting, all from a single self-contained app.**
+**An end-to-end AI Project Operations platform — projects, contributors, communications, technologies, repositories, hackathons, working groups, Smart ToDo, MCP Hub, and AI-assisted reporting, all from a single self-contained app.**
 
-NEXUS.AI is a single-page React 19 application backed by a Python **FastAPI** server. It manages an AI initiative portfolio from intake to executive reporting:
+DOINg.AI is a single-page React 19 application backed by a Python **FastAPI** server. It manages an AI initiative portfolio from intake to executive reporting:
 
-- Project tracking with Kanban and a Gantt-lite timeline
+- Project tracking with Kanban, Gantt timeline, and exportable SteerCo booklet
+- Dev workflow status (To Start / Dev / UAT / Prod) on every project
+- External stakeholder contacts per project (outside the contributor directory)
 - RAG risk heatmap with one-click AI risk assessment
 - Multi-role authentication (admin / manager / contributor / viewer)
 - Weekly contributor check-ins with AI consolidation
+- Working Groups with meeting notes, tasks, and action items
+- Hackathon management with candidate kits and participant roster
+- Smart ToDo with Eisenhower matrix, energy levels, and ICS export
+- MCP Hub — catalog and manage Model Context Protocol servers
 - AI-generated weekly / newsletter / Exco communications
 - Outlook-ready `.eml` export wired to mailing lists
-- Executive-grade PDF export (A4, branded, print-pipeline)
+- Executive-grade PDF export: per-project brief, multi-project booklet, Gantt timeline
+- Project Families for cross-project grouping
 - Local LLM admin console (Ollama / OpenAI-compatible / n8n webhook)
+- First-login onboarding modal + built-in User Guide
 
 The app is **100% local-first**: no third-party telemetry, no cloud dependency, no external SDKs. Data lives in `db.json` on your machine and a mirrored cache in your browser's `localStorage`.
 
@@ -58,7 +66,7 @@ install.bat
 - create a Python virtual environment in `.venv\`,
 - install FastAPI and Uvicorn into it,
 - build the production frontend (`dist\`),
-- optionally drop a **desktop shortcut** named *"NEXUS.AI"* on your Desktop.
+- optionally drop a **desktop shortcut** named *"DOINg.AI"* on your Desktop.
 
 **Run:**
 
@@ -120,6 +128,8 @@ Change the admin password from **Settings → Security** as soon as you are in.
 
 The seed also creates two example contributors (`emma`, `lucas`) with password `changeme`, used by the project demo data. Replace them once you start adding your real team.
 
+On first login, each user sees a **4-step onboarding modal** that introduces the platform and role-specific capabilities. It only appears once per account.
+
 ---
 
 ## Features in detail
@@ -127,62 +137,141 @@ The seed also creates two example contributors (`emma`, `lucas`) with password `
 ### 1. Global Dashboard
 Cross-portfolio KPIs, recent projects with progress bars, upcoming milestones, technology snapshot, and a shortcut to the risk heatmap.
 
-### 2. Projects (with Kanban)
-Click any project to open its detail view:
+### 2. Projects
 
-- **Overview tab** — status, owner, dates, tags, budget, members, technologies, AI-generated project brief.
-- **Kanban tab** — four columns (To Do, In Progress, Blocked, Done). Click a task's "→ next" button to advance it through the workflow. Expand a task to edit title, description, assignee, ETA, priority, and a checklist.
-- **Audit tab** — every change is logged with author and timestamp.
+A full project lifecycle manager with **Kanban board**, **detail modal**, and multiple export options.
 
-PDF export is available from the project detail footer.
+**Project card** — shows name, status badge, dev workflow stage (To Start / Dev / UAT / Prod), priority, deadline, and RAG indicator.
 
-### 3. Timeline (Gantt-lite)
-A high-level horizontal Gantt across all visible projects, with month markers, a "today" line, and milestone flags. Toggle completed projects on/off.
+**Detail modal tabs:**
 
-### 4. Risk Heatmap
-Each project is scored Green / Amber / Red based on overdue deadlines, blocked tasks, late tasks, and staleness. The page exposes:
+- **Overview** — status, dates (with slip detection), budget, FTE gain, confidentiality level, project family, owner, internal members, **external stakeholders** (contacts outside the contributor directory — name, email, role, company), technologies, linked apps, presentations (PPT/PPTX viewer), tags, and notes.
+- **Kanban** — four swim-lanes (To Do · In Progress · Blocked · Done) with blue highlight for active tasks and green for done. Per-task detail: description, assignee, ETA, priority, weight, checklist.
+- **Audit log** — every change recorded with author and timestamp.
+- **AI Brief** — LLM-generated structured project brief.
+
+**Toolbar actions:**
+
+- **Booklet presentation** — choose one or more projects, generate a full SteerCo PDF deck (landscape A4): dark cover page, agenda, executive summary with KPI tiles and portfolio donut, per-project pages with progress bars, task breakdown, team and milestones.
+- **Export PDF** — single-project A4 brief with milestone roadmap SVG.
+- **Project Families** — admins can define colour-coded families (e.g. *Digital Transformation*, *Infrastructure*) to group related projects. Managed from Admin Settings.
+- **Templates** — create reusable project skeletons with pre-defined tasks and milestones.
+
+### 3. Timeline (Gantt)
+
+A high-level horizontal Gantt across all visible projects.
+
+- Month markers, dashed "today" line, coloured bars (orange = on track, red = overdue, green = done), milestone flags.
+- Toggle completed projects on/off.
+- **Select & Export PDF** — enter selection mode to check individual projects, or "Export all" for a one-click landscape Gantt PDF with DOINg.AI branding, legend, and print toolbar.
+
+### 4. Risk Heatmap *(admin only)*
+
+Each project is scored Green / Amber / Red based on overdue deadlines, blocked tasks, late tasks, and staleness. Exposes:
 
 - Three KPI tiles with portfolio distribution.
 - A grouped, color-coded card list ranked by criticality.
-- An **AI Risk Assessment** button that asks your local LLM to prioritize and recommend mitigations.
+- **AI Risk Assessment** — asks your local LLM to prioritize and recommend mitigations.
 
-### 5. Contributors
-Group view by team. Admins and managers can add/edit users, set their app role (admin/manager/contributor/viewer), assign team and job title, and capture **expectations** for clarity. Every user has their own UID + password for self-service.
+### 5. Technologies & Repositories
 
-### 6. Weekly Check-in
+**Technologies** — catalog of frameworks, libraries, databases, languages, tools, and services with versions, URLs, layer (frontend/backend/data/ML-AI…), maturity status (adopted/evaluating/deprecated/hold), and tags.
+
+**Repositories** — code repos tracked with provider (GitHub/GitLab/Bitbucket/Azure), visibility, language, description, and linked projects.
+
+### 6. Hackathons
+
+End-to-end hackathon management:
+
+- Status lifecycle: Upcoming → Active → Completed → Archived.
+- Participant roster with roles (Dev, SME, Expert, PM, Designer).
+- Documents (brief, guide, results, resources) with inline rich text editor.
+- Live message board.
+- **Candidate Kit PDF** — branded A4 document with objective, challenge, team roster, documents, and AI synthesis.
+
+### 7. MCP Hub
+
+Catalog and manage **Model Context Protocol** servers used across the team:
+
+- Add servers by URL or declarative definition.
+- Per-server tool listing with AI-enriched descriptions.
+- Category and tag taxonomy, active/inactive toggle.
+- Used as a shared reference for AI tooling standardisation.
+
+### 8. Contributors
+
+Team directory with role-based visibility:
+
+- All roles see the directory (name, team, function, avatar).
+- Managers and admins can edit profiles.
+- **Login credentials** (UID + password) are visible only to admins — fully hidden from managers and contributors.
+- Group view by team with search/filter.
+
+### 9. Communications *(manager and above)*
+
+- **Generate** — choose type (Summary / Newsletter / Exco / Info), optionally focus on a project, add context, pick a mailing list, hit *Generate*. The draft is editable, copyable, and exportable as `.eml` (drops straight into Outlook with recipients and subject pre-filled) or branded PDF.
+- **Templates** — reusable subject/body templates with `{{projectName}}`, `{{authorName}}` variables.
+- **Mailing Lists** — manage broadcast audiences.
+- **History** — every saved draft listed with one-click re-export.
+
+### 10. Working Groups
+
+Lightweight collaboration spaces outside formal projects:
+
+- Status: Active / Paused / Closed.
+- Member roster with Lead / Contributor / Observer roles.
+- Kanban task board (To Do / Doing / Review / Done).
+- Meeting notes with agenda, decisions, and action items — unresolved actions are automatically carried forward.
+
+### 11. Weekly Check-in *(contributor and above)*
+
 Each contributor logs their weekly status (accomplishments / blockers / next steps) with a Green/Amber/Red mood marker. Managers and admins can:
 
 - See all submissions for the current week.
-- Click **AI Consolidate** to ask the local LLM to produce a structured manager-grade synthesis.
-- Export both the raw submissions and the AI synthesis as a single branded PDF.
+- Click **AI Consolidate** to produce a manager-grade synthesis.
+- Export the raw submissions and synthesis as a branded PDF.
 
-### 7. Communications (Generate / Templates / Lists / History)
-- **Generate** — choose `weekly`, `newsletter`, or `exco`, optionally focus on a project, add free-text context, pick a mailing list, hit *Generate*. The draft is editable, copyable, exportable as `.eml` (drops straight into Outlook with the recipient list and subject pre-filled), and savable to history.
-- **Templates** — create reusable subject/body templates with `{{projectName}}`, `{{authorName}}` variables.
-- **Mailing Lists** — manage broadcast audiences (e.g. *Executive committee*, *All employees*).
-- **History** — every saved draft is listed with one-click PDF export.
+### 12. Smart ToDo *(contributor and above)*
 
-### 8. Technologies & Repositories
-Catalog of frameworks, libraries, databases, languages, tools, and services in use — with versions, URLs, tags, and category icons. Code repositories are tracked separately with visibility (public/private/internal), language, description, and projects they are linked to.
+Personal task manager beyond project tracking:
 
-### 9. Notification Center
+- Eisenhower matrix (Urgent-Important quadrants) with drag-style assignment.
+- Priority, energy level, estimated duration, actual time spent.
+- Planning horizon: Today / This week / This month / This quarter / TBD.
+- Recurring tasks with recurrence rules.
+- Schedule picker with date + time slot.
+- **ICS export** for calendar integration.
+- AI synthesis of your task load.
+
+### 13. User Guide
+
+Built-in contextual help:
+
+- 13 sections covering every feature.
+- Admin-only sections (LLM setup, data management, user management) are hidden from non-admins.
+- Always accessible from the sidebar — no external docs needed.
+
+### 14. Notification Center
+
 Surfaces dynamic alerts:
 
-- projects with no activity in 10+ days,
-- tasks past their ETA,
-- contributors who haven't submitted a weekly check-in.
+- Projects with no activity in 10+ days.
+- Tasks past their ETA.
+- Contributors who haven't submitted a weekly check-in.
 
-### 10. AI Executive Insight (modal)
-One-click portfolio-wide synthesis with executive summary, highlights, risks, and recommended actions — straight to PDF.
+### 15. AI Executive Insight (modal)
+
+One-click portfolio-wide synthesis — executive summary, highlights, risks, and recommended actions — straight to PDF.
 
 ### Light / dark mode
-A discreet sun/moon button in the sidebar toggles light mode. The choice is persisted alongside the rest of the app state.
+
+A sun/moon button in the sidebar toggles themes. The choice persists alongside the rest of the app state.
 
 ---
 
 ## Configure your local LLM
 
-NEXUS.AI never leaves your network. Configure your provider from **Settings → Local LLM** (admin only).
+DOINg.AI never leaves your network. Configure your provider from **Settings → Local LLM** (admin only).
 
 | Provider | Base URL example | API key | Notes |
 | -------- | ---------------- | ------- | ----- |
@@ -250,7 +339,7 @@ NEXUS.AI/
 ├── start.bat                  # Windows: production launcher (opens browser)
 ├── start-dev.bat              # Windows: dev launcher (Vite + FastAPI in 2 terms)
 ├── scripts/
-│   └── Create-Shortcut.ps1    # Drops a NEXUS.AI shortcut on the Desktop
+│   └── Create-Shortcut.ps1    # Drops a DOINg.AI shortcut on the Desktop
 ├── server.py                  # FastAPI backend
 ├── requirements.txt           # Python deps (fastapi, uvicorn)
 ├── package.json               # Node deps and scripts
@@ -267,31 +356,37 @@ NEXUS.AI/
     ├── services/
     │   ├── storage.ts         # localStorage + /api/data + version + conflict handling
     │   ├── llmService.ts      # Ollama / OpenAI-compat / n8n + default prompts
-    │   └── exports.ts         # PDF (print pipeline) and Outlook .eml builders
+    │   └── exports.ts         # PDF (print pipeline), booklet, timeline Gantt, .eml builders
     └── components/
-        ├── Sidebar.tsx        # Nav, theme toggle, notifications, AI insight launcher
+        ├── Sidebar.tsx        # Grouped nav, theme toggle, notifications, AI insight launcher
         ├── Login.tsx
+        ├── OnboardingModal.tsx        # First-login 4-step onboarding
         ├── NotificationCenter.tsx
         ├── AiInsightModal.tsx
-        ├── ui/                # Button, Input, Textarea, Select, Card, Badge
+        ├── ui/                        # Button, Input, Textarea, Select, Card, Badge
         └── views/
             ├── Dashboard.tsx
-            ├── Projects.tsx           # + Kanban + audit log + project detail modal
-            ├── Timeline.tsx
+            ├── Projects.tsx           # Kanban, booklet, dev status, external members
+            ├── Timeline.tsx           # Gantt + PDF export with project selection
             ├── RiskHeatmap.tsx
-            ├── Contributors.tsx
+            ├── Contributors.tsx       # Split view/edit, UID/password admin-only
             ├── WeeklyCheckIn.tsx
             ├── Communications.tsx     # Generate / Templates / Lists / History
             ├── Technologies.tsx
             ├── Repositories.tsx
-            └── Settings.tsx           # LLM / Prompts / Security / Data
+            ├── Hackathons.tsx         # + candidate kit PDF
+            ├── WorkingGroups.tsx      # Tasks + meeting notes + action items
+            ├── SmartTodo.tsx          # Eisenhower matrix + schedule + ICS
+            ├── McpHub.tsx             # MCP server catalog
+            ├── UserGuide.tsx          # Built-in contextual help (role-filtered)
+            └── Settings.tsx           # LLM / Prompts / Security / Data / Families
 ```
 
 ---
 
 ## Data storage and conflicts
 
-NEXUS.AI uses a **dual-layer** persistence strategy borrowed from production-grade local-first apps:
+DOINg.AI uses a **dual-layer** persistence strategy borrowed from production-grade local-first apps:
 
 1. **Browser localStorage** (key `nexus_ai_data_v1`) — instant writes, instant reads, survives reloads.
 2. **`db.json` on disk**, owned by the FastAPI server — canonical source of truth, atomic writes (`tmp + rename`), shared between users on the same machine, picked up first on next boot.
@@ -312,7 +407,7 @@ You can change `db.json`'s location at runtime via the admin **Settings → Data
 POST /api/config/db-path
 Content-Type: application/json
 
-{ "path": "C:\\NEXUS\\my-db.json" }
+{ "path": "C:\\DOINg\\my-db.json" }
 ```
 
 A `server-config.json` file persists the choice across restarts.
@@ -328,7 +423,7 @@ All AI prompts live in `src/services/llmService.ts` under `DEFAULT_PROMPTS`. Key
 | `portfolio_summary`     | AI Executive Insight modal                           |
 | `project_brief`         | Project detail → AI Project Brief                    |
 | `risk_assessment`       | Risk Heatmap → AI Risk Assessment                    |
-| `weekly_email`          | Communications → Weekly                              |
+| `weekly_email`          | Communications → Summary                             |
 | `newsletter`            | Communications → Newsletter                          |
 | `exco_update`           | Communications → Exco                                |
 | `weekly_consolidation`  | Weekly Check-in → AI Consolidate                     |
@@ -349,9 +444,9 @@ npm run build       # outputs ./dist
 python server.py    # FastAPI serves dist + the API on port 3001
 ```
 
-The Vite build emits four chunks (HTML, CSS, vendor, icons, app) with `gzip ≈ 100 kB` total. Source maps are disabled in production.
+The Vite build emits four chunks (HTML, CSS, vendor, icons, app) with `gzip ≈ 170 kB` total. Source maps are disabled in production.
 
-If you want NEXUS.AI to autostart on Windows: drop a shortcut to `start.bat` inside `shell:startup`.
+If you want DOINg.AI to autostart on Windows: drop a shortcut to `start.bat` inside `shell:startup`.
 
 ---
 

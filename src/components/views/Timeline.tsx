@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Calendar, Flag, Filter } from 'lucide-react';
+import { Calendar, Flag, Filter, FileDown, CheckSquare, Square } from 'lucide-react';
 import { AppState, ProjectStatus } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
+import { buildTimelinePDF } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -12,6 +13,8 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 export const Timeline: React.FC<Props> = ({ state }) => {
   const [includeDone, setIncludeDone] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
 
   const visible = useMemo(
     () =>
@@ -20,6 +23,39 @@ export const Timeline: React.FC<Props> = ({ state }) => {
       ),
     [state.projects, includeDone]
   );
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === visible.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(visible.map((p) => p.id)));
+    }
+  };
+
+  const handleExportPDF = () => {
+    const toExport = selectMode && selectedIds.size > 0
+      ? visible.filter((p) => selectedIds.has(p.id))
+      : visible;
+    buildTimelinePDF(toExport, state);
+  };
+
+  const enterSelectMode = () => {
+    setSelectMode(true);
+    setSelectedIds(new Set(visible.map((p) => p.id)));
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
 
   const { min, max, totalDays } = useMemo(() => {
     if (visible.length === 0) {
@@ -61,10 +97,40 @@ export const Timeline: React.FC<Props> = ({ state }) => {
             High-level Gantt across {visible.length} projects · {Math.round(totalDays)} days span.
           </p>
         </div>
-        <Button variant="outline" onClick={() => setIncludeDone((v) => !v)}>
-          <Filter className="w-4 h-4 mr-2" />
-          {includeDone ? 'Hide completed' : 'Show completed'}
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" onClick={() => setIncludeDone((v) => !v)}>
+            <Filter className="w-4 h-4 mr-2" />
+            {includeDone ? 'Hide completed' : 'Show completed'}
+          </Button>
+          {selectMode ? (
+            <>
+              <Button variant="outline" onClick={toggleAll}>
+                {selectedIds.size === visible.length
+                  ? <><CheckSquare className="w-4 h-4 mr-2" />Deselect all</>
+                  : <><Square className="w-4 h-4 mr-2" />Select all</>
+                }
+              </Button>
+              <Button variant="outline" onClick={exitSelectMode}>
+                Cancel
+              </Button>
+              <Button onClick={handleExportPDF}>
+                <FileDown className="w-4 h-4 mr-2" />
+                Export PDF{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={enterSelectMode}>
+                <CheckSquare className="w-4 h-4 mr-2" />
+                Select &amp; Export PDF
+              </Button>
+              <Button variant="outline" onClick={handleExportPDF}>
+                <FileDown className="w-4 h-4 mr-2" />
+                Export all
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="surface border overflow-hidden">
@@ -97,15 +163,35 @@ export const Timeline: React.FC<Props> = ({ state }) => {
             const endPct = ((new Date(p.deadline).getTime() - min) / (max - min)) * 100;
             const width = Math.max(2, endPct - startPct);
             const overdue = new Date(p.deadline).getTime() < Date.now() && p.status !== 'Done';
+            const isSelected = selectedIds.has(p.id);
             return (
-              <div key={p.id} className="grid grid-cols-12 gap-2 items-center px-3 py-3">
-                <div className="col-span-12 md:col-span-3 min-w-0">
+              <div
+                key={p.id}
+                className={`grid gap-2 items-center px-3 py-3 transition-colors ${
+                  selectMode
+                    ? isSelected
+                      ? 'bg-brand/5 cursor-pointer'
+                      : 'opacity-60 cursor-pointer hover:opacity-80'
+                    : ''
+                }`}
+                style={{ gridTemplateColumns: selectMode ? 'auto 1fr 3fr' : undefined }}
+                onClick={selectMode ? () => toggleSelect(p.id) : undefined}
+              >
+                {selectMode && (
+                  <div className="flex items-center" onClick={(e) => { e.stopPropagation(); toggleSelect(p.id); }}>
+                    {isSelected
+                      ? <CheckSquare className="w-4 h-4 text-brand" />
+                      : <Square className="w-4 h-4 text-neutral-400" />
+                    }
+                  </div>
+                )}
+                <div className={`${selectMode ? '' : 'col-span-12 md:col-span-3'} min-w-0`}>
                   <p className="text-sm font-bold uppercase tracking-tight truncate">{p.name}</p>
                   <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted">
                     {p.status}
                   </p>
                 </div>
-                <div className="col-span-12 md:col-span-9 relative h-10">
+                <div className={`${selectMode ? '' : 'col-span-12 md:col-span-9'} relative h-10`}>
                   {/* Today line */}
                   {todayPct >= 0 && todayPct <= 100 && (
                     <div

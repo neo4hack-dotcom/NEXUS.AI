@@ -38,12 +38,14 @@ import {
   ProjectPresentation,
   ProjectLinkedApp,
   ProjectFamily,
+  DevStatus,
+  ExternalMember,
 } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
-import { buildProjectHTML } from '../../services/exports';
+import { buildProjectHTML, buildBookletHTML } from '../../services/exports';
 import {
   buildProjectBriefData,
   DEFAULT_PROMPTS,
@@ -122,6 +124,19 @@ const CONF_STYLE: Record<string, string> = {
   internal: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   confidential: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   restricted: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+};
+
+const DEV_STATUS_LABEL: Record<DevStatus, string> = {
+  to_start: 'To Start',
+  dev: 'Dev',
+  uat: 'UAT',
+  prod: 'Prod',
+};
+const DEV_STATUS_STYLE: Record<DevStatus, string> = {
+  to_start: 'bg-neutral-100 text-neutral-600 dark:bg-ink-700 dark:text-neutral-300',
+  dev:      'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  uat:      'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  prod:     'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
 };
 
 /* ── RAG health helper ── */
@@ -414,6 +429,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [showBooklet, setShowBooklet] = useState(false);
   const [view, setView] = useState<'list' | 'portfolio'>('list');
   const [showFamilyManager, setShowFamilyManager] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
@@ -520,6 +536,10 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
               AI PRJ
             </Button>
           )}
+          <Button variant="outline" size="md" onClick={() => setShowBooklet(true)}>
+            <Printer className="w-4 h-4 mr-2" />
+            Booklet
+          </Button>
           {canEdit && (
             <>
               {(state.projectTemplates || []).length > 0 && (
@@ -644,6 +664,11 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                   <Badge tone={overdue ? 'red' : p.status === 'Done' ? 'muted' : 'green'}>
                     {p.status}
                   </Badge>
+                  {p.devStatus && (
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${DEV_STATUS_STYLE[p.devStatus]}`}>
+                      {DEV_STATUS_LABEL[p.devStatus]}
+                    </span>
+                  )}
                   {p.confidentiality && p.confidentiality !== 'internal' && (
                     <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${CONF_STYLE[p.confidentiality] || ''}`}>
                       {p.confidentiality}
@@ -766,6 +791,244 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           }}
         />
       )}
+
+      {showBooklet && (
+        <BookletModal
+          state={state}
+          currentUser={currentUser}
+          onClose={() => setShowBooklet(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+/* === External Members Field === */
+
+const ExternalMembersField: React.FC<{
+  members: ExternalMember[];
+  canEdit: boolean;
+  onChange: (members: ExternalMember[]) => void;
+}> = ({ members, canEdit, onChange }) => {
+  const [form, setForm] = useState({ name: '', email: '', role: '', company: '' });
+  const [open, setOpen] = useState(false);
+
+  const add = () => {
+    if (!form.name.trim()) return;
+    onChange([...members, { id: generateId(), ...form }]);
+    setForm({ name: '', email: '', role: '', company: '' });
+    setOpen(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="label-xs">External Members</label>
+        {canEdit && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="text-[10px] font-bold uppercase tracking-[0.12em] text-brand hover:underline flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> Add external
+          </button>
+        )}
+      </div>
+
+      {open && canEdit && (
+        <div className="border border-brand/30 bg-brand/5 p-3 grid grid-cols-2 gap-2">
+          <Input placeholder="Full name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input placeholder="Role / function" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} />
+          <Input placeholder="Company / org" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+          <div className="col-span-2 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={add} disabled={!form.name.trim()}>Add</Button>
+          </div>
+        </div>
+      )}
+
+      {members.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {members.map((m) => (
+            <div key={m.id} className="flex items-center gap-2 px-2 py-1 border border-neutral-300 dark:border-ink-500 bg-neutral-50 dark:bg-ink-800 text-xs">
+              <div>
+                <span className="font-bold">{m.name}</span>
+                {m.role && <span className="text-muted ml-1">· {m.role}</span>}
+                {m.company && <span className="text-muted ml-1">({m.company})</span>}
+              </div>
+              {canEdit && (
+                <button onClick={() => onChange(members.filter((x) => x.id !== m.id))} className="text-muted hover:text-red-500 ml-1">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {members.length === 0 && !open && (
+        <p className="text-xs text-muted">No external members yet.</p>
+      )}
+    </div>
+  );
+};
+
+/* === Booklet Presentation Modal === */
+
+const BookletModal: React.FC<{
+  state: AppState;
+  currentUser: User;
+  onClose: () => void;
+}> = ({ state, currentUser, onClose }) => {
+  const activeProjects = state.projects.filter((p) => !p.isArchived);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState('');
+  const [useAI, setUseAI] = useState(!!state.llmConfig?.provider);
+  const canUseAI = (currentUser.role === 'admin' || currentUser.role === 'manager') && !!state.llmConfig?.provider;
+
+  const toggle = (id: string) =>
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const selectAll = () => setSelected(new Set(activeProjects.map((p) => p.id)));
+  const clearAll = () => setSelected(new Set());
+
+  const chosenProjects = activeProjects.filter((p) => selected.has(p.id));
+
+  const generate = async () => {
+    if (chosenProjects.length === 0) return;
+    let summary = '';
+    if (useAI && canUseAI) {
+      setAiLoading(true);
+      try {
+        const names = chosenProjects.map((p) => p.name).join(', ');
+        const statuses = chosenProjects.map((p) => `${p.name}: ${p.status}`).join('; ');
+        const prompt = `You are a senior PMO analyst writing an executive summary for a SteerCo presentation.
+Portfolio: ${chosenProjects.length} projects — ${statuses}.
+Write a concise, impactful 3-4 sentence executive summary highlighting key achievements, risks, and strategic recommendations.
+Be direct, professional, and action-oriented. No markdown, plain text only.`;
+        const result = await runPrompt(prompt, state.llmConfig);
+        summary = result || '';
+        setAiSummary(summary);
+      } catch (_) {
+        summary = '';
+      }
+      setAiLoading(false);
+    }
+    buildBookletHTML(chosenProjects, state, summary || undefined);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-2xl animate-slide-up flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <div>
+            <p className="label-xs">SteerCo Presentation</p>
+            <h2 className="text-lg font-black uppercase tracking-tight">Booklet Presentation</h2>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-muted hover:text-brand">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Info banner */}
+          <div className="border border-brand/30 bg-brand/5 p-3 flex items-start gap-3">
+            <Sparkles className="w-4 h-4 text-brand mt-0.5 shrink-0" />
+            <p className="text-xs text-muted">
+              Generates a professional A4 landscape booklet: cover page, agenda, visual exec summary with KPI charts, and one detailed page per project — ready to print or export as PDF.
+            </p>
+          </div>
+
+          {/* Project selector */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="label-xs">Select projects ({selected.size} selected)</label>
+              <div className="flex gap-2">
+                <button onClick={selectAll} className="text-[10px] font-bold uppercase tracking-[0.12em] text-brand hover:underline">All</button>
+                <span className="text-muted text-[10px]">·</span>
+                <button onClick={clearAll} className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted hover:text-brand">None</button>
+              </div>
+            </div>
+            <div className="border border-neutral-200 dark:border-ink-600 divide-y divide-neutral-200 dark:divide-ink-600 max-h-64 overflow-y-auto">
+              {activeProjects.map((p) => {
+                const tasks = p.tasks || [];
+                const totalW = tasks.reduce((s, t) => s + (t.weight || 1), 0);
+                const doneW = tasks.filter((t) => t.status === 'Done').reduce((s, t) => s + (t.weight || 1), 0);
+                const pct = totalW ? Math.round((doneW / totalW) * 100) : 0;
+                const family = p.familyId ? (state.projectFamilies || []).find((f) => f.id === p.familyId) : null;
+                const checked = selected.has(p.id);
+                return (
+                  <label key={p.id} className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${checked ? 'bg-brand/5' : 'hover:bg-neutral-50 dark:hover:bg-ink-700'}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(p.id)}
+                      className="w-4 h-4 accent-brand"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold uppercase tracking-tight text-sm truncate">{p.name}</span>
+                        {family && (
+                          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5" style={{ backgroundColor: (family.color || '#FF3E00') + '20', color: family.color || '#FF3E00' }}>{family.name}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-[10px] text-muted uppercase tracking-[0.1em]">{p.status}</span>
+                        <span className="text-[10px] text-muted">{pct}% done</span>
+                        <span className="text-[10px] text-muted">{tasks.length} tasks</span>
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+              {activeProjects.length === 0 && (
+                <p className="p-6 text-center text-sm text-muted">No active projects.</p>
+              )}
+            </div>
+          </div>
+
+          {/* AI toggle */}
+          {canUseAI && (
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useAI}
+                onChange={(e) => setUseAI(e.target.checked)}
+                className="w-4 h-4 accent-brand"
+              />
+              <div>
+                <p className="text-sm font-bold">AI Executive Summary</p>
+                <p className="text-xs text-muted">Generate a SteerCo-ready executive summary using the local LLM</p>
+              </div>
+              <Sparkles className="w-4 h-4 text-brand ml-auto" />
+            </label>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <p className="text-xs text-muted">
+            {chosenProjects.length === 0 ? 'Select at least 1 project' : `${chosenProjects.length + 3} pages: cover + agenda + exec summary + ${chosenProjects.length} project${chosenProjects.length !== 1 ? 's' : ''}`}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button
+              onClick={generate}
+              disabled={chosenProjects.length === 0 || aiLoading}
+            >
+              {aiLoading ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating AI summary…</>
+              ) : (
+                <><Printer className="w-4 h-4 mr-2" /> Generate Booklet</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1055,6 +1318,19 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                   <option value="restricted">Restricted</option>
                 </Select>
               </Field>
+              <Field label="Dev Workflow">
+                <Select
+                  value={draft.devStatus || ''}
+                  onChange={(e) => setDraft({ ...draft, devStatus: (e.target.value as DevStatus) || undefined })}
+                  disabled={!canEdit}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="to_start">To Start</option>
+                  <option value="dev">Dev</option>
+                  <option value="uat">UAT</option>
+                  <option value="prod">Prod</option>
+                </Select>
+              </Field>
               <Field label="Family">
                 <Select
                   value={draft.familyId || ''}
@@ -1224,6 +1500,15 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                     })}
                   </div>
                 </Field>
+              </div>
+
+              {/* External members */}
+              <div className="md:col-span-2">
+                <ExternalMembersField
+                  members={draft.externalMembers || []}
+                  canEdit={canEdit}
+                  onChange={(externalMembers) => setDraft({ ...draft, externalMembers })}
+                />
               </div>
 
               <div className="md:col-span-2 mt-2 surface-flat border p-4">
@@ -1630,12 +1915,20 @@ const KanbanBoard: React.FC<{
               ? 'border-red-500/50 bg-red-500/5'
               : status === TaskStatus.PAUSED
               ? 'border-orange-500/50 bg-orange-500/5'
+              : status === TaskStatus.ONGOING
+              ? 'border-blue-500/40 bg-blue-500/8 dark:bg-blue-500/10'
+              : status === TaskStatus.DONE
+              ? 'border-emerald-500/40 bg-emerald-500/8 dark:bg-emerald-500/10'
               : '';
           const labelColor =
             status === TaskStatus.BLOCKED
               ? 'text-red-500'
               : status === TaskStatus.PAUSED
               ? 'text-orange-500'
+              : status === TaskStatus.ONGOING
+              ? 'text-blue-600 dark:text-blue-400'
+              : status === TaskStatus.DONE
+              ? 'text-emerald-600 dark:text-emerald-400'
               : '';
           return (
             <div
