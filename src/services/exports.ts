@@ -1231,7 +1231,6 @@ export const buildBookletHTML = (
 
       <!-- Main content -->
       <div style="padding:60px 48px;flex:1;display:flex;flex-direction:column;justify-content:center">
-        <div style="font-size:9pt;text-transform:uppercase;letter-spacing:0.3em;color:${BRAND};font-weight:900;font-family:system-ui;margin-bottom:20px">STEERCO PRESENTATION</div>
         <div style="font-size:52pt;font-weight:900;line-height:0.9;font-family:system-ui;letter-spacing:-0.03em;margin-bottom:12px">PROJECT<br>PORTFOLIO<br><span style="color:${BRAND}">REVIEW</span></div>
         <div style="width:80px;height:4px;background:${BRAND};margin:24px 0"></div>
         <div style="font-size:12pt;color:#888;font-family:system-ui;margin-bottom:8px">${projects.length} project${projects.length !== 1 ? 's' : ''} · ${activeProjects} active · ${avgPct}% avg progress</div>
@@ -1246,7 +1245,6 @@ export const buildBookletHTML = (
       <div style="padding:28px 48px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ffffff10">
         <div style="font-size:22pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
         <div style="text-align:right">
-          <div style="font-size:8.5pt;color:#555;font-family:system-ui;letter-spacing:0.1em;text-transform:uppercase">AI Project Operations Platform</div>
           <div style="font-size:8pt;color:#444;font-family:system-ui;margin-top:3px">Generated ${today}</div>
         </div>
       </div>
@@ -1259,7 +1257,7 @@ export const buildBookletHTML = (
     const sc = statusColor[p.status] || BRAND;
     return `
     <div style="display:flex;align-items:center;gap:16px;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:${i % 2 === 0 ? '#fff' : '#fafafa'}">
-      <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">${i + 3}</div>
+      <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">${i + 5}</div>
       <div style="width:4px;height:36px;background:${color};flex-shrink:0"></div>
       <div style="flex:1;min-width:0">
         <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em">${esc(p.name)}</div>
@@ -1289,12 +1287,17 @@ export const buildBookletHTML = (
         <div style="width:4px;height:36px;background:#64748b;flex-shrink:0"></div>
         <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em">Agenda</div>
       </div>
-      <div style="margin-bottom:12px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#fff4f0">
+      <div style="margin-bottom:4px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#fff4f0">
         <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">3</div>
         <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
         <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em;color:${BRAND}">Executive Summary</div>
       </div>
-      <!-- Project rows -->
+      <div style="margin-bottom:12px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#0a0a0b;color:#fff">
+        <div style="font-size:28pt;font-weight:900;color:#333;font-family:system-ui;min-width:40px;text-align:right;line-height:1">4</div>
+        <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
+        <div style="font-size:10.5pt;font-weight:800;text-transform:uppercase;letter-spacing:0.03em">Project Booklet</div>
+      </div>
+      <!-- Project rows (start at page 5) -->
       ${agendaRows}
     </div>`);
 
@@ -1362,6 +1365,30 @@ export const buildBookletHTML = (
           <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:${BRAND};font-weight:900;margin-bottom:8px">AI Executive Summary</div>
           <div style="font-size:9.5pt;color:#333;line-height:1.6;font-family:system-ui">${esc(aiExecSummary)}</div>
         </div>` : ''}
+      </div>
+    </div>`);
+
+  // ── Separator page — Project Booklet ────────────────────────────────
+  const separatorPage = page(`
+    <div style="min-height:100vh;background:#0a0a0b;color:#fff;display:flex;flex-direction:column;justify-content:center;align-items:center;position:relative;overflow:hidden">
+      <!-- Geometric decoration -->
+      <div style="position:absolute;top:-100px;left:-100px;width:500px;height:500px;border:1px solid ${BRAND};opacity:0.08;transform:rotate(20deg)"></div>
+      <div style="position:absolute;bottom:-80px;right:-80px;width:350px;height:350px;border:1px solid #ffffff;opacity:0.04;transform:rotate(-15deg)"></div>
+      <div style="position:absolute;top:0;right:0;width:4px;height:100%;background:${BRAND}"></div>
+      <div style="position:absolute;bottom:0;left:0;width:100%;height:3px;background:linear-gradient(90deg,${BRAND},transparent)"></div>
+      <!-- Big number decoration -->
+      <div style="position:absolute;font-size:320pt;font-weight:900;color:#ffffff06;font-family:system-ui;line-height:1;user-select:none;pointer-events:none;top:50%;transform:translateY(-50%);right:-20px">P</div>
+      <!-- Content -->
+      <div style="text-align:center;position:relative;z-index:1;padding:60px">
+        <div style="font-size:9pt;letter-spacing:0.4em;text-transform:uppercase;color:${BRAND};font-weight:900;font-family:system-ui;margin-bottom:28px">Portfolio Review</div>
+        <div style="font-size:64pt;font-weight:900;line-height:0.9;font-family:system-ui;letter-spacing:-0.04em;margin-bottom:20px">PROJECT<br><span style="color:${BRAND}">BOOKLET</span></div>
+        <div style="width:60px;height:3px;background:${BRAND};margin:28px auto"></div>
+        <div style="font-size:11pt;color:#666;font-family:system-ui;letter-spacing:0.1em">${projects.length} project${projects.length !== 1 ? 's' : ''} · Detailed reviews</div>
+      </div>
+      <!-- Bottom bar -->
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:24px 48px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ffffff08">
+        <div style="font-size:18pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
+        <div style="font-size:8pt;color:#444;font-family:system-ui;letter-spacing:0.1em;text-transform:uppercase">${today}</div>
       </div>
     </div>`);
 
@@ -1501,6 +1528,30 @@ export const buildBookletHTML = (
     </div>`, i < projects.length - 1);
   }).join('');
 
+  // ── Closing page — Thank You ─────────────────────────────────────────
+  const closingPage = page(`
+    <div style="min-height:100vh;background:#0a0a0b;color:#fff;display:flex;flex-direction:column;justify-content:center;align-items:center;position:relative;overflow:hidden">
+      <!-- Background decoration -->
+      <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 70% 30%,${BRAND}0d 0%,transparent 60%)"></div>
+      <div style="position:absolute;top:0;left:0;width:4px;height:100%;background:${BRAND}"></div>
+      <div style="position:absolute;bottom:0;right:0;width:4px;height:60%;background:${BRAND};opacity:0.3"></div>
+      <div style="position:absolute;top:40px;right:40px;width:180px;height:180px;border:1px solid ${BRAND};opacity:0.12;transform:rotate(15deg)"></div>
+      <div style="position:absolute;bottom:60px;left:60px;width:120px;height:120px;border:1px solid #fff;opacity:0.04;transform:rotate(-10deg)"></div>
+      <div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:linear-gradient(90deg,${BRAND},transparent)"></div>
+      <!-- Content -->
+      <div style="text-align:center;position:relative;z-index:1;padding:60px">
+        <div style="font-size:8pt;letter-spacing:0.5em;text-transform:uppercase;color:${BRAND};font-weight:900;font-family:system-ui;margin-bottom:24px">End of Presentation</div>
+        <div style="font-size:80pt;font-weight:900;line-height:0.85;font-family:system-ui;letter-spacing:-0.04em;margin-bottom:24px">Thank<br><span style="color:${BRAND}">You.</span></div>
+        <div style="width:50px;height:3px;background:${BRAND};margin:32px auto"></div>
+        <div style="font-size:10pt;color:#555;font-family:system-ui;line-height:1.7;max-width:420px;margin:0 auto">
+          Questions &amp; discussion<br>
+          <span style="color:#333;font-size:9pt">${today}</span>
+        </div>
+        <div style="margin-top:48px;font-size:26pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
+        <div style="font-size:8pt;color:#444;letter-spacing:0.2em;text-transform:uppercase;font-family:system-ui;margin-top:6px">AI Project Operations Platform</div>
+      </div>
+    </div>`, false);
+
   // ── Assemble full document ───────────────────────────────────────────
   const w = window.open('', '_blank');
   if (!w) return;
@@ -1538,7 +1589,9 @@ export const buildBookletHTML = (
   ${coverPage}
   ${agendaPage}
   ${execPage}
+  ${separatorPage}
   ${projectPages}
+  ${closingPage}
 </body>
 </html>`);
   w.document.close();
@@ -1709,6 +1762,178 @@ export const buildTimelinePDF = (projects: Project[], _state: AppState): void =>
 </html>`;
 
   const w = window.open('', '_blank', 'width=1200,height=850');
+  if (!w) { alert('Allow pop-ups to export PDF.'); return; }
+  w.document.write(html);
+  w.document.close();
+};
+
+/* ====================================================================
+   TECH STACK ONE-PAGER — grouped by category, DOINg.AI brand
+   ==================================================================== */
+
+export const buildTechStackPDF = (technologies: import('../types').Technology[]): void => {
+  if (technologies.length === 0) {
+    alert('No technologies to export.');
+    return;
+  }
+
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Group by category
+  const groups: Record<string, import('../types').Technology[]> = {};
+  const ORDER = ['language', 'framework', 'library', 'database', 'tool', 'service'];
+  technologies.forEach((t) => {
+    const cat = t.category || 'other';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(t);
+  });
+  // Sort within each group by maturity then name
+  const MATURITY_RANK: Record<string, number> = { adopted: 0, evaluating: 1, hold: 2, deprecated: 3 };
+  Object.values(groups).forEach((arr) =>
+    arr.sort((a, b) => {
+      const ma = MATURITY_RANK[a.maturityStatus || ''] ?? 9;
+      const mb = MATURITY_RANK[b.maturityStatus || ''] ?? 9;
+      return ma !== mb ? ma - mb : a.name.localeCompare(b.name);
+    })
+  );
+
+  const CATEGORY_LABEL: Record<string, string> = {
+    language: 'Languages',
+    framework: 'Frameworks',
+    library: 'Libraries',
+    database: 'Databases',
+    tool: 'Tools',
+    service: 'Services',
+    other: 'Other',
+  };
+
+  const MATURITY_COLOR: Record<string, string> = {
+    adopted: COL_GREEN,
+    evaluating: COL_AMBER,
+    hold: COL_AMBER,
+    deprecated: COL_RED,
+  };
+
+  const LAYER_COLOR: Record<string, string> = {
+    frontend: '#6366f1',
+    backend: COL_BLUE,
+    fullstack: BRAND,
+    data: '#f59e0b',
+    'ml-ai': '#8b5cf6',
+    infrastructure: '#64748b',
+    devops: '#0ea5e9',
+    mobile: '#ec4899',
+    security: COL_RED,
+  };
+
+  const techCard = (t: import('../types').Technology) => {
+    const mColor = t.maturityStatus ? MATURITY_COLOR[t.maturityStatus] : '#94a3b8';
+    const lColor = t.layer ? LAYER_COLOR[t.layer] : '#94a3b8';
+    return `
+    <div style="border:1px solid #e5e7eb;border-top:3px solid ${mColor};padding:12px 14px;background:#fff;break-inside:avoid">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:6px">
+        <div style="font-size:10.5pt;font-weight:900;text-transform:uppercase;letter-spacing:0.04em;color:#111;font-family:system-ui;line-height:1.2">${esc(t.name)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-end;flex-shrink:0">
+          ${t.version ? `<span style="background:#f3f4f6;color:#666;font-size:6.5pt;font-weight:700;padding:1px 6px;font-family:monospace">v${esc(t.version)}</span>` : ''}
+          ${t.maturityStatus ? `<span style="background:${mColor}18;color:${mColor};font-size:6.5pt;font-weight:900;text-transform:uppercase;padding:1px 6px;letter-spacing:0.08em;font-family:system-ui">${esc(t.maturityStatus)}</span>` : ''}
+          ${t.layer ? `<span style="background:${lColor}18;color:${lColor};font-size:6.5pt;font-weight:900;text-transform:uppercase;padding:1px 6px;letter-spacing:0.08em;font-family:system-ui">${esc(t.layer)}</span>` : ''}
+        </div>
+      </div>
+      ${t.description ? `<div style="font-size:8pt;color:#666;line-height:1.5;font-family:system-ui;margin-bottom:5px">${esc(t.description.slice(0, 90))}${t.description.length > 90 ? '…' : ''}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${t.internalOwner ? `<div style="font-size:7pt;color:#aaa;font-family:system-ui"><span style="color:#888">Owner:</span> ${esc(t.internalOwner)}</div>` : ''}
+        ${t.license ? `<div style="font-size:7pt;color:#aaa;font-family:system-ui"><span style="color:#888">License:</span> ${esc(t.license)}</div>` : ''}
+        ${t.url ? `<a href="${esc(t.url)}" style="font-size:7pt;color:${BRAND};font-family:system-ui;text-decoration:none" target="_blank">↗ Link</a>` : ''}
+      </div>
+    </div>`;
+  };
+
+  const groupsSvg = ORDER.concat(
+    Object.keys(groups).filter((k) => !ORDER.includes(k))
+  )
+    .filter((cat) => groups[cat] && groups[cat].length > 0)
+    .map((cat) => {
+      const items = groups[cat];
+      return `
+    <div style="margin-bottom:24px;break-inside:avoid">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #0a0a0b">
+        <div style="background:#0a0a0b;color:#fff;font-size:7pt;font-weight:900;text-transform:uppercase;letter-spacing:0.2em;padding:4px 12px;font-family:system-ui">${esc(CATEGORY_LABEL[cat] || cat)}</div>
+        <div style="font-size:8pt;color:#aaa;font-family:system-ui">${items.length} entr${items.length > 1 ? 'ies' : 'y'}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        ${items.map(techCard).join('')}
+      </div>
+    </div>`;
+    })
+    .join('');
+
+  // Stats
+  const adopted = technologies.filter((t) => t.maturityStatus === 'adopted').length;
+  const evaluating = technologies.filter((t) => t.maturityStatus === 'evaluating').length;
+  const deprecated = technologies.filter((t) => t.maturityStatus === 'deprecated').length;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>DOINg.AI — Tech Stack</title>
+  <style>
+    @page { size: A4; margin: 12mm 14mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #fff; color: #0a0a0b; font-size: 10pt; }
+    .no-print { display: block; }
+    @media print { .no-print { display: none !important; } }
+    .footer-bar { margin-top: 20px; border-top: 1px solid #e5e7eb; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 7pt; color: #bbb; text-transform: uppercase; letter-spacing: 0.1em; font-family: system-ui; }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:1000;background:#0a0a0b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:10px 24px">
+    <div style="font-size:11pt;font-weight:900;font-family:system-ui">DOINg<span style="color:#FF3E00">.AI</span> <span style="font-weight:400;color:#888;font-size:9pt">— Tech Stack &middot; ${technologies.length} technologies</span></div>
+    <button onclick="window.print()" style="background:#FF3E00;color:#fff;border:none;padding:8px 24px;font-size:10pt;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;font-family:system-ui">Print / Save PDF</button>
+  </div>
+  <div class="no-print" style="height:44px"></div>
+
+  <!-- Page header -->
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:4px solid #0a0a0b;padding-bottom:14px;margin-bottom:20px">
+    <div>
+      <div style="font-size:8pt;font-weight:900;text-transform:uppercase;letter-spacing:0.3em;color:#FF3E00;font-family:system-ui;margin-bottom:4px">Technology Catalog</div>
+      <div style="font-size:26pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.03em;line-height:1;font-family:system-ui">Tech Stack<br><span style="color:#FF3E00">Overview</span></div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:22pt;font-weight:900;font-family:system-ui">DOINg<span style="color:#FF3E00">.AI</span></div>
+      <div style="font-size:8pt;color:#888;margin-top:3px;letter-spacing:0.1em;text-transform:uppercase;font-family:system-ui">${today}</div>
+    </div>
+  </div>
+
+  <!-- KPI strip -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px">
+    ${kpiTile('Total', technologies.length, BRAND, `${Object.keys(groups).length} categories`)}
+    ${kpiTile('Adopted', adopted, COL_GREEN, `${technologies.length ? Math.round((adopted / technologies.length) * 100) : 0}% of stack`)}
+    ${kpiTile('Evaluating', evaluating, COL_AMBER, 'under review')}
+    ${kpiTile('Deprecated', deprecated, deprecated > 0 ? COL_RED : '#94a3b8', deprecated > 0 ? 'to phase out' : 'none')}
+  </div>
+
+  <!-- Maturity legend -->
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px;padding:8px 14px;background:#f8fafc;border-left:3px solid #0a0a0b">
+    <div style="font-size:7pt;font-weight:900;text-transform:uppercase;letter-spacing:0.16em;color:#888;font-family:system-ui">Maturity:</div>
+    <span style="background:${COL_GREEN}18;color:${COL_GREEN};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px;font-family:system-ui">Adopted</span>
+    <span style="background:${COL_AMBER}18;color:${COL_AMBER};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px;font-family:system-ui">Evaluating / Hold</span>
+    <span style="background:${COL_RED}18;color:${COL_RED};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px;font-family:system-ui">Deprecated</span>
+    <div style="margin-left:auto;font-size:7pt;color:#aaa;font-family:system-ui">Top border colour = maturity status</div>
+  </div>
+
+  <!-- Tech groups -->
+  ${groupsSvg}
+
+  <!-- Footer -->
+  <div class="footer-bar">
+    <div>DOINg.AI &middot; AI Project Operations Platform</div>
+    <div>Generated ${today} &middot; ${technologies.length} technologies</div>
+  </div>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank', 'width=1000,height=1300');
   if (!w) { alert('Allow pop-ups to export PDF.'); return; }
   w.document.write(html);
   w.document.close();

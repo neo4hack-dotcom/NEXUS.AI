@@ -162,13 +162,19 @@ const App: React.FC = () => {
       applyThemeDom(next.theme);
     });
 
-    // Conflict resolution: prefer server data
+    // Conflict resolution: prefer server data.
+    // Use functional setAppState so we always read the live currentUserId / theme
+    // rather than the stale `local` snapshot captured at initial load.
+    // We do NOT call saveState() here — the useEffect that watches appState will
+    // handle the persist, and an extra saveState call could trigger another 409 loop.
     const onConflict = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.serverData) {
-        const merged = { ...detail.serverData, currentUserId: local.currentUserId, theme: local.theme };
-        setAppState(merged);
-        saveState({ ...merged, lastUpdated: detail.serverData.lastUpdated || 0 });
+        setAppState((curr): AppState => ({
+          ...detail.serverData,
+          currentUserId: curr?.currentUserId ?? null,
+          theme: curr?.theme ?? 'dark',
+        }));
       }
     };
     window.addEventListener('nexus_conflict', onConflict);

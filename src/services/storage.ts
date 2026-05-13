@@ -334,12 +334,43 @@ export const importBackup = (
   onError: (msg: string) => void
 ): void => {
   const reader = new FileReader();
-  reader.onload = (e) => {
+
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  reader.onload = async (e) => {
     try {
       const raw = JSON.parse(e.target?.result as string);
       const imported = sanitizeAppState(raw);
-      // Force-write to server without version check so we can overwrite
-      _serverVersion = 0;
+
+      // --- Sync to server BEFORE notifying React ---
+      // We use X-Base-Version: force to bypass optimistic-concurrency checks.
+      // This must happen first so that _serverVersion is current when the
+      // subsequent saveState() (triggered by the React useEffect) fires —
+      // otherwise it would send X-Base-Version: 0, get a 409, and the
+      // onConflict handler would overwrite the imported data with old server data.
+      const { currentUserId: _uid, theme: _theme, ...serverPayload } = imported;
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Base-Version': 'force',
+          },
+          body: JSON.stringify(serverPayload),
+        });
+        if (res.ok) {
+          const result = await res.json();
+          // Update so the polling never sees an older version and overwrites us.
+          _serverVersion = result.timestamp ?? Date.now();
+        } else {
+          // Server is up but rejected (shouldn't happen with "force") — block
+          // polling for 5 min to avoid reverting localStorage.
+          _serverVersion = Date.now() + 300_000;
+        }
+      } catch {
+        // Server offline — block polling revert for 5 min so localStorage wins.
+        _serverVersion = Date.now() + 300_000;
+      }
+
       onDone(imported);
     } catch {
       onError('Invalid backup file — could not parse JSON.');
