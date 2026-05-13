@@ -101,6 +101,8 @@ export interface ProjectTemplate {
 
 export type DevStatus = 'to_start' | 'dev' | 'uat' | 'prod';
 
+export type InnovationStatus = 'poc' | 'pilot' | 'prod';
+
 export interface ExternalMember {
   id: string;
   name: string;
@@ -117,6 +119,7 @@ export interface Project {
   notes?: string;
   status: ProjectStatus;
   devStatus?: DevStatus;           // dev workflow stage
+  innovationStatus?: InnovationStatus; // innovation maturity stage
   managerId?: string;              // user id of owner/PM
   startDate: string;
   deadline: string;
