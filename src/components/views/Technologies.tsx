@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Search, Plus, Code, Database, Box, Wrench, FileCode, Cloud, Trash2, X, ExternalLink } from 'lucide-react';
+import { Search, Plus, Code, Database, Box, Wrench, FileCode, Cloud, Trash2, X, ExternalLink, FileDown } from 'lucide-react';
 import { AppState, Technology, TechLayer, TechMaturity, User } from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
 import { generateId } from '../../services/storage';
+import { buildTechStackPDF } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -73,7 +74,7 @@ export const Technologies: React.FC<Props> = ({ state, currentUser, update }) =>
             Catalog of frameworks, libraries, languages and services in use.
           </p>
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
+        <div className="flex gap-2 w-full md:w-auto flex-wrap">
           <div className="relative flex-1 md:w-64">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <Input
@@ -83,6 +84,14 @@ export const Technologies: React.FC<Props> = ({ state, currentUser, update }) =>
               className="pl-9"
             />
           </div>
+          <Button
+            variant="outline"
+            onClick={() => buildTechStackPDF(filtered.length > 0 ? filtered : state.technologies)}
+            title="Export tech stack as PDF one-pager"
+          >
+            <FileDown className="w-4 h-4 mr-2" />
+            Export PDF
+          </Button>
           {canEdit && (
             <Button
               onClick={() => {

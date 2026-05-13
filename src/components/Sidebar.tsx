@@ -90,7 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'Collaboration & Communication',
+    label: 'Collaboration',
     items: [
       { id: 'contributors', label: 'Contributors', icon: Users },
       { id: 'communications', label: 'Communications', icon: Mail, minRole: 'manager' },
