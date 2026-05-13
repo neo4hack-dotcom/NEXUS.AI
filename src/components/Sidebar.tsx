@@ -72,17 +72,25 @@ const ROLE_LEVEL: Record<Role, number> = { viewer: 0, contributor: 1, manager: 2
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Project Management',
+    label: 'Dashboard',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'projects', label: 'Projects', icon: Target },
-      { id: 'timeline', label: 'Timeline', icon: Calendar },
-      { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'admin' },
-      { id: 'todos', label: 'Smart ToDo', icon: CheckSquare, minRole: 'contributor' },
     ],
   },
   {
-    label: 'Collaboration',
+    label: 'Project Management',
+    items: [
+      { id: 'projects', label: 'Projects', icon: Target },
+      { id: 'timeline', label: 'Timeline', icon: Calendar },
+      { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'admin' },
+      { id: 'tech', label: 'Technologies', icon: Cpu },
+      { id: 'repos', label: 'Code Repositories', icon: GitBranch },
+      { id: 'hackathons', label: 'Hackathons', icon: Zap },
+      { id: 'mcp', label: 'MCP Hub', icon: Plug },
+    ],
+  },
+  {
+    label: 'Collaboration & Communication',
     items: [
       { id: 'contributors', label: 'Contributors', icon: Users, minRole: 'manager' },
       { id: 'communications', label: 'Communications', icon: Mail, minRole: 'manager' },
@@ -93,10 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Tools',
     items: [
-      { id: 'tech', label: 'Technologies', icon: Cpu },
-      { id: 'repos', label: 'Code Repositories', icon: GitBranch },
-      { id: 'hackathons', label: 'Hackathons', icon: Zap },
-      { id: 'mcp', label: 'MCP Hub', icon: Plug },
+      { id: 'todos', label: 'Smart ToDo', icon: CheckSquare, minRole: 'contributor' },
     ],
   },
   {
