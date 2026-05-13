@@ -15,11 +15,11 @@ import {
   LogOut,
   Bell,
   Sparkles,
-  CircleDot,
   Zap,
   Network,
   BookOpen,
   CheckSquare,
+  Plug,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 
@@ -37,7 +37,8 @@ export type TabId =
   | 'workinggroups'
   | 'settings'
   | 'guide'
-  | 'todos';
+  | 'todos'
+  | 'mcp';
 
 interface Props {
   activeTab: TabId;
@@ -62,22 +63,48 @@ interface NavItem {
   minRole?: MinRole;
 }
 
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
 const ROLE_LEVEL: Record<Role, number> = { viewer: 0, contributor: 1, manager: 2, admin: 3 };
 
-const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'projects', label: 'Projects', icon: Target },
-  { id: 'timeline', label: 'Timeline', icon: Calendar },
-  { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'admin' },
-  { id: 'contributors', label: 'Contributors', icon: Users, minRole: 'manager' },
-  { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList, minRole: 'contributor' },
-  { id: 'communications', label: 'Communications', icon: Mail, minRole: 'contributor' },
-  { id: 'tech', label: 'Technologies', icon: Cpu },
-  { id: 'repos', label: 'Code Repositories', icon: GitBranch },
-  { id: 'hackathons', label: 'Hackathons', icon: Zap },
-  { id: 'workinggroups', label: 'Working Groups', icon: Network },
-  { id: 'todos', label: 'Smart ToDo', icon: CheckSquare, minRole: 'contributor' },
-  { id: 'guide', label: 'User Guide', icon: BookOpen },
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Project Management',
+    items: [
+      { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'projects', label: 'Projects', icon: Target },
+      { id: 'timeline', label: 'Timeline', icon: Calendar },
+      { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'admin' },
+      { id: 'todos', label: 'Smart ToDo', icon: CheckSquare, minRole: 'contributor' },
+    ],
+  },
+  {
+    label: 'Collaboration',
+    items: [
+      { id: 'contributors', label: 'Contributors', icon: Users, minRole: 'manager' },
+      { id: 'communications', label: 'Communications', icon: Mail, minRole: 'manager' },
+      { id: 'workinggroups', label: 'Working Groups', icon: Network },
+      { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList, minRole: 'contributor' },
+    ],
+  },
+  {
+    label: 'Tools',
+    items: [
+      { id: 'tech', label: 'Technologies', icon: Cpu },
+      { id: 'repos', label: 'Code Repositories', icon: GitBranch },
+      { id: 'hackathons', label: 'Hackathons', icon: Zap },
+      { id: 'mcp', label: 'MCP Hub', icon: Plug },
+    ],
+  },
+  {
+    label: 'Knowledge',
+    items: [
+      { id: 'guide', label: 'User Guide', icon: BookOpen },
+    ],
+  },
 ];
 
 export const Sidebar: React.FC<Props> = ({
@@ -95,9 +122,6 @@ export const Sidebar: React.FC<Props> = ({
 }) => {
   const isAdmin = currentUser?.role === 'admin';
   const userLevel = ROLE_LEVEL[currentUser?.role ?? 'viewer'];
-  const visibleNav = NAV.filter(
-    (item) => !item.minRole || userLevel >= ROLE_LEVEL[item.minRole]
-  );
 
   return (
     <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col border-r border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
@@ -125,38 +149,60 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-        {visibleNav.map((item) => {
-          const Icon = item.icon;
-          const active = activeTab === item.id;
+      <nav className="flex-1 overflow-y-auto px-3 py-2">
+        {NAV_GROUPS.map((group) => {
+          const visibleItems = group.items.filter(
+            (item) => !item.minRole || userLevel >= ROLE_LEVEL[item.minRole]
+          );
+          if (visibleItems.length === 0) return null;
           return (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`group w-full flex items-center gap-3 px-3 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ${
-                active
-                  ? 'bg-brand text-white'
-                  : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 dark:hover:text-white dark:hover:bg-ink-700'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              <span>{item.label}</span>
-            </button>
+            <div key={group.label} className="mb-2">
+              <div className="px-3 pt-3 pb-1">
+                <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-neutral-400 dark:text-ink-500">
+                  {group.label}
+                </span>
+              </div>
+              {visibleItems.map((item) => {
+                const Icon = item.icon;
+                const active = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveTab(item.id)}
+                    className={`group w-full flex items-center gap-3 px-3 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ${
+                      active
+                        ? 'bg-brand text-white'
+                        : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 dark:hover:text-white dark:hover:bg-ink-700'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           );
         })}
 
         {isAdmin && (
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`group w-full flex items-center gap-3 px-3 py-2.5 mt-4 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ${
-              activeTab === 'settings'
-                ? 'bg-brand text-white'
-                : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 dark:hover:text-white dark:hover:bg-ink-700'
-            }`}
-          >
-            <SettingsIcon className="w-4 h-4" />
-            <span>Admin Settings</span>
-          </button>
+          <div className="mb-2">
+            <div className="px-3 pt-3 pb-1">
+              <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-neutral-400 dark:text-ink-500">
+                Admin
+              </span>
+            </div>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`group w-full flex items-center gap-3 px-3 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ${
+                activeTab === 'settings'
+                  ? 'bg-brand text-white'
+                  : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 dark:hover:text-white dark:hover:bg-ink-700'
+              }`}
+            >
+              <SettingsIcon className="w-4 h-4" />
+              <span>Admin Settings</span>
+            </button>
+          </div>
         )}
       </nav>
 

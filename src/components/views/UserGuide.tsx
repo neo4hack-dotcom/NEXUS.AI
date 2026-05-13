@@ -12,6 +12,7 @@ interface Section {
   title: string;
   icon: React.ReactNode;
   content: React.ReactNode;
+  adminOnly?: boolean;
 }
 
 const Tag: React.FC<{ children: React.ReactNode; color?: string }> = ({ children, color = 'bg-brand/10 text-brand' }) => (
@@ -481,6 +482,7 @@ const SECTIONS: Section[] = [
     id: 'settings',
     title: 'Admin & Settings',
     icon: <Settings className="w-4 h-4" />,
+    adminOnly: true,
     content: (
       <div>
         <H2>Admin & Settings</H2>
@@ -588,16 +590,21 @@ export const UserGuide: React.FC<Props> = ({ currentUser }) => {
   const [activeId, setActiveId] = useState('overview');
   const [q, setQ] = useState('');
 
+  const visibleSections = useMemo(
+    () => SECTIONS.filter((s) => !s.adminOnly || currentUser.role === 'admin'),
+    [currentUser.role]
+  );
+
   const filteredSections = useMemo(() => {
-    if (!q.trim()) return SECTIONS;
+    if (!q.trim()) return visibleSections;
     const lq = q.toLowerCase();
-    return SECTIONS.filter((s) =>
+    return visibleSections.filter((s) =>
       s.title.toLowerCase().includes(lq) ||
       String(s.content).toLowerCase().includes(lq)
     );
-  }, [q]);
+  }, [q, visibleSections]);
 
-  const active = SECTIONS.find((s) => s.id === activeId) ?? SECTIONS[0];
+  const active = visibleSections.find((s) => s.id === activeId) ?? visibleSections[0];
 
   return (
     <div className="max-w-7xl mx-auto animate-fade-in h-full">

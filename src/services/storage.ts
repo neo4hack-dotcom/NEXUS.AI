@@ -19,6 +19,8 @@ import {
   ProjectTemplate,
   SmartTodo,
   Theme,
+  ProjectFamily,
+  McpServer,
 } from '../types';
 
 const STORAGE_KEY = 'nexus_ai_data_v1';
@@ -86,6 +88,8 @@ export const getDefaultState = (): AppState => {
     workingGroups: [],
     smartTodos: [],
     projectTemplates: [],
+    projectFamilies: [],
+    mcpServers: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -119,6 +123,8 @@ export const sanitizeAppState = (data: any): AppState => {
       tags: arr(h.tags),
     })),
     projectTemplates: arr<ProjectTemplate>(data.projectTemplates),
+    projectFamilies: arr<ProjectFamily>(data.projectFamilies),
+    mcpServers: arr<McpServer>(data.mcpServers),
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,

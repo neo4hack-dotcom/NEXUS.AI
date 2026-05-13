@@ -369,7 +369,7 @@ const buildWeeklyBody = (title: string, content: string, state: AppState): strin
         .join('')}
     </div>
 
-    ${sectionHeader('Weekly Summary')}
+    ${sectionHeader('Summary')}
     <div class="ai-content" style="border:1px solid #e5e7eb;padding:16px;background:#fafafa">
       ${renderMarkdownLite(content)}
     </div>
