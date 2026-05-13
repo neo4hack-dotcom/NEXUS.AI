@@ -92,7 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Collaboration & Communication',
     items: [
-      { id: 'contributors', label: 'Contributors', icon: Users, minRole: 'manager' },
+      { id: 'contributors', label: 'Contributors', icon: Users },
       { id: 'communications', label: 'Communications', icon: Mail, minRole: 'manager' },
       { id: 'workinggroups', label: 'Working Groups', icon: Network },
       { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList, minRole: 'contributor' },
