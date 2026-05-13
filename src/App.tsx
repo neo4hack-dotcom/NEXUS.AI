@@ -31,6 +31,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { UserGuide } from './components/views/UserGuide';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SmartTodoView } from './components/views/SmartTodo';
+import { McpHubView } from './components/views/McpHub';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -323,6 +324,8 @@ const App: React.FC = () => {
         return <SmartTodoView state={appState} currentUser={currentUser} update={update} />;
       case 'guide':
         return <UserGuide currentUser={currentUser} />;
+      case 'mcp':
+        return <McpHubView state={appState} currentUser={currentUser} update={update} />;
       default:
         return null;
     }

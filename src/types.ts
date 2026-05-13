@@ -113,6 +113,9 @@ export interface Project {
   isImportant?: boolean;
   isArchived?: boolean;
   budget?: number;
+  familyId?: string;
+  fteGain?: number;
+  confidentiality?: 'public' | 'internal' | 'confidential' | 'restricted';
   members: ProjectMember[];
   tasks: Task[];
   milestones: Milestone[];
@@ -346,10 +349,41 @@ export interface ProjectLinkedApp {
   url?: string;
 }
 
+export interface ProjectFamily {
+  id: string;
+  name: string;
+  description?: string;
+  color?: string; // hex color for visual identity
+  createdAt: string;
+}
+
+export interface McpTool {
+  name: string;
+  description: string;
+  enrichedDescription?: string; // LLM-enriched version
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  description: string;
+  enrichedDescription?: string;
+  url?: string;
+  token?: string;
+  source: 'declarative' | 'url';
+  tools: McpTool[];
+  category?: string; // e.g. "Productivity", "Data", "Dev Tools"
+  tags: string[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
   projectTemplates: ProjectTemplate[];
+  projectFamilies: ProjectFamily[];
   technologies: Technology[];
   repositories: Repository[];
   communications: Communication[];
@@ -360,6 +394,7 @@ export interface AppState {
   hackathons: Hackathon[];
   workingGroups: WorkingGroup[];
   smartTodos: SmartTodo[];
+  mcpServers: McpServer[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

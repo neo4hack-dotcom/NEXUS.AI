@@ -195,7 +195,7 @@ const Generator: React.FC<{
                     onClick={() => setType(t)}
                     size="sm"
                   >
-                    {t}
+                    {t === 'weekly' ? 'Summary' : t}
                   </Button>
                 ))}
               </div>
@@ -393,7 +393,7 @@ const Templates: React.FC<{
                     setEditing({ ...editing, type: e.target.value as EmailTemplate['type'] })
                   }
                 >
-                  <option value="weekly">Weekly</option>
+                  <option value="weekly">Summary</option>
                   <option value="newsletter">Newsletter</option>
                   <option value="exco">Exco</option>
                   <option value="info">Info</option>
@@ -627,7 +627,7 @@ const History: React.FC<{ state: AppState; currentUser: User }> = ({ state, curr
                 <div>
                   <p className="font-bold uppercase tracking-tight text-sm">{c.title}</p>
                   <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-muted mt-0.5">
-                    {new Date(c.createdAt).toLocaleString()} • {c.type}
+                    {new Date(c.createdAt).toLocaleString()} • {c.type === 'weekly' ? 'summary' : c.type}
                     {author && isPrivileged && ` • ${author.firstName} ${author.lastName}`}
                   </p>
                 </div>

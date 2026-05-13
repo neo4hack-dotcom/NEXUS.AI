@@ -21,6 +21,8 @@ import {
   ChevronRight,
   Edit2,
   Loader2,
+  LayoutGrid,
+  Layers,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
@@ -35,6 +37,7 @@ import {
   AuditEntry,
   ProjectPresentation,
   ProjectLinkedApp,
+  ProjectFamily,
 } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -72,6 +75,9 @@ const newProject = (managerId: string): Project => {
     isImportant: false,
     isArchived: false,
     budget: 0,
+    confidentiality: 'internal',
+    familyId: undefined,
+    fteGain: undefined,
     members: [{ userId: managerId, role: ProjectRole.OWNER }],
     tasks: [],
     milestones: [],
@@ -109,6 +115,14 @@ const addAudit = (p: Project, user: User, action: string, details?: string): Pro
     },
   ],
 });
+
+/* ── Confidentiality badge styles ── */
+const CONF_STYLE: Record<string, string> = {
+  public: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  internal: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  confidential: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  restricted: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+};
 
 /* ── RAG health helper ── */
 type RAGTone = 'green' | 'amber' | 'red' | 'muted';
@@ -400,8 +414,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [view, setView] = useState<'list' | 'portfolio'>('list');
+  const [showFamilyManager, setShowFamilyManager] = useState(false);
+  const [familyFilter, setFamilyFilter] = useState<string | null>(null);
   const canEdit = currentUser.role !== 'viewer';
   const canUseAI = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const isAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   const filtered = useMemo(
     () =>
@@ -412,8 +430,13 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             p.name.toLowerCase().includes(q.toLowerCase()) ||
             p.description.toLowerCase().includes(q.toLowerCase())
         )
+        .filter((p) => {
+          if (familyFilter === null) return true;
+          if (familyFilter === '__none__') return !p.familyId;
+          return p.familyId === familyFilter;
+        })
         .sort((a, b) => Number(b.isImportant) - Number(a.isImportant)),
-    [state.projects, q, showArchived]
+    [state.projects, q, showArchived, familyFilter]
   );
 
   const selected = state.projects.find((p) => p.id === selectedId) || null;
@@ -456,8 +479,23 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             {filtered.length} project{filtered.length !== 1 ? 's' : ''} visible to you.
           </p>
         </div>
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <div className="relative flex-1 md:w-72">
+        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+          {/* View toggle */}
+          <div className="flex border border-neutral-300 dark:border-ink-500 overflow-hidden">
+            <button
+              onClick={() => { setView('list'); setFamilyFilter(null); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors ${view === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+            >
+              <LayoutGrid className="w-3 h-3" /> List
+            </button>
+            <button
+              onClick={() => setView('portfolio')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] border-l border-neutral-300 dark:border-ink-500 transition-colors ${view === 'portfolio' ? 'bg-brand text-white border-brand' : 'text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+            >
+              <Layers className="w-3 h-3" /> Portfolio
+            </button>
+          </div>
+          <div className="relative flex-1 md:w-64">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <Input
               placeholder="Search projects…"
@@ -470,6 +508,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             <Archive className="w-4 h-4 mr-2" />
             {showArchived ? 'Hide archived' : 'Show archived'}
           </Button>
+          {isAdmin && (
+            <Button variant="outline" size="md" onClick={() => setShowFamilyManager(true)}>
+              <Layers className="w-3 h-3 mr-2" />
+              Families
+            </Button>
+          )}
           {canUseAI && (
             <Button variant="outline" size="md" onClick={() => setShowAiBot(true)}>
               <Bot className="w-4 h-4 mr-2" />
@@ -493,7 +537,71 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Portfolio / Family view */}
+      {view === 'portfolio' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Ungrouped card */}
+            {(() => {
+              const ungrouped = state.projects.filter((p) => !p.isArchived && !p.familyId);
+              return (
+                <button
+                  onClick={() => { setFamilyFilter('__none__'); setView('list'); }}
+                  className="surface border text-left p-5 hover:border-brand transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-3 h-3 bg-neutral-400" />
+                    <span className="text-[11px] font-black uppercase tracking-tight">Ungrouped</span>
+                  </div>
+                  <p className="text-xs text-muted mb-3">Projects without a family</p>
+                  <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] bg-neutral-100 dark:bg-ink-700 text-muted">
+                    {ungrouped.length} project{ungrouped.length !== 1 ? 's' : ''}
+                  </span>
+                </button>
+              );
+            })()}
+            {(state.projectFamilies || []).map((family) => {
+              const count = state.projects.filter((p) => !p.isArchived && p.familyId === family.id).length;
+              return (
+                <button
+                  key={family.id}
+                  onClick={() => { setFamilyFilter(family.id); setView('list'); }}
+                  className="surface border text-left p-5 hover:border-brand transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-3 h-3" style={{ backgroundColor: family.color || '#FF3E00' }} />
+                    <span className="text-[11px] font-black uppercase tracking-tight">{family.name}</span>
+                  </div>
+                  {family.description && (
+                    <p className="text-xs text-muted mb-3 line-clamp-2">{family.description}</p>
+                  )}
+                  <span
+                    className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-white"
+                    style={{ backgroundColor: family.color || '#FF3E00' }}
+                  >
+                    {count} project{count !== 1 ? 's' : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Active family filter banner */}
+      {familyFilter && view === 'list' && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-brand/10 border border-brand/30">
+          <Layers className="w-3.5 h-3.5 text-brand" />
+          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand">
+            Filtered by: {familyFilter === '__none__' ? 'Ungrouped' : (state.projectFamilies || []).find((f) => f.id === familyFilter)?.name}
+          </span>
+          <button onClick={() => setFamilyFilter(null)} className="ml-auto text-brand hover:text-brand/70">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {view === 'list' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {filtered.map((p) => {
           const pct = projectProgress(p);
           const overdue = new Date(p.deadline).getTime() < Date.now() && p.status !== 'Done';
@@ -503,6 +611,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             p.deadline &&
             new Date(p.deadline).getTime() > new Date(p.initialDeadline).getTime();
           const rag = ragHealth(p);
+          const family = p.familyId ? (state.projectFamilies || []).find((f) => f.id === p.familyId) : null;
           return (
             <button
               key={p.id}
@@ -511,7 +620,18 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             >
               <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex-1">
                 <div className="flex items-start justify-between gap-2 mb-2">
-                  <h3 className="text-lg font-black uppercase tracking-tight">{p.name}</h3>
+                  <div className="flex-1 min-w-0">
+                    {family && (
+                      <div className="flex items-center gap-1 mb-1">
+                        <span
+                          className="w-2 h-2 shrink-0"
+                          style={{ backgroundColor: family.color || '#FF3E00' }}
+                        />
+                        <span className="text-[8px] font-bold uppercase tracking-[0.14em] text-muted truncate">{family.name}</span>
+                      </div>
+                    )}
+                    <h3 className="text-lg font-black uppercase tracking-tight">{p.name}</h3>
+                  </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${RAG_STYLE[rag.tone]}`}>{rag.label}</span>
                     {p.isImportant && <Star className="w-4 h-4 text-brand fill-brand" />}
@@ -524,6 +644,16 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                   <Badge tone={overdue ? 'red' : p.status === 'Done' ? 'muted' : 'green'}>
                     {p.status}
                   </Badge>
+                  {p.confidentiality && p.confidentiality !== 'internal' && (
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${CONF_STYLE[p.confidentiality] || ''}`}>
+                      {p.confidentiality}
+                    </span>
+                  )}
+                  {(p.fteGain ?? 0) > 0 && (
+                    <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400">
+                      {p.fteGain} FTE saved
+                    </span>
+                  )}
                   {p.tags?.slice(0, 2).map((t) => (
                     <Badge key={t} tone="muted">
                       {t}
@@ -562,7 +692,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             <p className="text-xs uppercase tracking-[0.18em]">No projects match.</p>
           </div>
         )}
-      </div>
+      </div>}
 
       {selected && (
         <ProjectDetailModal
@@ -626,6 +756,108 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           }}
         />
       )}
+
+      {showFamilyManager && (
+        <FamilyManagerModal
+          families={state.projectFamilies || []}
+          onClose={() => setShowFamilyManager(false)}
+          onSave={(families) => {
+            update((s) => ({ ...s, projectFamilies: families }));
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+/* === Family Manager Modal === */
+
+const FamilyManagerModal: React.FC<{
+  families: ProjectFamily[];
+  onClose: () => void;
+  onSave: (families: ProjectFamily[]) => void;
+}> = ({ families, onClose, onSave }) => {
+  const [draft, setDraft] = useState<ProjectFamily[]>(families);
+  const [newName, setNewName] = useState('');
+  const [newColor, setNewColor] = useState('#FF3E00');
+
+  const addFamily = () => {
+    if (!newName.trim()) return;
+    const f: ProjectFamily = {
+      id: generateId(),
+      name: newName.trim(),
+      color: newColor,
+      createdAt: new Date().toISOString(),
+    };
+    setDraft((d) => [...d, f]);
+    setNewName('');
+    setNewColor('#FF3E00');
+  };
+
+  const removeFamily = (id: string) => setDraft((d) => d.filter((f) => f.id !== id));
+
+  const updateFamily = (id: string, patch: Partial<ProjectFamily>) =>
+    setDraft((d) => d.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-lg animate-slide-up">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <h2 className="text-lg font-black uppercase tracking-tight">Manage Project Families</h2>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
+          {draft.map((f) => (
+            <div key={f.id} className="flex items-center gap-2 border border-neutral-200 dark:border-ink-600 p-3">
+              <input
+                type="color"
+                value={f.color || '#FF3E00'}
+                onChange={(e) => updateFamily(f.id, { color: e.target.value })}
+                className="w-8 h-8 border-0 cursor-pointer"
+                title="Family color"
+              />
+              <Input
+                value={f.name}
+                onChange={(e) => updateFamily(f.id, { name: e.target.value })}
+                className="flex-1"
+                placeholder="Family name"
+              />
+              <button onClick={() => removeFamily(f.id)} className="text-muted hover:text-red-500">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+          {draft.length === 0 && (
+            <p className="text-xs text-muted text-center py-4">No families yet. Add one below.</p>
+          )}
+        </div>
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={newColor}
+              onChange={(e) => setNewColor(e.target.value)}
+              className="w-8 h-8 border-0 cursor-pointer"
+            />
+            <Input
+              placeholder="New family name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') addFamily(); }}
+              className="flex-1"
+            />
+            <Button size="sm" onClick={addFamily} disabled={!newName.trim()}>
+              <Plus className="w-3 h-3 mr-1" /> Add
+            </Button>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={() => { onSave(draft); onClose(); }}>Save</Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -810,6 +1042,41 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                     </option>
                   ))}
                 </Select>
+              </Field>
+              <Field label="Confidentiality">
+                <Select
+                  value={draft.confidentiality || 'internal'}
+                  onChange={(e) => setDraft({ ...draft, confidentiality: e.target.value as Project['confidentiality'] })}
+                  disabled={!canEdit}
+                >
+                  <option value="public">Public</option>
+                  <option value="internal">Internal</option>
+                  <option value="confidential">Confidential</option>
+                  <option value="restricted">Restricted</option>
+                </Select>
+              </Field>
+              <Field label="Family">
+                <Select
+                  value={draft.familyId || ''}
+                  onChange={(e) => setDraft({ ...draft, familyId: e.target.value || undefined })}
+                  disabled={!canEdit}
+                >
+                  <option value="">— None —</option>
+                  {(state.projectFamilies || []).map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Est. FTE Gain">
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.1}
+                  value={draft.fteGain ?? ''}
+                  onChange={(e) => setDraft({ ...draft, fteGain: e.target.value ? parseFloat(e.target.value) : undefined })}
+                  disabled={!canEdit}
+                  placeholder="e.g. 1.5"
+                />
               </Field>
               <Field label="Manager">
                 <Select
