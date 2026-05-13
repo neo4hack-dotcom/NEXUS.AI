@@ -1630,12 +1630,20 @@ const KanbanBoard: React.FC<{
               ? 'border-red-500/50 bg-red-500/5'
               : status === TaskStatus.PAUSED
               ? 'border-orange-500/50 bg-orange-500/5'
+              : status === TaskStatus.ONGOING
+              ? 'border-blue-500/40 bg-blue-500/8 dark:bg-blue-500/10'
+              : status === TaskStatus.DONE
+              ? 'border-emerald-500/40 bg-emerald-500/8 dark:bg-emerald-500/10'
               : '';
           const labelColor =
             status === TaskStatus.BLOCKED
               ? 'text-red-500'
               : status === TaskStatus.PAUSED
               ? 'text-orange-500'
+              : status === TaskStatus.ONGOING
+              ? 'text-blue-600 dark:text-blue-400'
+              : status === TaskStatus.DONE
+              ? 'text-emerald-600 dark:text-emerald-400'
               : '';
           return (
             <div
