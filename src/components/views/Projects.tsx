@@ -39,6 +39,7 @@ import {
   ProjectLinkedApp,
   ProjectFamily,
   DevStatus,
+  InnovationStatus,
   ExternalMember,
 } from '../../types';
 import { Button } from '../ui/Button';
@@ -137,6 +138,17 @@ const DEV_STATUS_STYLE: Record<DevStatus, string> = {
   dev:      'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
   uat:      'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   prod:     'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+};
+
+const INNOVATION_LABEL: Record<InnovationStatus, string> = {
+  poc:   'POC',
+  pilot: 'Pilot',
+  prod:  'Prod',
+};
+const INNOVATION_STYLE: Record<InnovationStatus, string> = {
+  poc:   'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+  pilot: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+  prod:  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
 };
 
 /* ── RAG health helper ── */
@@ -667,6 +679,11 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                   {p.devStatus && (
                     <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${DEV_STATUS_STYLE[p.devStatus]}`}>
                       {DEV_STATUS_LABEL[p.devStatus]}
+                    </span>
+                  )}
+                  {p.innovationStatus && (
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${INNOVATION_STYLE[p.innovationStatus]}`}>
+                      {INNOVATION_LABEL[p.innovationStatus]}
                     </span>
                   )}
                   {p.confidentiality && p.confidentiality !== 'internal' && (
@@ -1328,6 +1345,18 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                   <option value="to_start">To Start</option>
                   <option value="dev">Dev</option>
                   <option value="uat">UAT</option>
+                  <option value="prod">Prod</option>
+                </Select>
+              </Field>
+              <Field label="Innovation Status">
+                <Select
+                  value={draft.innovationStatus || ''}
+                  onChange={(e) => setDraft({ ...draft, innovationStatus: (e.target.value as InnovationStatus) || undefined })}
+                  disabled={!canEdit}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="poc">POC</option>
+                  <option value="pilot">Pilot</option>
                   <option value="prod">Prod</option>
                 </Select>
               </Field>

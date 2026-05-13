@@ -229,6 +229,12 @@ const PDF_BASE_STYLES = `
   .ai-content p { margin: 5pt 0; }
   .ai-content ul { padding-left: 16pt; }
   .ai-content li { margin: 2pt 0; }
+  /* Dark-background markdown override */
+  .ai-dark h1, .ai-dark h2 { color: #FF3E00 !important; border-left: 3px solid #FF3E00; padding-left: 8pt; background: transparent; }
+  .ai-dark h3 { color: #FF3E00 !important; background: transparent; }
+  .ai-dark strong { color: #ffffff !important; }
+  .ai-dark p, .ai-dark li { color: #e2e8f0; }
+  .ai-dark ul { padding-left: 18pt; }
 `;
 
 export const wrapHtmlDoc = (
@@ -381,20 +387,45 @@ const buildWeeklyPDF = (t: string, c: string, s: AppState) =>
   openPrintWindow(`Weekly Status — ${t}`, buildWeeklyBody(t, c, s));
 
 /* --- Newsletter --- */
-const buildNewsletterBody = (title: string, content: string, state: AppState): string => {
+export const NEWSLETTER_SECTIONS = [
+  { id: 'highlights', label: 'Highlights' },
+  { id: 'projects',   label: 'Projects' },
+  { id: 'technologies', label: 'Technologies' },
+  { id: 'mcp',        label: 'MCP Servers' },
+  { id: 'workinggroups', label: 'Working Groups' },
+  { id: 'hackathons', label: 'Hackathons' },
+] as const;
+
+const newsletterPageHeader = (title: string, sectionLabel: string, period: string) => `
+  <div style="background:#0a0a0b;color:#fff;padding:18px 28px;margin-bottom:20px;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:space-between">
+    <div style="position:absolute;top:0;right:0;width:120px;height:120px;background:${BRAND};opacity:0.1;border-radius:50%;transform:translate(30px,-30px)"></div>
+    <div>
+      <div style="font-size:7pt;letter-spacing:0.28em;text-transform:uppercase;color:${BRAND};font-weight:700;font-family:system-ui;margin-bottom:4px">${esc(sectionLabel)}</div>
+      <div style="font-size:20pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.02em;line-height:1;font-family:system-ui">${esc(title || 'Portfolio Newsletter')}</div>
+      <div style="font-size:8pt;color:#888;margin-top:4px;font-family:system-ui">${period} Edition</div>
+    </div>
+    <div style="text-align:right;position:relative;z-index:1">
+      <div style="font-size:18pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
+      <div style="font-size:7pt;color:#666;letter-spacing:0.1em;text-transform:uppercase;font-family:system-ui">Confidential</div>
+    </div>
+  </div>`;
+
+const buildNewsletterBody = (title: string, content: string, state: AppState, sections?: string[]): string => {
+  const activeSet = sections && sections.length > 0 ? new Set(sections) : new Set(NEWSLETTER_SECTIONS.map((s) => s.id));
   const projects = state.projects.filter((p) => !p.isArchived);
   const done = projects.filter((p) => p.status === 'Done').length;
   const active = projects.filter((p) => p.status === 'Active').length;
-  const techs = state.technologies.slice(0, 8);
 
-  // Total tasks completed vs total
   const allTasks = projects.flatMap((p) => p.tasks || []);
   const doneTasks = allTasks.filter((t) => t.status === 'Done').length;
   const taskPct = allTasks.length ? Math.round((doneTasks / allTasks.length) * 100) : 0;
 
   const period = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const pages: string[] = [];
 
-  const body = `
+  /* ── Page 1: Highlights ── */
+  if (activeSet.has('highlights')) {
+    pages.push(`
     <!-- Hero header -->
     <div style="background:#0a0a0b;color:#fff;padding:28px 32px;margin-bottom:24px;position:relative;overflow:hidden">
       <div style="position:absolute;top:0;right:0;width:160px;height:160px;background:${BRAND};opacity:0.12;border-radius:50%;transform:translate(40px,-40px)"></div>
@@ -416,58 +447,135 @@ const buildNewsletterBody = (title: string, content: string, state: AppState): s
       ${kpiTile('Task Progress', `${taskPct}%`, taskPct >= 70 ? COL_GREEN : taskPct >= 40 ? COL_AMBER : COL_RED, `${doneTasks}/${allTasks.length} tasks done`)}
     </div>
 
-    <!-- Two-column layout -->
-    <div style="display:grid;grid-template-columns:1fr 280px;gap:20px">
-      <!-- Main content -->
-      <div>
-        ${sectionHeader('Highlights & Updates', BRAND)}
-        <div class="ai-content" style="border:1px solid #e5e7eb;padding:16px;background:#fafafa;margin-bottom:16px">
-          ${renderMarkdownLite(content)}
-        </div>
-      </div>
-
-      <!-- Sidebar -->
-      <div>
-        ${sectionHeader('Active Projects', COL_BLUE)}
-        <div style="space-y:6px">
-          ${projects
-            .filter((p) => p.status === 'Active')
-            .slice(0, 8)
-            .map((p) => {
-              const tasks = p.tasks || [];
-              const pct = tasks.length
-                ? Math.round((tasks.filter((t) => t.status === 'Done').length / tasks.length) * 100)
-                : 0;
-              return `<div style="margin-bottom:10px">
-                <div style="font-size:8.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;font-family:system-ui">${esc(p.name)}</div>
-                ${progressBar(pct, COL_BLUE)}
-                <div style="font-size:7pt;color:#999;margin-top:2px;font-family:system-ui">${pct}% complete • Due ${new Date(p.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</div>
-              </div>`;
-            })
-            .join('')}
-          ${projects.filter((p) => p.status === 'Active').length === 0
-            ? '<div style="font-size:8pt;color:#aaa;font-style:italic;font-family:system-ui">No active projects.</div>'
-            : ''}
-        </div>
-
-        <div style="margin-top:20px">
-          ${sectionHeader('Technology Stack', '#6366f1')}
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
-            ${techs
-              .map(
-                (t) => `<span style="background:#f1f5f9;border:1px solid #e2e8f0;padding:3px 8px;
-                  font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;
-                  font-family:system-ui;color:#475569;border-radius:2px">${esc(t.name)}</span>`
-              )
-              .join('')}
-            ${state.technologies.length > 8 ? `<span style="font-size:7pt;color:#aaa;font-family:system-ui;align-self:center">+${state.technologies.length - 8} more</span>` : ''}
-          </div>
-        </div>
-      </div>
+    ${sectionHeader('Highlights & Updates', BRAND)}
+    <div class="ai-content" style="border:1px solid #e5e7eb;padding:16px;background:#fafafa;margin-bottom:16px">
+      ${renderMarkdownLite(content)}
     </div>
+    ${pdfFooter('Newsletter — Highlights')}`);
+  }
 
-    ${pdfFooter('Newsletter')}`;
-  return body;
+  /* ── Page 2: Projects ── */
+  if (activeSet.has('projects')) {
+    const activeProjects = projects.filter((p) => p.status === 'Active');
+    pages.push(`
+    <div style="page-break-before:always">
+    ${newsletterPageHeader(title, 'Projects', period)}
+    ${sectionHeader('Active Projects', COL_BLUE)}
+    <div style="margin-bottom:16px">
+      ${activeProjects.length === 0 ? '<p style="color:#aaa;font-style:italic;font-family:system-ui;font-size:8pt">No active projects.</p>' :
+        activeProjects.map((p) => {
+          const tasks = p.tasks || [];
+          const pct = tasks.length ? Math.round((tasks.filter((t) => t.status === 'Done').length / tasks.length) * 100) : 0;
+          const pm = state.users.find((u) => u.id === p.managerId);
+          return `<div style="margin-bottom:14px;padding:12px;border:1px solid #e5e7eb;background:#fafafa">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px">
+              <div style="font-size:9pt;font-weight:900;text-transform:uppercase;letter-spacing:0.04em;font-family:system-ui">${esc(p.name)}</div>
+              <span style="font-size:7pt;font-weight:700;text-transform:uppercase;padding:2px 8px;border:1px solid ${BRAND};color:${BRAND};white-space:nowrap;font-family:system-ui">${esc(p.status)}</span>
+            </div>
+            ${p.description ? `<p style="font-size:8pt;color:#555;margin-bottom:8px;font-family:system-ui">${esc(p.description.slice(0, 150))}${p.description.length > 150 ? '…' : ''}</p>` : ''}
+            ${progressBar(pct, COL_BLUE)}
+            <div style="display:flex;gap:16px;margin-top:4px;font-size:7pt;color:#999;font-family:system-ui">
+              <span>${pct}% complete</span>
+              <span>Due ${new Date(p.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}</span>
+              ${pm ? `<span>PM: ${esc(pm.firstName)} ${esc(pm.lastName)}</span>` : ''}
+              <span>${tasks.filter((t) => t.status === 'Blocked').length} blocked</span>
+            </div>
+          </div>`;
+        }).join('')}
+    </div>
+    ${projects.filter((p) => p.status === 'Done').length > 0 ? `
+    ${sectionHeader('Completed Projects', COL_GREEN)}
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      ${projects.filter((p) => p.status === 'Done').map((p) => `
+        <span style="background:#f0fdf4;border:1px solid #bbf7d0;padding:3px 10px;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;font-family:system-ui;color:#15803d">${esc(p.name)}</span>
+      `).join('')}
+    </div>` : ''}
+    ${pdfFooter('Newsletter — Projects')}
+    </div>`);
+  }
+
+  /* ── Page 3: Technologies ── */
+  if (activeSet.has('technologies') && state.technologies.length > 0) {
+    const byCategory: Record<string, typeof state.technologies> = {};
+    state.technologies.forEach((t) => { (byCategory[t.category] = byCategory[t.category] || []).push(t); });
+    pages.push(`
+    <div style="page-break-before:always">
+    ${newsletterPageHeader(title, 'Technology Stack', period)}
+    ${Object.entries(byCategory).map(([cat, techs]) => `
+      ${sectionHeader(cat.charAt(0).toUpperCase() + cat.slice(1) + 's', '#6366f1')}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+        ${techs.map((t) => `
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:5px 10px;font-family:system-ui">
+            <div style="font-size:8.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#0a0a0b">${esc(t.name)}</div>
+            ${t.version ? `<div style="font-size:6.5pt;font-family:monospace;color:${BRAND}">${esc('v' + t.version)}</div>` : ''}
+            ${t.maturityStatus ? `<div style="font-size:6.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#666;font-family:system-ui">${esc(t.maturityStatus)}</div>` : ''}
+          </div>`).join('')}
+      </div>`).join('')}
+    ${pdfFooter('Newsletter — Technologies')}
+    </div>`);
+  }
+
+  /* ── Page 4: MCP Servers ── */
+  if (activeSet.has('mcp') && state.mcpServers && state.mcpServers.length > 0) {
+    pages.push(`
+    <div style="page-break-before:always">
+    ${newsletterPageHeader(title, 'MCP Hub', period)}
+    ${sectionHeader('MCP Servers', BRAND)}
+    <div style="margin-bottom:16px">
+      ${state.mcpServers.map((m: any) => `
+        <div style="margin-bottom:10px;padding:10px 14px;border:1px solid #e5e7eb;background:#fafafa;font-family:system-ui">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:0.04em">${esc(m.name || 'Unnamed')}</div>
+            ${m.status ? `<span style="font-size:7pt;font-weight:700;text-transform:uppercase;padding:2px 8px;background:${m.status === 'active' ? '#f0fdf4' : '#fafafa'};border:1px solid ${m.status === 'active' ? '#bbf7d0' : '#e5e7eb'};color:${m.status === 'active' ? '#15803d' : '#666'};font-family:system-ui">${esc(m.status)}</span>` : ''}
+          </div>
+          ${m.description ? `<p style="font-size:8pt;color:#555;margin-top:4px">${esc(m.description.slice(0, 120))}${m.description.length > 120 ? '…' : ''}</p>` : ''}
+        </div>`).join('')}
+    </div>
+    ${pdfFooter('Newsletter — MCP Hub')}
+    </div>`);
+  }
+
+  /* ── Page 5: Working Groups ── */
+  if (activeSet.has('workinggroups') && state.workingGroups && state.workingGroups.length > 0) {
+    pages.push(`
+    <div style="page-break-before:always">
+    ${newsletterPageHeader(title, 'Working Groups', period)}
+    ${sectionHeader('Active Working Groups', '#6366f1')}
+    <div style="margin-bottom:16px">
+      ${state.workingGroups.map((wg) => `
+        <div style="margin-bottom:12px;padding:12px 16px;border:1px solid #e5e7eb;background:#fafafa;font-family:system-ui">
+          <div style="font-size:9pt;font-weight:900;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">${esc(wg.name)}</div>
+          ${wg.description ? `<p style="font-size:8pt;color:#555;margin-bottom:6px">${esc(wg.description.slice(0, 150))}${wg.description.length > 150 ? '…' : ''}</p>` : ''}
+          <div style="font-size:7pt;color:#999">${wg.members?.length ?? 0} members · ${wg.tasks?.length ?? 0} tasks</div>
+        </div>`).join('')}
+    </div>
+    ${pdfFooter('Newsletter — Working Groups')}
+    </div>`);
+  }
+
+  /* ── Page 6: Hackathons ── */
+  if (activeSet.has('hackathons') && state.hackathons && state.hackathons.length > 0) {
+    pages.push(`
+    <div style="page-break-before:always">
+    ${newsletterPageHeader(title, 'Hackathons', period)}
+    ${sectionHeader('Hackathons', COL_AMBER)}
+    <div style="margin-bottom:16px">
+      ${state.hackathons.map((h) => `
+        <div style="margin-bottom:12px;padding:12px 16px;border:1px solid #e5e7eb;background:#fafafa;font-family:system-ui">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px">
+            <div style="font-size:9pt;font-weight:900;text-transform:uppercase;letter-spacing:0.04em">${esc(h.title)}</div>
+            <span style="font-size:7pt;font-weight:700;text-transform:uppercase;padding:2px 8px;border:1px solid ${COL_AMBER};color:${COL_AMBER};white-space:nowrap;font-family:system-ui">${esc(h.status || 'upcoming')}</span>
+          </div>
+          ${h.theme ? `<p style="font-size:8pt;color:#555;font-style:italic;margin-bottom:4px">Theme: ${esc(h.theme)}</p>` : ''}
+          ${h.objective ? `<p style="font-size:8pt;color:#555;margin-bottom:4px">${esc(h.objective.slice(0, 150))}${h.objective.length > 150 ? '…' : ''}</p>` : ''}
+          <div style="font-size:7pt;color:#999">${h.participants?.length ?? 0} participants · ${h.startDate ? new Date(h.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}</div>
+        </div>`).join('')}
+    </div>
+    ${pdfFooter('Newsletter — Hackathons')}
+    </div>`);
+  }
+
+  return pages.join('\n');
 };
 const buildNewsletterPDF = (t: string, c: string, s: AppState) =>
   openPrintWindow(`Newsletter — ${t}`, buildNewsletterBody(t, c, s));
@@ -518,7 +626,7 @@ const buildExcoBody = (title: string, content: string, state: AppState): string 
     <!-- Executive summary strip -->
     <div style="background:#1e1b4b;color:#fff;padding:16px 20px;margin-bottom:20px;border-left:4px solid ${BRAND}">
       <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.18em;color:${BRAND};font-weight:700;font-family:system-ui;margin-bottom:8px">Executive Summary</div>
-      <div class="ai-content" style="font-size:9.5pt;line-height:1.55;color:#e2e8f0;font-family:system-ui">
+      <div class="ai-content ai-dark" style="font-size:9.5pt;line-height:1.55;color:#e2e8f0;font-family:system-ui">
         ${renderMarkdownLite(summaryPart || content.slice(0, 500))}
       </div>
     </div>
@@ -591,11 +699,12 @@ export const buildCommunicationHTML = (
   title: string,
   content: string,
   state: AppState,
-  landscape = false
+  landscape = false,
+  newsletterSections?: string[]
 ): string => {
   let body = '';
   if (type === 'weekly') body = buildWeeklyBody(title, content, state);
-  else if (type === 'newsletter') body = buildNewsletterBody(title, content, state);
+  else if (type === 'newsletter') body = buildNewsletterBody(title, content, state, newsletterSections);
   else if (type === 'exco') body = buildExcoBody(title, content, state);
   else body = buildInfoBody(title, content, state);
   return wrapHtmlDoc(title || 'Communication', body, landscape, false);
