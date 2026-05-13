@@ -1088,3 +1088,458 @@ export const buildProjectHTML = (
 
   return wrapHtmlDoc(`Project Brief — ${project.name}`, body, landscape, false);
 };
+
+/* ====================================================================
+   BOOKLET PRESENTATION — SteerCo multi-project deck
+   ==================================================================== */
+
+export const buildBookletHTML = (
+  projects: Project[],
+  state: AppState,
+  aiExecSummary?: string
+): void => {
+  const now = Date.now();
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const todayShort = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  // ── RAG helper ──────────────────────────────────────────────────────
+  const ragOf = (p: Project): 'red' | 'amber' | 'green' => {
+    const tasks = p.tasks || [];
+    const totalW = tasks.reduce((s, t) => s + (t.weight || 1), 0);
+    const doneW = tasks.filter((t) => t.status === 'Done').reduce((s, t) => s + (t.weight || 1), 0);
+    const progress = totalW ? doneW / totalW : 0;
+    const overdue = new Date(p.deadline).getTime() < now && p.status !== 'Done';
+    const blockedRatio = totalW ? tasks.filter((t) => t.status === 'Blocked').reduce((s, t) => s + (t.weight || 1), 0) / totalW : 0;
+    if (overdue || blockedRatio > 0.4) return 'red';
+    if (blockedRatio > 0 || progress < 0.3) return 'amber';
+    return 'green';
+  };
+
+  const ragLabel: Record<string, string> = { green: 'On Track', amber: 'At Risk', red: 'Off Track' };
+  const statusColor: Record<string, string> = { Planning: '#6366f1', Active: COL_GREEN, Paused: COL_AMBER, Done: '#64748b' };
+
+  const rags = projects.map(ragOf);
+  const ragCounts = {
+    green: rags.filter((r) => r === 'green').length,
+    amber: rags.filter((r) => r === 'amber').length,
+    red: rags.filter((r) => r === 'red').length,
+  };
+  const totalTasks = projects.reduce((s, p) => s + (p.tasks?.length || 0), 0);
+  const doneTasks = projects.reduce((s, p) => s + (p.tasks?.filter((t) => t.status === 'Done').length || 0), 0);
+  const activeProjects = projects.filter((p) => p.status === 'Active').length;
+  const totalBudget = projects.reduce((s, p) => s + (p.budget || 0), 0);
+  const avgProgress = projects.reduce((s, p) => {
+    const tasks = p.tasks || [];
+    const totalW = tasks.reduce((a, t) => a + (t.weight || 1), 0);
+    const doneW = tasks.filter((t) => t.status === 'Done').reduce((a, t) => a + (t.weight || 1), 0);
+    return s + (totalW ? doneW / totalW : 0);
+  }, 0) / (projects.length || 1);
+  const avgPct = Math.round(avgProgress * 100);
+
+  // ── SVG helpers ─────────────────────────────────────────────────────
+  const mkPortfolioDonut = () => {
+    const total = projects.length || 1;
+    const C2 = 2 * Math.PI * 44;
+    const seg2 = (count: number, color: string, startFraction: number) => {
+      const f = count / total;
+      const arc = f * C2;
+      if (arc < 0.5) return '';
+      const rot = startFraction * 360 - 90;
+      return `<circle cx="55" cy="55" r="44" fill="none" stroke="${color}" stroke-width="14"
+        stroke-dasharray="${arc.toFixed(2)} ${(C2 - arc).toFixed(2)}"
+        transform="rotate(${rot.toFixed(2)} 55 55)"/>`;
+    };
+    const gf = ragCounts.green / total;
+    const af = ragCounts.amber / total;
+    return `<svg viewBox="0 0 110 110" width="140" height="140" style="display:block">
+      <circle cx="55" cy="55" r="44" fill="none" stroke="#e5e7eb" stroke-width="14"/>
+      ${seg2(ragCounts.green, COL_GREEN, 0)}
+      ${seg2(ragCounts.amber, COL_AMBER, gf)}
+      ${seg2(ragCounts.red, COL_RED, gf + af)}
+      <text x="55" y="50" text-anchor="middle" font-size="22" font-weight="900" fill="#111" font-family="system-ui">${projects.length}</text>
+      <text x="55" y="65" text-anchor="middle" font-size="8.5" fill="#888" font-family="system-ui" font-weight="700" letter-spacing="0.1em">PROJECTS</text>
+    </svg>`;
+  };
+
+  const mkProgressBars = () =>
+    projects.map((p, i) => {
+      const tasks = p.tasks || [];
+      const totalW = tasks.reduce((s, t) => s + (t.weight || 1), 0);
+      const doneW = tasks.filter((t) => t.status === 'Done').reduce((s, t) => s + (t.weight || 1), 0);
+      const pct = totalW ? Math.round((doneW / totalW) * 100) : 0;
+      const rag = rags[i];
+      const color = rag === 'green' ? COL_GREEN : rag === 'amber' ? COL_AMBER : COL_RED;
+      const daysLeft = Math.ceil((new Date(p.deadline).getTime() - now) / 86400000);
+      const daysLabel = p.status === 'Done' ? '✓ Done' : daysLeft < 0 ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`;
+      return `
+      <div style="margin-bottom:10px;padding:10px 14px;border:1px solid #f0f0f0;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <div style="font-size:9.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.04em">${esc(p.name)}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:7.5pt;color:#888;font-family:system-ui">${daysLabel}</span>
+            <span style="background:${color}20;color:${color};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px;font-family:system-ui">${ragLabel[rag]}</span>
+            <span style="font-size:9pt;font-weight:900;color:${color};font-family:system-ui;min-width:36px;text-align:right">${pct}%</span>
+          </div>
+        </div>
+        <div style="background:#eee;height:6px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${color};transition:width 0.3s"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+  const mkSparkMatrix = () =>
+    projects.map((p, i) => {
+      const rag = rags[i];
+      const color = rag === 'green' ? COL_GREEN : rag === 'amber' ? COL_AMBER : COL_RED;
+      const tasks = p.tasks || [];
+      const totalW = tasks.reduce((s, t) => s + (t.weight || 1), 0);
+      const doneW = tasks.filter((t) => t.status === 'Done').reduce((s, t) => s + (t.weight || 1), 0);
+      const pct = totalW ? Math.round((doneW / totalW) * 100) : 0;
+      const daysLeft = Math.ceil((new Date(p.deadline).getTime() - now) / 86400000);
+      const family = p.familyId ? (state.projectFamilies ?? []).find((f) => f.id === p.familyId) : null;
+      return `
+      <div style="border:1px solid #e5e7eb;border-top:3px solid ${color};padding:12px 14px;background:#fff">
+        <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#888;font-family:system-ui;margin-bottom:3px">${esc(p.status)}${family ? ` · ${esc(family.name)}` : ''}</div>
+        <div style="font-size:10pt;font-weight:900;font-family:system-ui;line-height:1.2;margin-bottom:6px">${esc(p.name)}</div>
+        <div style="font-size:18pt;font-weight:900;color:${color};font-family:system-ui;line-height:1">${pct}%</div>
+        <div style="background:#eee;height:3px;margin:5px 0">
+          <div style="width:${pct}%;height:100%;background:${color}"></div>
+        </div>
+        <div style="font-size:7.5pt;color:#aaa;font-family:system-ui">${p.status === 'Done' ? 'Completed' : daysLeft < 0 ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d to deadline`}</div>
+      </div>`;
+    }).join('');
+
+  // ── PAGE FACTORY ────────────────────────────────────────────────────
+  const page = (content: string, breakAfter = true) =>
+    `<div class="page" style="page-break-after:${breakAfter ? 'always' : 'avoid'}">${content}</div>`;
+
+  // ── PAGE 1 — Cover ──────────────────────────────────────────────────
+  const coverPage = page(`
+    <div style="min-height:100vh;background:#0a0a0b;color:#fff;display:flex;flex-direction:column;justify-content:space-between;padding:0;position:relative;overflow:hidden">
+      <!-- Geometric decoration -->
+      <div style="position:absolute;top:-80px;right:-80px;width:400px;height:400px;border:2px solid ${BRAND};opacity:0.15;transform:rotate(30deg)"></div>
+      <div style="position:absolute;top:40px;right:60px;width:200px;height:200px;background:${BRAND};opacity:0.07;transform:rotate(15deg)"></div>
+      <div style="position:absolute;bottom:-60px;left:-40px;width:300px;height:300px;border:2px solid ${BRAND};opacity:0.1;transform:rotate(-20deg)"></div>
+      <div style="position:absolute;bottom:80px;right:120px;width:120px;height:3px;background:${BRAND};opacity:0.4"></div>
+      <div style="position:absolute;top:0;left:0;width:4px;height:100%;background:${BRAND}"></div>
+
+      <!-- Top bar -->
+      <div style="padding:32px 48px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #ffffff10">
+        <div style="font-size:9pt;letter-spacing:0.28em;text-transform:uppercase;color:${BRAND};font-weight:900;font-family:system-ui">Portfolio Booklet</div>
+        <div style="font-size:9pt;color:#555;font-family:system-ui;letter-spacing:0.1em">${todayShort}</div>
+      </div>
+
+      <!-- Main content -->
+      <div style="padding:60px 48px;flex:1;display:flex;flex-direction:column;justify-content:center">
+        <div style="font-size:9pt;text-transform:uppercase;letter-spacing:0.3em;color:${BRAND};font-weight:900;font-family:system-ui;margin-bottom:20px">STEERCO PRESENTATION</div>
+        <div style="font-size:52pt;font-weight:900;line-height:0.9;font-family:system-ui;letter-spacing:-0.03em;margin-bottom:12px">PROJECT<br>PORTFOLIO<br><span style="color:${BRAND}">REVIEW</span></div>
+        <div style="width:80px;height:4px;background:${BRAND};margin:24px 0"></div>
+        <div style="font-size:12pt;color:#888;font-family:system-ui;margin-bottom:8px">${projects.length} project${projects.length !== 1 ? 's' : ''} · ${activeProjects} active · ${avgPct}% avg progress</div>
+        <div style="display:flex;gap:12px;margin-top:8px">
+          <span style="background:${COL_GREEN}20;color:${COL_GREEN};font-size:8.5pt;font-weight:900;text-transform:uppercase;padding:5px 14px;letter-spacing:0.1em;font-family:system-ui">${ragCounts.green} On Track</span>
+          <span style="background:${COL_AMBER}20;color:${COL_AMBER};font-size:8.5pt;font-weight:900;text-transform:uppercase;padding:5px 14px;letter-spacing:0.1em;font-family:system-ui">${ragCounts.amber} At Risk</span>
+          <span style="background:${COL_RED}20;color:${COL_RED};font-size:8.5pt;font-weight:900;text-transform:uppercase;padding:5px 14px;letter-spacing:0.1em;font-family:system-ui">${ragCounts.red} Off Track</span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="padding:28px 48px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ffffff10">
+        <div style="font-size:22pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
+        <div style="text-align:right">
+          <div style="font-size:8.5pt;color:#555;font-family:system-ui;letter-spacing:0.1em;text-transform:uppercase">AI Project Operations Platform</div>
+          <div style="font-size:8pt;color:#444;font-family:system-ui;margin-top:3px">Generated ${today}</div>
+        </div>
+      </div>
+    </div>`);
+
+  // ── PAGE 2 — Agenda ─────────────────────────────────────────────────
+  const agendaRows = projects.map((p, i) => {
+    const rag = rags[i];
+    const color = rag === 'green' ? COL_GREEN : rag === 'amber' ? COL_AMBER : COL_RED;
+    const sc = statusColor[p.status] || BRAND;
+    return `
+    <div style="display:flex;align-items:center;gap:16px;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:${i % 2 === 0 ? '#fff' : '#fafafa'}">
+      <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">${i + 3}</div>
+      <div style="width:4px;height:36px;background:${color};flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em">${esc(p.name)}</div>
+        ${p.description ? `<div style="font-size:8pt;color:#888;font-family:system-ui;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.description.slice(0, 90))}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <span style="background:${sc}15;color:${sc};font-size:7.5pt;font-weight:900;text-transform:uppercase;padding:3px 10px;font-family:system-ui">${esc(p.status)}</span>
+        <span style="background:${color}15;color:${color};font-size:7.5pt;font-weight:900;text-transform:uppercase;padding:3px 10px;font-family:system-ui">${ragLabel[rag]}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const agendaPage = page(`
+    <div style="padding:40px 48px;min-height:100vh;background:#fff;font-family:system-ui">
+      <div style="border-left:4px solid ${BRAND};padding-left:16px;margin-bottom:32px">
+        <div style="font-size:8.5pt;text-transform:uppercase;letter-spacing:0.28em;color:${BRAND};font-weight:900;margin-bottom:4px">Agenda</div>
+        <div style="font-size:28pt;font-weight:900;color:#111;line-height:1">Table of Contents</div>
+      </div>
+      <!-- Fixed pages -->
+      <div style="margin-bottom:4px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#0a0a0b;color:#fff">
+        <div style="font-size:28pt;font-weight:900;color:#333;font-family:system-ui;min-width:40px;text-align:right;line-height:1">1</div>
+        <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
+        <div style="font-size:10.5pt;font-weight:800;text-transform:uppercase;letter-spacing:0.03em">Cover Page</div>
+      </div>
+      <div style="margin-bottom:4px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#f8f8f8">
+        <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">2</div>
+        <div style="width:4px;height:36px;background:#64748b;flex-shrink:0"></div>
+        <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em">Agenda</div>
+      </div>
+      <div style="margin-bottom:12px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#fff4f0">
+        <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">3</div>
+        <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
+        <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em;color:${BRAND}">Executive Summary</div>
+      </div>
+      <!-- Project rows -->
+      ${agendaRows}
+    </div>`);
+
+  // ── PAGE 3 — Executive Summary ──────────────────────────────────────
+  const execPage = page(`
+    <div style="min-height:100vh;background:#fff;font-family:system-ui">
+      <!-- Header band -->
+      <div style="background:#0a0a0b;color:#fff;padding:28px 48px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:8.5pt;text-transform:uppercase;letter-spacing:0.28em;color:${BRAND};font-weight:900;margin-bottom:4px">Executive Summary</div>
+          <div style="font-size:24pt;font-weight:900;line-height:1">Portfolio Overview</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:22pt;font-weight:900">DOINg<span style="color:${BRAND}">.AI</span></div>
+          <div style="font-size:8pt;color:#555;margin-top:3px">${today}</div>
+        </div>
+      </div>
+
+      <div style="padding:28px 48px">
+        <!-- KPI row -->
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:24px">
+          ${kpiTile('Total Projects', projects.length, BRAND)}
+          ${kpiTile('Active', activeProjects, COL_GREEN, `${Math.round((activeProjects / (projects.length || 1)) * 100)}% of portfolio`)}
+          ${kpiTile('On Track', ragCounts.green, COL_GREEN, `${Math.round((ragCounts.green / (projects.length || 1)) * 100)}%`)}
+          ${kpiTile('At Risk', ragCounts.amber, COL_AMBER, `${Math.round((ragCounts.amber / (projects.length || 1)) * 100)}%`)}
+          ${kpiTile('Off Track', ragCounts.red, COL_RED, `${Math.round((ragCounts.red / (projects.length || 1)) * 100)}%`)}
+        </div>
+
+        <!-- Charts row -->
+        <div style="display:grid;grid-template-columns:180px 1fr;gap:20px;margin-bottom:24px;align-items:start">
+          <!-- Donut + legend -->
+          <div style="border:1px solid #e5e7eb;padding:16px;text-align:center">
+            <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:10px">RAG Status</div>
+            <div style="display:flex;justify-content:center">${mkPortfolioDonut()}</div>
+            <div style="margin-top:10px">
+              ${ragLegendRow(COL_GREEN, 'On Track', ragCounts.green, projects.length)}
+              ${ragLegendRow(COL_AMBER, 'At Risk', ragCounts.amber, projects.length)}
+              ${ragLegendRow(COL_RED, 'Off Track', ragCounts.red, projects.length)}
+            </div>
+          </div>
+          <!-- Progress bars -->
+          <div>
+            <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:8px">Project Progress</div>
+            ${mkProgressBars()}
+          </div>
+        </div>
+
+        <!-- Spark matrix -->
+        <div>
+          <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:8px">Project Scorecards</div>
+          <div style="display:grid;grid-template-columns:repeat(${Math.min(4, projects.length)},1fr);gap:8px">
+            ${mkSparkMatrix()}
+          </div>
+        </div>
+
+        <!-- Global stats -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px">
+          ${kpiTile('Total Tasks', totalTasks, '#64748b', `${doneTasks} done`)}
+          ${kpiTile('Avg Progress', avgPct + '%', avgPct >= 70 ? COL_GREEN : avgPct >= 40 ? COL_AMBER : COL_RED, 'across all projects')}
+          ${totalBudget > 0 ? kpiTile('Total Budget', totalBudget >= 1000 ? `${(totalBudget / 1000).toFixed(0)}k€` : `${totalBudget}€`, BRAND, 'combined allocation') : kpiTile('FTE Saved', projects.reduce((s, p) => s + (p.fteGain || 0), 0).toFixed(1), COL_GREEN, 'est. across portfolio')}
+        </div>
+
+        ${aiExecSummary ? `
+        <div style="margin-top:20px;border-left:4px solid ${BRAND};padding:16px 20px;background:#fff8f5">
+          <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.16em;color:${BRAND};font-weight:900;margin-bottom:8px">AI Executive Summary</div>
+          <div style="font-size:9.5pt;color:#333;line-height:1.6;font-family:system-ui">${esc(aiExecSummary)}</div>
+        </div>` : ''}
+      </div>
+    </div>`);
+
+  // ── Per-project pages ───────────────────────────────────────────────
+  const projectPages = projects.map((p, i) => {
+    const rag = rags[i];
+    const ragColor2 = rag === 'green' ? COL_GREEN : rag === 'amber' ? COL_AMBER : COL_RED;
+    const tasks = p.tasks || [];
+    const totalW = tasks.reduce((s, t) => s + (t.weight || 1), 0);
+    const doneW = tasks.filter((t) => t.status === 'Done').reduce((s, t) => s + (t.weight || 1), 0);
+    const progress = totalW ? Math.round((doneW / totalW) * 100) : 0;
+    const accentColor = statusColor[p.status] || BRAND;
+    const owner = state.users.find((u) => u.id === p.managerId);
+    const members = p.members.map((m) => state.users.find((u) => u.id === m.userId)).filter(Boolean) as typeof state.users;
+    const techs = p.technologyIds.map((id) => state.technologies.find((t) => t.id === id)).filter(Boolean) as typeof state.technologies;
+    const daysLeft = Math.ceil((new Date(p.deadline).getTime() - now) / 86400000);
+    const overdue = daysLeft < 0 && p.status !== 'Done';
+    const milestones = [...(p.milestones || [])].sort((a, b) => a.date.localeCompare(b.date));
+    const doneMilestones = milestones.filter((m) => m.done).length;
+    const taskCounts2 = {
+      todo: tasks.filter((t) => t.status === 'To Do').length,
+      inProgress: tasks.filter((t) => t.status === 'In Progress').length,
+      paused: tasks.filter((t) => t.status === 'Paused').length,
+      blocked: tasks.filter((t) => t.status === 'Blocked').length,
+      done: tasks.filter((t) => t.status === 'Done').length,
+    };
+    const family = p.familyId ? (state.projectFamilies ?? []).find((f) => f.id === p.familyId) : null;
+
+    return page(`
+    <div style="min-height:100vh;background:#fff;font-family:system-ui">
+      <!-- Project header band -->
+      <div style="background:#0a0a0b;color:#fff;padding:20px 40px;display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.22em;color:${accentColor};font-weight:900">Project ${i + 1} / ${projects.length}</div>
+            ${family ? `<span style="background:${family.color || BRAND}30;color:${family.color || BRAND};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px;font-family:system-ui">${esc(family.name)}</span>` : ''}
+          </div>
+          <div style="font-size:22pt;font-weight:900;line-height:1;text-transform:uppercase;letter-spacing:-0.02em">${esc(p.name)}</div>
+          ${p.description ? `<div style="font-size:9pt;color:#888;margin-top:6px">${esc(p.description.slice(0, 140))}</div>` : ''}
+        </div>
+        <div style="text-align:right;flex-shrink:0;margin-left:24px">
+          <div style="background:${accentColor};color:#fff;font-size:8pt;font-weight:900;text-transform:uppercase;padding:5px 14px;margin-bottom:6px;display:inline-block">${esc(p.status)}</div><br>
+          <div style="background:${ragColor2};color:#fff;font-size:8pt;font-weight:900;text-transform:uppercase;padding:5px 14px;display:inline-block">${ragLabel[rag]}</div>
+        </div>
+      </div>
+
+      <div style="padding:20px 40px">
+        <!-- KPI strip -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+          ${kpiTile('Progress', progress + '%', ragColor2)}
+          ${kpiTile(overdue ? 'Overdue' : 'Days Left', overdue ? `${Math.abs(daysLeft)}d` : `${daysLeft}d`, overdue ? COL_RED : daysLeft < 14 ? COL_AMBER : COL_GREEN)}
+          ${kpiTile('Tasks', tasks.length, '#64748b', `${taskCounts2.done} done`)}
+          ${kpiTile('Milestones', milestones.length, accentColor, `${doneMilestones} done`)}
+        </div>
+
+        <!-- Progress bar -->
+        <div style="margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:7.5pt;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#888">Overall Progress</span>
+            <span style="font-size:8pt;font-weight:900;color:${ragColor2}">${progress}%</span>
+          </div>
+          <div style="background:#eee;height:8px">
+            <div style="width:${progress}%;height:100%;background:${ragColor2}"></div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <!-- Left: details -->
+          <div style="space-y:8px">
+            ${owner ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;margin-bottom:8px">
+              <div style="width:28px;height:28px;background:${BRAND};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9pt;font-weight:900;flex-shrink:0">${esc(owner.firstName[0] + (owner.lastName[0] || ''))}</div>
+              <div>
+                <div style="font-size:7.5pt;text-transform:uppercase;letter-spacing:0.1em;color:${BRAND}">Project Manager</div>
+                <div style="font-size:9pt;font-weight:700">${esc(owner.firstName + ' ' + owner.lastName)}</div>
+              </div>
+            </div>` : ''}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:8.5pt">
+              <div style="padding:7px 10px;border:1px solid #e5e7eb"><div style="color:#888;font-size:7pt;text-transform:uppercase;letter-spacing:0.1em">Start</div><div style="font-weight:700">${new Date(p.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
+              <div style="padding:7px 10px;border:1px solid ${overdue ? COL_RED : '#e5e7eb'};${overdue ? `background:${COL_RED}08` : ''}"><div style="color:${overdue ? COL_RED : '#888'};font-size:7pt;text-transform:uppercase;letter-spacing:0.1em">Deadline</div><div style="font-weight:700;color:${overdue ? COL_RED : '#111'}">${new Date(p.deadline).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
+              ${p.budget ? `<div style="padding:7px 10px;border:1px solid #e5e7eb;grid-column:span 2"><div style="color:#888;font-size:7pt;text-transform:uppercase;letter-spacing:0.1em">Budget</div><div style="font-weight:700">${p.budget >= 1000 ? `${(p.budget / 1000).toFixed(0)}k€` : `${p.budget}€`}</div></div>` : ''}
+            </div>
+            ${techs.length > 0 ? `
+            <div style="margin-top:8px">
+              <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:5px">Technologies</div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px">${techs.map((t) => `<span style="background:#f3f4f6;color:#374151;font-size:7.5pt;font-weight:700;padding:2px 8px;text-transform:uppercase;letter-spacing:0.06em">${esc(t.name)}</span>`).join('')}</div>
+            </div>` : ''}
+            ${members.length > 0 ? `
+            <div style="margin-top:8px">
+              <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:5px">Team (${members.length})</div>
+              <div style="display:flex;flex-wrap:wrap;gap:3px">${members.slice(0, 8).map((u) => `<span style="width:26px;height:26px;background:${u.avatarColor || accentColor};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:7.5pt;font-weight:900;title="${esc(u.firstName + ' ' + u.lastName)}">${esc(u.firstName[0] + u.lastName[0])}</span>`).join('')}${members.length > 8 ? `<span style="font-size:8pt;color:#888;align-self:center;margin-left:3px">+${members.length - 8}</span>` : ''}</div>
+            </div>` : ''}
+          </div>
+
+          <!-- Right: task board summary -->
+          <div>
+            <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:6px">Task Status</div>
+            ${[
+              ['Done', taskCounts2.done, COL_GREEN],
+              ['In Progress', taskCounts2.inProgress, COL_BLUE],
+              ['To Do', taskCounts2.todo, '#94a3b8'],
+              ['Paused', taskCounts2.paused, COL_AMBER],
+              ['Blocked', taskCounts2.blocked, COL_RED],
+            ].filter(([, count]) => (count as number) > 0).map(([label, count, color]) => `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+              <div style="width:8px;height:8px;background:${color};flex-shrink:0"></div>
+              <div style="flex:1;font-size:8pt;font-family:system-ui">${label}</div>
+              <div style="font-size:9pt;font-weight:900;font-family:system-ui">${count}</div>
+              <div style="font-size:7.5pt;color:#aaa;width:32px;text-align:right">${tasks.length ? Math.round((count as number / tasks.length) * 100) : 0}%</div>
+            </div>`).join('')}
+          </div>
+        </div>
+
+        <!-- Milestones -->
+        ${milestones.length > 0 ? `
+        <div style="margin-bottom:12px">
+          <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;margin-bottom:6px">Milestones</div>
+          <div style="display:grid;grid-template-columns:repeat(${Math.min(3, milestones.length)},1fr);gap:6px">
+            ${milestones.slice(0, 6).map((m) => {
+              const mColor = m.done ? COL_GREEN : now > new Date(m.date).getTime() ? COL_RED : '#64748b';
+              return `<div style="border-left:3px solid ${mColor};padding:6px 10px;border:1px solid #e5e7eb;border-left-width:3px;border-left-color:${mColor}">
+                <div style="font-size:7pt;color:${mColor};font-weight:900;text-transform:uppercase">${m.done ? '✓ Done' : now > new Date(m.date).getTime() ? 'Overdue' : 'Upcoming'}</div>
+                <div style="font-size:8.5pt;font-weight:700;margin-top:2px">${esc(m.label)}</div>
+                <div style="font-size:7.5pt;color:#aaa;margin-top:1px">${new Date(m.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>` : ''}
+
+        <!-- Tags & confidentiality -->
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          ${p.confidentiality ? `<span style="background:${p.confidentiality === 'restricted' ? COL_RED : p.confidentiality === 'confidential' ? COL_AMBER : p.confidentiality === 'internal' ? COL_BLUE : COL_GREEN}15;color:${p.confidentiality === 'restricted' ? COL_RED : p.confidentiality === 'confidential' ? COL_AMBER : p.confidentiality === 'internal' ? COL_BLUE : COL_GREEN};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px">🔒 ${esc(p.confidentiality)}</span>` : ''}
+          ${(p.tags || []).map((t) => `<span style="background:#f3f4f6;color:#666;font-size:7.5pt;padding:2px 8px">#${esc(t)}</span>`).join('')}
+          ${p.fteGain ? `<span style="background:${COL_GREEN}15;color:${COL_GREEN};font-size:7.5pt;font-weight:900;padding:2px 8px">${p.fteGain} FTE saved</span>` : ''}
+        </div>
+      </div>
+    </div>`, i < projects.length - 1);
+  }).join('');
+
+  // ── Assemble full document ───────────────────────────────────────────
+  const w = window.open('', '_blank');
+  if (!w) return;
+  w.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>DOINg.AI — Portfolio Booklet</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f0f0f0; }
+    .page { background: #fff; margin: 0 auto; width: 297mm; min-height: 210mm; }
+    @media print {
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      body { background: #fff; }
+      .page { width: 100%; margin: 0; page-break-after: always; }
+      .page:last-child { page-break-after: avoid; }
+      @page { size: A4 landscape; margin: 0; }
+    }
+    @media screen {
+      .page { box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin: 20px auto; }
+    }
+    .no-print { display: block; }
+    @media print { .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <!-- Print toolbar -->
+  <div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:1000;background:#0a0a0b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:10px 24px">
+    <div style="font-size:11pt;font-weight:900;font-family:system-ui">DOINg<span style="color:#FF3E00">.AI</span> <span style="font-weight:400;color:#888;font-size:9pt">— Portfolio Booklet · ${projects.length} projects</span></div>
+    <button onclick="window.print()" style="background:#FF3E00;color:#fff;border:none;padding:8px 24px;font-size:10pt;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;font-family:system-ui">🖨 Print / Save PDF</button>
+  </div>
+  <div style="height:44px" class="no-print"></div>
+
+  ${coverPage}
+  ${agendaPage}
+  ${execPage}
+  ${projectPages}
+</body>
+</html>`);
+  w.document.close();
+};
