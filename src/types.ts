@@ -99,6 +99,16 @@ export interface ProjectTemplate {
   createdAt: string;
 }
 
+export type DevStatus = 'to_start' | 'dev' | 'uat' | 'prod';
+
+export interface ExternalMember {
+  id: string;
+  name: string;
+  email?: string;
+  role?: string;        // free-text role/function
+  company?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -106,6 +116,7 @@ export interface Project {
   context?: string;
   notes?: string;
   status: ProjectStatus;
+  devStatus?: DevStatus;           // dev workflow stage
   managerId?: string;              // user id of owner/PM
   startDate: string;
   deadline: string;
@@ -117,6 +128,7 @@ export interface Project {
   fteGain?: number;
   confidentiality?: 'public' | 'internal' | 'confidential' | 'restricted';
   members: ProjectMember[];
+  externalMembers?: ExternalMember[];   // people outside the contributor list
   tasks: Task[];
   milestones: Milestone[];
   technologyIds: string[];

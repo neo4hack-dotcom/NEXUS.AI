@@ -38,6 +38,8 @@ import {
   ProjectPresentation,
   ProjectLinkedApp,
   ProjectFamily,
+  DevStatus,
+  ExternalMember,
 } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -122,6 +124,19 @@ const CONF_STYLE: Record<string, string> = {
   internal: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   confidential: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   restricted: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+};
+
+const DEV_STATUS_LABEL: Record<DevStatus, string> = {
+  to_start: 'To Start',
+  dev: 'Dev',
+  uat: 'UAT',
+  prod: 'Prod',
+};
+const DEV_STATUS_STYLE: Record<DevStatus, string> = {
+  to_start: 'bg-neutral-100 text-neutral-600 dark:bg-ink-700 dark:text-neutral-300',
+  dev:      'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  uat:      'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  prod:     'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
 };
 
 /* ── RAG health helper ── */
@@ -649,6 +664,11 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                   <Badge tone={overdue ? 'red' : p.status === 'Done' ? 'muted' : 'green'}>
                     {p.status}
                   </Badge>
+                  {p.devStatus && (
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${DEV_STATUS_STYLE[p.devStatus]}`}>
+                      {DEV_STATUS_LABEL[p.devStatus]}
+                    </span>
+                  )}
                   {p.confidentiality && p.confidentiality !== 'internal' && (
                     <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${CONF_STYLE[p.confidentiality] || ''}`}>
                       {p.confidentiality}
@@ -778,6 +798,76 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           currentUser={currentUser}
           onClose={() => setShowBooklet(false)}
         />
+      )}
+    </div>
+  );
+};
+
+/* === External Members Field === */
+
+const ExternalMembersField: React.FC<{
+  members: ExternalMember[];
+  canEdit: boolean;
+  onChange: (members: ExternalMember[]) => void;
+}> = ({ members, canEdit, onChange }) => {
+  const [form, setForm] = useState({ name: '', email: '', role: '', company: '' });
+  const [open, setOpen] = useState(false);
+
+  const add = () => {
+    if (!form.name.trim()) return;
+    onChange([...members, { id: generateId(), ...form }]);
+    setForm({ name: '', email: '', role: '', company: '' });
+    setOpen(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="label-xs">External Members</label>
+        {canEdit && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="text-[10px] font-bold uppercase tracking-[0.12em] text-brand hover:underline flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" /> Add external
+          </button>
+        )}
+      </div>
+
+      {open && canEdit && (
+        <div className="border border-brand/30 bg-brand/5 p-3 grid grid-cols-2 gap-2">
+          <Input placeholder="Full name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input placeholder="Role / function" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} />
+          <Input placeholder="Company / org" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+          <div className="col-span-2 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={add} disabled={!form.name.trim()}>Add</Button>
+          </div>
+        </div>
+      )}
+
+      {members.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {members.map((m) => (
+            <div key={m.id} className="flex items-center gap-2 px-2 py-1 border border-neutral-300 dark:border-ink-500 bg-neutral-50 dark:bg-ink-800 text-xs">
+              <div>
+                <span className="font-bold">{m.name}</span>
+                {m.role && <span className="text-muted ml-1">· {m.role}</span>}
+                {m.company && <span className="text-muted ml-1">({m.company})</span>}
+              </div>
+              {canEdit && (
+                <button onClick={() => onChange(members.filter((x) => x.id !== m.id))} className="text-muted hover:text-red-500 ml-1">
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {members.length === 0 && !open && (
+        <p className="text-xs text-muted">No external members yet.</p>
       )}
     </div>
   );
@@ -1228,6 +1318,19 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                   <option value="restricted">Restricted</option>
                 </Select>
               </Field>
+              <Field label="Dev Workflow">
+                <Select
+                  value={draft.devStatus || ''}
+                  onChange={(e) => setDraft({ ...draft, devStatus: (e.target.value as DevStatus) || undefined })}
+                  disabled={!canEdit}
+                >
+                  <option value="">— Not set —</option>
+                  <option value="to_start">To Start</option>
+                  <option value="dev">Dev</option>
+                  <option value="uat">UAT</option>
+                  <option value="prod">Prod</option>
+                </Select>
+              </Field>
               <Field label="Family">
                 <Select
                   value={draft.familyId || ''}
@@ -1397,6 +1500,15 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                     })}
                   </div>
                 </Field>
+              </div>
+
+              {/* External members */}
+              <div className="md:col-span-2">
+                <ExternalMembersField
+                  members={draft.externalMembers || []}
+                  canEdit={canEdit}
+                  onChange={(externalMembers) => setDraft({ ...draft, externalMembers })}
+                />
               </div>
 
               <div className="md:col-span-2 mt-2 surface-flat border p-4">

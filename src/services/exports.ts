@@ -2,7 +2,7 @@
 /* PDF: opens a self-contained print window styled for paper.
    EML: builds an RFC-822 .eml file the user can double-click to open in Outlook. */
 
-import { AppState, Hackathon, Project } from '../types';
+import { AppState, Hackathon, Project, ProjectStatus } from '../types';
 
 export const exportEML = (subject: string, body: string, recipients: string[]): void => {
   const safeSubj = (subject || 'DOINg.AI Update').replace(/[\r\n]+/g, ' ').trim();
@@ -1541,5 +1541,175 @@ export const buildBookletHTML = (
   ${projectPages}
 </body>
 </html>`);
+  w.document.close();
+};
+
+/* ====================================================================
+   TIMELINE GANTT PDF — landscape Gantt export
+   ==================================================================== */
+
+export const buildTimelinePDF = (projects: Project[], _state: AppState): void => {
+  if (projects.length === 0) {
+    alert('No projects selected for export.');
+    return;
+  }
+
+  const now = Date.now();
+  const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  const starts = projects.map((p) => new Date(p.startDate).getTime());
+  const ends = projects.map((p) => new Date(p.deadline).getTime());
+  const minTs = Math.min(...starts) - 10 * 86400000;
+  const maxTs = Math.max(...ends) + 10 * 86400000;
+  const totalMs = maxTs - minTs;
+
+  const SVG_W = 1060;
+  const LABEL_W = 200;
+  const GANTT_W = SVG_W - LABEL_W - 20;
+  const ROW_H = 36;
+  const HEADER_H = 40;
+  const SVG_H = HEADER_H + projects.length * ROW_H + 10;
+
+  const toX = (ts: number) => LABEL_W + ((ts - minTs) / totalMs) * GANTT_W;
+
+  // Month markers
+  const monthLines: string[] = [];
+  const cursor = new Date(minTs);
+  cursor.setDate(1);
+  cursor.setHours(0, 0, 0, 0);
+  while (cursor.getTime() < maxTs) {
+    const x = toX(cursor.getTime());
+    if (x >= LABEL_W && x <= SVG_W - 20) {
+      monthLines.push(
+        `<line x1="${x.toFixed(1)}" y1="${HEADER_H}" x2="${x.toFixed(1)}" y2="${SVG_H}" stroke="#e5e7eb" stroke-width="1"/>`
+      );
+      monthLines.push(
+        `<text x="${(x + 4).toFixed(1)}" y="26" font-size="8" fill="#999" font-family="system-ui" font-weight="700">${MONTHS_SHORT[cursor.getMonth()]} ${cursor.getFullYear().toString().slice(2)}</text>`
+      );
+    }
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  // Today line
+  const todayX = toX(now);
+  const todayLine =
+    todayX >= LABEL_W && todayX <= SVG_W - 20
+      ? `<line x1="${todayX.toFixed(1)}" y1="0" x2="${todayX.toFixed(1)}" y2="${SVG_H}" stroke="${BRAND}" stroke-width="1.5" stroke-dasharray="4,3"/>
+         <rect x="${(todayX - 16).toFixed(1)}" y="2" width="32" height="12" fill="${BRAND}"/>
+         <text x="${todayX.toFixed(1)}" y="11" text-anchor="middle" font-size="7" fill="#fff" font-weight="900" font-family="system-ui">TODAY</text>`
+      : '';
+
+  // Project rows
+  const rowsSvg = projects
+    .map((p, i) => {
+      const y = HEADER_H + i * ROW_H;
+      const rowBg = i % 2 === 0 ? '#ffffff' : '#f9fafb';
+      const startX = Math.max(LABEL_W, toX(new Date(p.startDate).getTime()));
+      const endX = Math.min(SVG_W - 20, toX(new Date(p.deadline).getTime()));
+      const barW = Math.max(4, endX - startX);
+      const overdue = new Date(p.deadline).getTime() < now && p.status !== ProjectStatus.DONE;
+      const done = p.status === ProjectStatus.DONE;
+      const barColor = done ? '#22c55e' : overdue ? '#ef4444' : BRAND;
+      const barAlpha = done ? 'b0' : 'cc';
+      const midY = y + ROW_H / 2;
+      const barY = midY - 9;
+
+      const milestonesSvg = (p.milestones || [])
+        .map((m) => {
+          const mx = toX(new Date(m.date).getTime());
+          if (mx < LABEL_W || mx > SVG_W - 20) return '';
+          const mColor = m.done ? '#22c55e' : now > new Date(m.date).getTime() ? '#ef4444' : '#f59e0b';
+          return `<polygon points="${mx.toFixed(1)},${(barY - 1).toFixed(1)} ${(mx - 5).toFixed(1)},${(barY - 9).toFixed(1)} ${(mx + 5).toFixed(1)},${(barY - 9).toFixed(1)}" fill="${mColor}"/>`;
+        })
+        .join('');
+
+      return `
+      <rect x="0" y="${y}" width="${SVG_W}" height="${ROW_H}" fill="${rowBg}"/>
+      <line x1="0" y1="${y + ROW_H}" x2="${SVG_W}" y2="${y + ROW_H}" stroke="#e5e7eb" stroke-width="0.5"/>
+      <text x="${LABEL_W - 8}" y="${midY + 4}" text-anchor="end" font-size="9.5" font-weight="700" fill="#111" font-family="system-ui">${esc(p.name.slice(0, 26))}</text>
+      <text x="${LABEL_W - 8}" y="${midY + 14}" text-anchor="end" font-size="7" fill="#aaa" font-family="system-ui">${esc(p.status.toUpperCase())}</text>
+      <line x1="${LABEL_W}" y1="${y}" x2="${LABEL_W}" y2="${y + ROW_H}" stroke="#e5e7eb" stroke-width="1"/>
+      <rect x="${startX.toFixed(1)}" y="${barY.toFixed(1)}" width="${barW.toFixed(1)}" height="18" fill="${barColor}${barAlpha}" rx="1"/>
+      ${barW > 30 ? `<text x="${(startX + 4).toFixed(1)}" y="${(barY + 12).toFixed(1)}" font-size="7.5" font-weight="900" fill="#fff" font-family="system-ui">${esc(p.name.slice(0, 22))}</text>` : ''}
+      ${milestonesSvg}`;
+    })
+    .join('');
+
+  const svg = `<svg viewBox="0 0 ${SVG_W} ${SVG_H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block">
+    <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" fill="#fff"/>
+    <rect x="0" y="0" width="${SVG_W}" height="${HEADER_H}" fill="#f8fafc"/>
+    <rect x="0" y="${HEADER_H - 1}" width="${SVG_W}" height="2" fill="#e5e7eb"/>
+    <text x="10" y="26" font-size="8" font-weight="900" fill="#aaa" font-family="system-ui">PROJECT</text>
+    ${monthLines.join('\n    ')}
+    ${rowsSvg}
+    ${todayLine}
+  </svg>`;
+
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const dateRange = `${new Date(minTs).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} — ${new Date(maxTs).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>DOINg.AI - Portfolio Timeline</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #fff; color: #0a0a0b; }
+    .no-print { display: block; }
+    @media print { .no-print { display: none !important; } }
+    .page-header { display:flex;align-items:flex-end;justify-content:space-between;border-bottom:3px solid #FF3E00;padding-bottom:10px;margin-bottom:14px; }
+    .brand { font-size:20pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.04em;line-height:1; }
+    .brand span { color:#FF3E00; }
+    .legend { display:flex;align-items:center;gap:18px;margin-top:10px;font-size:8pt;color:#666; }
+    .legend-dot { width:12px;height:12px;display:inline-block;margin-right:4px;vertical-align:middle; }
+    .footer { margin-top:10px;font-size:7.5pt;color:#bbb;text-align:center;border-top:1px solid #eee;padding-top:6px;letter-spacing:0.1em;text-transform:uppercase; }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:1000;background:#0a0a0b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:10px 24px">
+    <div style="font-size:11pt;font-weight:900;font-family:system-ui">DOINg<span style="color:#FF3E00">.AI</span> <span style="font-weight:400;color:#888;font-size:9pt">Portfolio Timeline &middot; ${projects.length} projects</span></div>
+    <button onclick="window.print()" style="background:#FF3E00;color:#fff;border:none;padding:8px 24px;font-size:10pt;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;font-family:system-ui">Print / Save PDF</button>
+  </div>
+  <div class="no-print" style="height:44px"></div>
+  <div style="padding:0 2px">
+    <div class="page-header">
+      <div>
+        <div class="brand">DOINg<span>.AI</span></div>
+        <div style="font-size:16pt;font-weight:900;text-transform:uppercase;letter-spacing:-0.02em;margin-top:4px">Portfolio Timeline</div>
+        <div style="font-size:8.5pt;color:#888;margin-top:3px;letter-spacing:0.1em">${projects.length} projects &middot; ${dateRange}</div>
+      </div>
+      <div style="text-align:right;font-size:8pt;color:#888;line-height:1.6;text-transform:uppercase;letter-spacing:0.1em">
+        <div>Confidential</div>
+        <div>${today}</div>
+      </div>
+    </div>
+    <div style="border:1px solid #e5e7eb;overflow:hidden">${svg}</div>
+    <div class="legend">
+      <span><span class="legend-dot" style="background:#FF3E00cc"></span>On track</span>
+      <span><span class="legend-dot" style="background:#ef4444cc"></span>Overdue</span>
+      <span><span class="legend-dot" style="background:#22c55eb0"></span>Done</span>
+      <span style="display:flex;align-items:center;gap:4px">
+        <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,0 0,10 10,10" fill="#f59e0b"/></svg>
+        Milestone (pending)
+      </span>
+      <span style="display:flex;align-items:center;gap:4px">
+        <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,0 0,10 10,10" fill="#22c55e"/></svg>
+        Milestone (done)
+      </span>
+      <span style="display:flex;align-items:center;gap:4px">
+        <svg width="2" height="14" viewBox="0 0 2 14"><line x1="1" y1="0" x2="1" y2="14" stroke="#FF3E00" stroke-width="1.5" stroke-dasharray="3,2"/></svg>
+        Today
+      </span>
+    </div>
+    <div class="footer">DOINg.AI &middot; AI Project Operations Platform &middot; Generated ${today}</div>
+  </div>
+</body>
+</html>`;
+
+  const w = window.open('', '_blank', 'width=1200,height=850');
+  if (!w) { alert('Allow pop-ups to export PDF.'); return; }
+  w.document.write(html);
   w.document.close();
 };
