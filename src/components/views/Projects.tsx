@@ -23,6 +23,8 @@ import {
   Loader2,
   LayoutGrid,
   Layers,
+  Rows3,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
@@ -443,8 +445,24 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showBooklet, setShowBooklet] = useState(false);
   const [view, setView] = useState<'list' | 'portfolio'>('list');
+  const [density, setDensity] = useState<'cards' | 'rows'>('cards');
   const [showFamilyManager, setShowFamilyManager] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterDev, setFilterDev] = useState<string>('');
+  const [filterInnov, setFilterInnov] = useState<string>('');
+  const [filterOwner, setFilterOwner] = useState<string>('');
+  const [filterTag, setFilterTag] = useState<string>('');
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilterCount =
+    (filterStatus ? 1 : 0) +
+    (filterDev ? 1 : 0) +
+    (filterInnov ? 1 : 0) +
+    (filterOwner ? 1 : 0) +
+    (filterTag ? 1 : 0);
+  const clearFilters = () => {
+    setFilterStatus(''); setFilterDev(''); setFilterInnov(''); setFilterOwner(''); setFilterTag('');
+  };
   const canEdit = currentUser.role !== 'viewer';
   const canUseAI = currentUser.role === 'admin' || currentUser.role === 'manager';
   const isAdmin = currentUser.role === 'admin' || currentUser.role === 'manager';
@@ -463,9 +481,20 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           if (familyFilter === '__none__') return !p.familyId;
           return p.familyId === familyFilter;
         })
+        .filter((p) => !filterStatus || p.status === filterStatus)
+        .filter((p) => !filterDev || p.devStatus === filterDev)
+        .filter((p) => !filterInnov || p.innovationStatus === filterInnov)
+        .filter((p) => !filterOwner || p.managerId === filterOwner)
+        .filter((p) => !filterTag || (p.tags || []).map((t) => t.toLowerCase()).includes(filterTag.toLowerCase()))
         .sort((a, b) => Number(b.isImportant) - Number(a.isImportant)),
-    [state.projects, q, showArchived, familyFilter]
+    [state.projects, q, showArchived, familyFilter, filterStatus, filterDev, filterInnov, filterOwner, filterTag]
   );
+
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    state.projects.forEach((p) => (p.tags || []).forEach((t) => t && set.add(t)));
+    return [...set].sort();
+  }, [state.projects]);
 
   const selected = state.projects.find((p) => p.id === selectedId) || null;
 
@@ -523,6 +552,40 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
               <Layers className="w-3 h-3" /> Portfolio
             </button>
           </div>
+          {/* Density toggle (only in list view) */}
+          {view === 'list' && (
+            <div className="flex border border-neutral-300 dark:border-ink-500 overflow-hidden" title="Display density">
+              <button
+                onClick={() => setDensity('cards')}
+                className={`flex items-center justify-center px-2.5 py-1.5 transition-colors ${density === 'cards' ? 'bg-brand text-white' : 'text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+                title="Card view"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setDensity('rows')}
+                className={`flex items-center justify-center px-2.5 py-1.5 border-l border-neutral-300 dark:border-ink-500 transition-colors ${density === 'rows' ? 'bg-brand text-white border-brand' : 'text-muted hover:text-neutral-900 dark:hover:text-white'}`}
+                title="Compact row view"
+              >
+                <Rows3 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+          {/* Filters toggle */}
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => setShowFilters((v) => !v)}
+            className={showFilters || activeFilterCount > 0 ? 'border-brand text-brand' : ''}
+          >
+            <SlidersHorizontal className="w-4 h-4 mr-2" />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-2 px-1.5 py-0.5 text-[9px] font-bold bg-brand text-white">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
           <div className="relative flex-1 md:w-64">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <Input
@@ -568,6 +631,72 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           )}
         </div>
       </div>
+
+      {/* Filter panel */}
+      {showFilters && view === 'list' && (
+        <div className="surface border p-4 space-y-3 animate-fade-in">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Status</label>
+              <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                <option value="">All</option>
+                <option value="Idea">Idea</option>
+                <option value="Active">Active</option>
+                <option value="On Hold">On Hold</option>
+                <option value="Done">Done</option>
+                <option value="Cancelled">Cancelled</option>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Innovation</label>
+              <Select value={filterInnov} onChange={(e) => setFilterInnov(e.target.value)}>
+                <option value="">All</option>
+                <option value="poc">POC</option>
+                <option value="pilot">Pilot</option>
+                <option value="prod">Prod</option>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Dev Workflow</label>
+              <Select value={filterDev} onChange={(e) => setFilterDev(e.target.value)}>
+                <option value="">All</option>
+                <option value="to_start">To Start</option>
+                <option value="dev">Dev</option>
+                <option value="uat">UAT</option>
+                <option value="prod">Prod</option>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Owner / PM</label>
+              <Select value={filterOwner} onChange={(e) => setFilterOwner(e.target.value)}>
+                <option value="">All</option>
+                {state.users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Tag</label>
+              <Select value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+                <option value="">All</option>
+                {allTags.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          {activeFilterCount > 0 && (
+            <div className="flex justify-end">
+              <button
+                onClick={clearFilters}
+                className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted hover:text-brand transition-colors"
+              >
+                Clear all filters
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Portfolio / Family view */}
       {view === 'portfolio' && (
@@ -633,7 +762,83 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         </div>
       )}
 
-      {view === 'list' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {view === 'list' && density === 'rows' && (
+        <div className="surface border divide-y divide-neutral-200 dark:divide-ink-600">
+          {filtered.map((p) => {
+            const pct = projectProgress(p);
+            const overdue = new Date(p.deadline).getTime() < Date.now() && p.status !== 'Done';
+            const owner = state.users.find((u) => u.id === p.managerId);
+            const rag = ragHealth(p);
+            const family = p.familyId ? (state.projectFamilies || []).find((f) => f.id === p.familyId) : null;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setSelectedId(p.id)}
+                className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-brand/5 transition-colors"
+              >
+                {/* Family color + important */}
+                <div className="flex items-center gap-1 shrink-0 w-[14px]">
+                  {family && <span className="w-2 h-2" style={{ backgroundColor: family.color || '#FF3E00' }} />}
+                </div>
+                {/* Name + family small */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    {p.isImportant && <Star className="w-3 h-3 text-brand fill-brand shrink-0" />}
+                    <span className="text-[12px] font-black uppercase tracking-tight truncate">{p.name}</span>
+                    {family && (
+                      <span className="text-[8px] font-bold uppercase tracking-[0.14em] text-muted shrink-0">· {family.name}</span>
+                    )}
+                  </div>
+                </div>
+                {/* RAG */}
+                <span className={`shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${RAG_STYLE[rag.tone]}`}>{rag.label}</span>
+                {/* Status */}
+                <span className={`shrink-0 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] w-[60px] text-center ${overdue ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : p.status === 'Done' ? 'bg-neutral-100 text-neutral-600 dark:bg-ink-700 dark:text-neutral-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
+                  {p.status}
+                </span>
+                {/* Dev */}
+                <span className="shrink-0 w-[60px] text-center">
+                  {p.devStatus ? (
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${DEV_STATUS_STYLE[p.devStatus]}`}>
+                      {DEV_STATUS_LABEL[p.devStatus]}
+                    </span>
+                  ) : <span className="text-[9px] text-muted">—</span>}
+                </span>
+                {/* Innovation */}
+                <span className="shrink-0 w-[56px] text-center">
+                  {p.innovationStatus ? (
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${INNOVATION_STYLE[p.innovationStatus]}`}>
+                      {INNOVATION_LABEL[p.innovationStatus]}
+                    </span>
+                  ) : <span className="text-[9px] text-muted">—</span>}
+                </span>
+                {/* Progress */}
+                <div className="shrink-0 w-[110px] flex items-center gap-2">
+                  <div className="flex-1 h-1 bg-neutral-200 dark:bg-ink-600 overflow-hidden">
+                    <div className="h-full bg-brand" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-[9px] font-mono text-muted w-[28px] text-right">{pct}%</span>
+                </div>
+                {/* Deadline */}
+                <span className="shrink-0 hidden md:flex items-center gap-1 text-[9px] font-mono uppercase tracking-[0.12em] text-muted w-[88px]">
+                  <Calendar className="w-3 h-3" />
+                  {new Date(p.deadline).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
+                </span>
+                {/* Owner */}
+                <span className="shrink-0 hidden lg:block text-[10px] text-muted truncate w-[120px]">
+                  {owner ? `${owner.firstName} ${owner.lastName}` : '—'}
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-muted shrink-0" />
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <p className="text-center text-sm text-muted py-12">No projects match the current filters.</p>
+          )}
+        </div>
+      )}
+
+      {view === 'list' && density === 'cards' && <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {filtered.map((p) => {
           const pct = projectProgress(p);
           const overdue = new Date(p.deadline).getTime() < Date.now() && p.status !== 'Done';
