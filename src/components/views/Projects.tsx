@@ -25,6 +25,9 @@ import {
   Layers,
   Rows3,
   SlidersHorizontal,
+  FileSpreadsheet,
+  Upload,
+  AlertCircle,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
@@ -58,6 +61,13 @@ import {
   ExtractedProject,
   ExtractedTask,
 } from '../../services/llmService';
+import {
+  parseSpreadsheet,
+  extractProjectsFromSheet,
+  buildProjectFromDraft,
+  type ExtractedProjectDraft,
+  type SheetPreview,
+} from '../../services/projectImport';
 
 interface Props {
   state: AppState;
@@ -442,6 +452,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showBooklet, setShowBooklet] = useState(false);
   const [view, setView] = useState<'list' | 'portfolio'>('list');
@@ -609,6 +620,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             <Button variant="outline" size="md" onClick={() => setShowAiBot(true)}>
               <Bot className="w-4 h-4 mr-2" />
               AI PRJ
+            </Button>
+          )}
+          {canUseAI && (
+            <Button variant="outline" size="md" onClick={() => setShowBulkImport(true)}>
+              <FileSpreadsheet className="w-4 h-4 mr-2" />
+              Import xlsx
             </Button>
           )}
           <Button variant="outline" size="md" onClick={() => setShowBooklet(true)}>
@@ -783,6 +800,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                 {/* Name + family small */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
+                    {p.botCreated && <Bot className="w-3 h-3 text-purple-500 shrink-0" />}
                     {p.isImportant && <Star className="w-3 h-3 text-brand fill-brand shrink-0" />}
                     <span className="text-[12px] font-black uppercase tracking-tight truncate">{p.name}</span>
                     {family && (
@@ -870,6 +888,11 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                     <h3 className="text-lg font-black uppercase tracking-tight">{p.name}</h3>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {p.botCreated && (
+                      <span title="Created by AI bulk import" className="flex items-center gap-1 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                        <Bot className="w-3 h-3" /> Bot
+                      </span>
+                    )}
                     <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${RAG_STYLE[rag.tone]}`}>{rag.label}</span>
                     {p.isImportant && <Star className="w-4 h-4 text-brand fill-brand" />}
                   </div>
@@ -1000,6 +1023,18 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             upsertProject(addAudit(p, currentUser, 'Project created via AI PRJ'));
             setSelectedId(p.id);
             setShowAiBot(false);
+          }}
+        />
+      )}
+
+      {showBulkImport && (
+        <BulkImportModal
+          state={state}
+          currentUser={currentUser}
+          onClose={() => setShowBulkImport(false)}
+          onImport={(projects) => {
+            update((s) => ({ ...s, projects: [...projects, ...s.projects] }));
+            setShowBulkImport(false);
           }}
         />
       )}
@@ -2348,6 +2383,273 @@ const KanbanCard: React.FC<{
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+/* === Bulk Import Modal (AI-assisted xlsx → projects) === */
+
+type BulkStep = 'upload' | 'analyzing' | 'review';
+
+const BulkImportModal: React.FC<{
+  state: AppState;
+  currentUser: User;
+  onClose: () => void;
+  onImport: (projects: Project[]) => void;
+}> = ({ state, currentUser, onClose, onImport }) => {
+  const [step, setStep] = useState<BulkStep>('upload');
+  const [preview, setPreview] = useState<SheetPreview | null>(null);
+  const [drafts, setDrafts] = useState<ExtractedProjectDraft[]>([]);
+  const [structureNote, setStructureNote] = useState('');
+  const [error, setError] = useState('');
+  const [fileName, setFileName] = useState('');
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const handleFile = async (file: File) => {
+    setError('');
+    setFileName(file.name);
+    try {
+      const p = await parseSpreadsheet(file);
+      setPreview(p);
+      setStep('analyzing');
+      const result = await extractProjectsFromSheet(p, state.llmConfig);
+      setStructureNote(result.structureNote);
+      setDrafts(result.projects);
+      setStep('review');
+      if (result.projects.length === 0) {
+        setError('The AI did not detect any project rows. Try a different file or clean up the headers.');
+      }
+    } catch (e: any) {
+      setError(e.message || 'Failed to import.');
+      setStep('upload');
+    }
+  };
+
+  const toggleDraft = (i: number) =>
+    setDrafts((prev) => prev.map((d, idx) => (idx === i ? { ...d, include: !d.include } : d)));
+
+  const updateDraft = (i: number, patch: Partial<ExtractedProjectDraft>) =>
+    setDrafts((prev) => prev.map((d, idx) => (idx === i ? { ...d, ...patch } : d)));
+
+  const confirmImport = () => {
+    const projects = drafts
+      .filter((d) => d.include && d.name.trim())
+      .map((d) =>
+        buildProjectFromDraft(
+          d,
+          { id: currentUser.id, firstName: currentUser.firstName, lastName: currentUser.lastName },
+          state.users
+        )
+      );
+    onImport(projects);
+  };
+
+  const selectedCount = drafts.filter((d) => d.include).length;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-5xl max-h-[92vh] flex flex-col animate-slide-up">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <FileSpreadsheet className="w-5 h-5 text-brand" />
+            <div>
+              <h2 className="text-lg font-black uppercase tracking-tight">AI Bulk Import</h2>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">
+                {step === 'upload' && 'Step 1 / 3 — Upload spreadsheet'}
+                {step === 'analyzing' && 'Step 2 / 3 — AI analyzing rows…'}
+                {step === 'review' && `Step 3 / 3 — Review (${selectedCount}/${drafts.length} selected)`}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {error && (
+            <div className="mb-4 flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300">
+              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-xs">{error}</p>
+            </div>
+          )}
+
+          {step === 'upload' && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted">
+                Upload an Excel (.xlsx) or CSV file. The local LLM will analyse the structure,
+                detect whether each row is a separate project and extract project data.
+              </p>
+              <label className="block border-2 border-dashed border-neutral-300 dark:border-ink-500 hover:border-brand p-12 text-center cursor-pointer transition-colors">
+                <Upload className="w-10 h-10 mx-auto mb-3 text-muted" />
+                <p className="text-sm font-bold uppercase tracking-[0.14em]">Click to choose a file</p>
+                <p className="text-[10px] text-muted mt-1">.xlsx, .xls, .csv — up to 200 rows analysed</p>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleFile(f);
+                  }}
+                />
+              </label>
+              <div className="flex items-start gap-2 p-3 bg-brand/5 border border-brand/20">
+                <Sparkles className="w-4 h-4 text-brand mt-0.5 shrink-0" />
+                <div className="text-xs">
+                  <p className="font-bold uppercase tracking-[0.12em] text-brand mb-1">Tips for best results</p>
+                  <ul className="text-muted space-y-0.5 list-disc list-inside">
+                    <li>Use clear column headers: Name, Description, Status, Owner, Start, Deadline…</li>
+                    <li>One row per project is ideal — the AI will adapt if rows are tasks/phases.</li>
+                    <li>Dates in YYYY-MM-DD or natural Excel date format are best.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 'analyzing' && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <Loader2 className="w-10 h-10 animate-spin text-brand" />
+              <p className="text-sm font-bold uppercase tracking-[0.14em]">Analysing {fileName}</p>
+              <p className="text-xs text-muted">{preview ? `${preview.totalRowCount} rows, ${preview.headers.length} columns` : ''}</p>
+              <p className="text-[10px] text-muted">Local LLM is detecting the structure and extracting projects…</p>
+            </div>
+          )}
+
+          {step === 'review' && (
+            <div className="space-y-4">
+              {structureNote && (
+                <div className="flex items-start gap-2 p-3 bg-neutral-50 dark:bg-ink-800 border border-neutral-200 dark:border-ink-600">
+                  <Sparkles className="w-4 h-4 text-brand mt-0.5 shrink-0" />
+                  <div className="text-xs">
+                    <p className="font-bold uppercase tracking-[0.12em] text-brand mb-1">AI structure analysis</p>
+                    <p className="text-muted">{structureNote}</p>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  onClick={() => setDrafts((p) => p.map((d) => ({ ...d, include: true })))}
+                  className="text-brand hover:underline text-[10px] font-bold uppercase tracking-[0.14em]"
+                >
+                  Select all
+                </button>
+                <span className="text-muted">·</span>
+                <button
+                  onClick={() => setDrafts((p) => p.map((d) => ({ ...d, include: false })))}
+                  className="text-muted hover:text-brand text-[10px] font-bold uppercase tracking-[0.14em]"
+                >
+                  Deselect all
+                </button>
+              </div>
+              <div className="space-y-2">
+                {drafts.map((d, i) => (
+                  <div
+                    key={i}
+                    className={`border p-3 transition-colors ${
+                      d.include ? 'border-brand bg-brand/5' : 'border-neutral-200 dark:border-ink-600 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={d.include}
+                        onChange={() => toggleDraft(i)}
+                        className="mt-1.5 w-4 h-4 accent-brand shrink-0"
+                      />
+                      <div className="flex-1 min-w-0 space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Input
+                            value={d.name}
+                            onChange={(e) => updateDraft(i, { name: e.target.value })}
+                            className="flex-1 min-w-[200px] !text-sm font-bold uppercase tracking-tight"
+                          />
+                          <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${
+                            d.confidence === 'high' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                            : d.confidence === 'medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          }`}>
+                            {d.confidence}
+                          </span>
+                          {d.sourceRows.length > 0 && (
+                            <span className="text-[9px] font-mono text-muted">rows {d.sourceRows.join(',')}</span>
+                          )}
+                        </div>
+                        <Textarea
+                          value={d.description}
+                          onChange={(e) => updateDraft(i, { description: e.target.value })}
+                          rows={2}
+                          className="!text-xs"
+                        />
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                          <Select value={d.status} onChange={(e) => updateDraft(i, { status: e.target.value as ProjectStatus })}>
+                            <option value="Idea">Idea</option>
+                            <option value="Active">Active</option>
+                            <option value="On Hold">On Hold</option>
+                            <option value="Done">Done</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </Select>
+                          <Select value={d.innovationStatus || ''} onChange={(e) => updateDraft(i, { innovationStatus: (e.target.value as InnovationStatus) || undefined })}>
+                            <option value="">— Innov —</option>
+                            <option value="poc">POC</option>
+                            <option value="pilot">Pilot</option>
+                            <option value="prod">Prod</option>
+                          </Select>
+                          <Input
+                            type="date"
+                            value={d.startDate}
+                            onChange={(e) => updateDraft(i, { startDate: e.target.value })}
+                          />
+                          <Input
+                            type="date"
+                            value={d.deadline}
+                            onChange={(e) => updateDraft(i, { deadline: e.target.value })}
+                          />
+                          <Input
+                            value={d.manager}
+                            onChange={(e) => updateDraft(i, { manager: e.target.value })}
+                            placeholder="Manager / PM"
+                          />
+                        </div>
+                        {d.tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {d.tags.map((t, ti) => (
+                              <span key={ti} className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] bg-neutral-100 dark:bg-ink-700 text-muted">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex items-center justify-between shrink-0">
+          <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">
+            {step === 'review' && drafts.length > 0 && `${selectedCount} project${selectedCount !== 1 ? 's' : ''} ready to import`}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            {step === 'review' && (
+              <Button onClick={confirmImport} disabled={selectedCount === 0}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create {selectedCount} project{selectedCount !== 1 ? 's' : ''}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
