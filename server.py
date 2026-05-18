@@ -176,6 +176,90 @@ async def update_db_path(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True, "path": str(DB_FILE)}
 
 
+# --- MCP discovery proxy ---
+#
+# Browsers cannot speak the MCP protocol directly (SSE / streamable HTTP, custom
+# handshake, no CORS on most servers). This endpoint uses the official Python
+# MCP SDK to connect, list tools, and return them as JSON for the frontend
+# McpHub editor's "Discover tools" button.
+#
+# Inspired by the implementation in neo4hack-dotcom/RAG-Chat.
+
+@app.post("/api/mcp/test")
+async def test_mcp_connection(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Connect to an MCP server and return its available tools."""
+    url = str(payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    auth_token = str(payload.get("authToken") or payload.get("token") or "").strip()
+    api_key = str(payload.get("apiKey") or "").strip()
+    api_key_header = str(payload.get("apiKeyHeader") or "x-api-key").strip() or "x-api-key"
+    disable_ssl = bool(payload.get("disableSslVerification", False))
+
+    # Lazy-import so the rest of the server keeps working if the MCP SDK
+    # is not installed yet.
+    try:
+        from mcp import ClientSession  # type: ignore
+        from mcp.client.sse import sse_client  # type: ignore
+        from mcp.client.streamable_http import streamablehttp_client  # type: ignore
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The 'mcp' Python SDK is not installed on the server. "
+                "Install it with: pip install 'mcp[cli]'"
+            ),
+        ) from e
+
+    headers: Dict[str, str] = {"Accept": "application/json, text/event-stream"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    if api_key:
+        headers[api_key_header] = api_key
+
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    path = (parsed.path or "").rstrip("/").lower()
+    is_sse = path.endswith("/sse") or path == "/sse"
+
+    try:
+        if is_sse:
+            async with sse_client(url, headers=headers) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tool_defs = await session.list_tools()
+                    tools = [
+                        {"name": t.name, "description": t.description or ""}
+                        for t in (tool_defs.tools or [])
+                    ]
+                    return {"status": "ok", "tools": tools, "tool_count": len(tools), "transport": "sse"}
+        else:
+            async with streamablehttp_client(url, headers=headers) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tool_defs = await session.list_tools()
+                    tools = [
+                        {"name": t.name, "description": t.description or ""}
+                        for t in (tool_defs.tools or [])
+                    ]
+                    return {"status": "ok", "tools": tools, "tool_count": len(tools), "transport": "http"}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        # Surface a useful error to the UI. The transport hint is the most
+        # common cause of failures (server expects SSE but URL has no /sse, etc.).
+        hint = ""
+        msg = str(e).strip() or e.__class__.__name__
+        if "406" in msg:
+            hint = (
+                " | The server rejected the request. Check whether the endpoint"
+                " expects SSE (URL should end in /sse) or streamable HTTP."
+            )
+        raise HTTPException(status_code=400, detail=f"MCP connection failed: {msg}{hint}") from e
+
+
 # --- Optional: serve built frontend from /dist ---
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")

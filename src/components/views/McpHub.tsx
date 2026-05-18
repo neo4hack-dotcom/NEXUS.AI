@@ -358,18 +358,33 @@ const McpEditorModal: React.FC<{
     setDiscovering(true);
     setDiscoverError('');
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token.trim()) headers['Authorization'] = `Bearer ${token.trim()}`;
-      const res = await fetch(`${url.trim()}/tools/list`, { method: 'GET', headers });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Use the backend proxy: browsers cannot speak the MCP protocol directly
+      // (SSE/streamable-HTTP handshake, no CORS on most MCP servers). The
+      // FastAPI endpoint /api/mcp/test connects with the official Python MCP
+      // SDK and returns the tool list as JSON.
+      const res = await fetch('/api/mcp/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: url.trim(),
+          authToken: token.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({} as { detail?: string }));
+        throw new Error(errBody.detail || `HTTP ${res.status}`);
+      }
       const data = await res.json();
-      const discovered: McpTool[] = (data.tools || data || []).map((t: Record<string, string>) => ({
+      const discovered: McpTool[] = (data.tools || []).map((t: Record<string, string>) => ({
         name: t.name || '',
-        description: t.description || t.desc || '',
+        description: t.description || '',
       }));
       setTools(discovered);
+      if (discovered.length === 0) {
+        setDiscoverError('Connected but the server reported zero tools.');
+      }
     } catch (e: any) {
-      setDiscoverError(`Could not discover tools: ${e.message}. You can add them manually.`);
+      setDiscoverError(`${e.message || 'Discovery failed'}. You can add tools manually.`);
     } finally {
       setDiscovering(false);
     }
