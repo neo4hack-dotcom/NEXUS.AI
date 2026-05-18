@@ -1360,13 +1360,14 @@ export const buildBookletHTML = (
     </div>`);
 
   // ── PAGE 2 — Agenda ─────────────────────────────────────────────────
+  const PROJECT_PAGE_START = 6;
   const agendaRows = projects.map((p, i) => {
     const rag = rags[i];
     const color = rag === 'green' ? COL_GREEN : rag === 'amber' ? COL_AMBER : COL_RED;
     const sc = statusColor[p.status] || BRAND;
     return `
     <div style="display:flex;align-items:center;gap:16px;padding:12px 16px;border-bottom:1px solid #f3f4f6;background:${i % 2 === 0 ? '#fff' : '#fafafa'}">
-      <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">${i + 5}</div>
+      <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">${i + PROJECT_PAGE_START}</div>
       <div style="width:4px;height:36px;background:${color};flex-shrink:0"></div>
       <div style="flex:1;min-width:0">
         <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em">${esc(p.name)}</div>
@@ -1401,8 +1402,13 @@ export const buildBookletHTML = (
         <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
         <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em;color:${BRAND}">Executive Summary</div>
       </div>
+      <div style="margin-bottom:4px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#fff4f0">
+        <div style="font-size:28pt;font-weight:900;color:#f0f0f0;font-family:system-ui;min-width:40px;text-align:right;line-height:1">4</div>
+        <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
+        <div style="font-size:10.5pt;font-weight:800;font-family:system-ui;text-transform:uppercase;letter-spacing:0.03em;color:${BRAND}">Portfolio Gantt</div>
+      </div>
       <div style="margin-bottom:12px;display:flex;align-items:center;gap:16px;padding:12px 16px;background:#0a0a0b;color:#fff">
-        <div style="font-size:28pt;font-weight:900;color:#333;font-family:system-ui;min-width:40px;text-align:right;line-height:1">4</div>
+        <div style="font-size:28pt;font-weight:900;color:#333;font-family:system-ui;min-width:40px;text-align:right;line-height:1">5</div>
         <div style="width:4px;height:36px;background:${BRAND};flex-shrink:0"></div>
         <div style="font-size:10.5pt;font-weight:800;text-transform:uppercase;letter-spacing:0.03em">Project Booklet</div>
       </div>
@@ -1476,6 +1482,102 @@ export const buildBookletHTML = (
         </div>` : ''}
       </div>
     </div>`);
+
+  // ── PAGE 4 — Portfolio Gantt (high-level timeline) ──────────────────
+  const ganttPage = (() => {
+    if (projects.length === 0) return '';
+    const ganttStarts = projects.map((p) => new Date(p.startDate).getTime());
+    const ganttEnds = projects.map((p) => new Date(p.deadline).getTime());
+    const minTs = Math.min(...ganttStarts) - 10 * 86400000;
+    const maxTs = Math.max(...ganttEnds) + 10 * 86400000;
+    const totalMs = maxTs - minTs || 1;
+    const SVG_W = 1100;
+    const LABEL_W = 220;
+    const GANTT_W = SVG_W - LABEL_W - 16;
+    const ROW_H = 26;
+    const HEADER_H = 36;
+    const SVG_H = HEADER_H + projects.length * ROW_H + 8;
+    const toX = (ts: number) => LABEL_W + ((ts - minTs) / totalMs) * GANTT_W;
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    const monthMarkers: string[] = [];
+    const c = new Date(minTs); c.setDate(1); c.setHours(0, 0, 0, 0);
+    while (c.getTime() < maxTs) {
+      const x = toX(c.getTime());
+      if (x >= LABEL_W && x <= SVG_W - 8) {
+        monthMarkers.push(`<line x1="${x.toFixed(1)}" y1="${HEADER_H}" x2="${x.toFixed(1)}" y2="${SVG_H}" stroke="#eee" stroke-width="0.7"/>`);
+        monthMarkers.push(`<text x="${(x + 4).toFixed(1)}" y="22" font-size="7.5" fill="#999" font-family="system-ui" font-weight="700">${MONTHS[c.getMonth()]} ${c.getFullYear().toString().slice(2)}</text>`);
+      }
+      c.setMonth(c.getMonth() + 1);
+    }
+
+    const todayX = toX(now);
+    const todayLine =
+      todayX >= LABEL_W && todayX <= SVG_W - 8
+        ? `<line x1="${todayX.toFixed(1)}" y1="0" x2="${todayX.toFixed(1)}" y2="${SVG_H}" stroke="${BRAND}" stroke-width="1.3" stroke-dasharray="4,3"/>
+           <rect x="${(todayX - 14).toFixed(1)}" y="2" width="28" height="11" fill="${BRAND}"/>
+           <text x="${todayX.toFixed(1)}" y="10" text-anchor="middle" font-size="6.5" fill="#fff" font-weight="900" font-family="system-ui">TODAY</text>`
+        : '';
+
+    const rowsSvg = projects.map((p, i) => {
+      const y = HEADER_H + i * ROW_H;
+      const rowBg = i % 2 === 0 ? '#ffffff' : '#fafafa';
+      const startX = Math.max(LABEL_W, toX(new Date(p.startDate).getTime()));
+      const endX = Math.min(SVG_W - 8, toX(new Date(p.deadline).getTime()));
+      const barW = Math.max(3, endX - startX);
+      const rag = rags[i];
+      const overdue = new Date(p.deadline).getTime() < now && p.status !== 'Done';
+      const done = p.status === 'Done';
+      const barColor = done ? COL_GREEN : overdue ? COL_RED : rag === 'amber' ? COL_AMBER : BRAND;
+      const midY = y + ROW_H / 2;
+      const barY = midY - 6;
+      const milestonesSvg = (p.milestones || []).map((m) => {
+        const mx = toX(new Date(m.date).getTime());
+        if (mx < LABEL_W || mx > SVG_W - 8) return '';
+        const mColor = m.done ? COL_GREEN : now > new Date(m.date).getTime() ? COL_RED : COL_AMBER;
+        return `<polygon points="${mx.toFixed(1)},${(barY - 1).toFixed(1)} ${(mx - 4).toFixed(1)},${(barY - 7).toFixed(1)} ${(mx + 4).toFixed(1)},${(barY - 7).toFixed(1)}" fill="${mColor}"/>`;
+      }).join('');
+      return `
+        <rect x="0" y="${y}" width="${SVG_W}" height="${ROW_H}" fill="${rowBg}"/>
+        <line x1="0" y1="${y + ROW_H}" x2="${SVG_W}" y2="${y + ROW_H}" stroke="#f0f0f0" stroke-width="0.5"/>
+        <text x="${LABEL_W - 8}" y="${(midY + 3).toFixed(1)}" text-anchor="end" font-size="8.5" font-weight="700" fill="#111" font-family="system-ui">${esc(p.name.slice(0, 30))}</text>
+        <line x1="${LABEL_W}" y1="${y}" x2="${LABEL_W}" y2="${y + ROW_H}" stroke="#e5e7eb" stroke-width="0.8"/>
+        <rect x="${startX.toFixed(1)}" y="${barY.toFixed(1)}" width="${barW.toFixed(1)}" height="12" fill="${barColor}" opacity="0.85" rx="1"/>
+        ${milestonesSvg}`;
+    }).join('');
+
+    const svg = `<svg viewBox="0 0 ${SVG_W} ${SVG_H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block">
+      <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" fill="#fff"/>
+      <rect x="0" y="0" width="${SVG_W}" height="${HEADER_H}" fill="#fafafa"/>
+      <rect x="0" y="${HEADER_H - 1}" width="${SVG_W}" height="1.5" fill="#e5e7eb"/>
+      <text x="10" y="22" font-size="7.5" font-weight="900" fill="#aaa" font-family="system-ui" letter-spacing="0.12em">PROJECT</text>
+      ${monthMarkers.join('\n      ')}
+      ${rowsSvg}
+      ${todayLine}
+    </svg>`;
+
+    const rangeLabel = `${new Date(minTs).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} — ${new Date(maxTs).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`;
+
+    return page(`
+      <div style="padding:34px 38px;min-height:100vh;background:#fff;font-family:system-ui">
+        <div style="border-left:4px solid ${BRAND};padding-left:16px;margin-bottom:22px">
+          <div style="font-size:8.5pt;text-transform:uppercase;letter-spacing:0.28em;color:${BRAND};font-weight:900;margin-bottom:4px">Timeline</div>
+          <div style="font-size:24pt;font-weight:900;color:#111;line-height:1">Portfolio Gantt</div>
+          <div style="font-size:9pt;color:#888;margin-top:6px">${rangeLabel} · ${projects.length} project${projects.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div style="border:1px solid #eee;padding:8px;background:#fff;margin-bottom:14px">
+          ${svg}
+        </div>
+        <div style="display:flex;align-items:center;gap:18px;font-size:8pt;color:#666;font-family:system-ui">
+          <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:14px;height:8px;background:${BRAND};opacity:0.85"></span>On track</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:14px;height:8px;background:${COL_AMBER};opacity:0.85"></span>At risk</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:14px;height:8px;background:${COL_RED};opacity:0.85"></span>Overdue</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:14px;height:8px;background:${COL_GREEN};opacity:0.85"></span>Done</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto"><span style="display:inline-block;width:14px;height:0;border-top:1.5px dashed ${BRAND}"></span>Today</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="display:inline-block;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:6px solid ${COL_AMBER}"></span>Milestone</div>
+        </div>
+      </div>`);
+  })();
 
   // ── Separator page — Project Booklet ────────────────────────────────
   const separatorPage = page(`
@@ -1698,6 +1800,7 @@ export const buildBookletHTML = (
   ${coverPage}
   ${agendaPage}
   ${execPage}
+  ${ganttPage}
   ${separatorPage}
   ${projectPages}
   ${closingPage}
