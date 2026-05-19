@@ -22,8 +22,31 @@ import {
   Maximize2,
   Minimize2,
   FileSpreadsheet,
+  ScanLine,
+  CheckSquare,
+  Square,
+  BookOpen,
+  Wand2,
+  AlertTriangle,
+  ListChecks,
+  Pin,
+  PinOff,
+  Upload,
 } from 'lucide-react';
-import { AppState, McpServer, McpTool, McpFamily, McpDeployStatus, User } from '../../types';
+import {
+  AppState,
+  McpServer,
+  McpTool,
+  McpFamily,
+  McpDeployStatus,
+  McpCodeAnalysis,
+  McpCodeRecommendation,
+  McpRecommendationSeverity,
+  McpBestPractice,
+  McpBestPracticeSource,
+  User,
+  LlmConfig,
+} from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
@@ -55,6 +78,95 @@ const FAMILY_COLORS = [
   '#ec4899', '#8b5cf6', '#14b8a6', '#f97316', '#64748b',
 ];
 
+const SEVERITY_STYLE: Record<McpRecommendationSeverity, string> = {
+  critical: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 border-red-400',
+  high:     'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border-orange-400',
+  medium:   'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-400',
+  low:      'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 border-sky-400',
+};
+
+const SEVERITY_RANK: Record<McpRecommendationSeverity, number> = {
+  critical: 0, high: 1, medium: 2, low: 3,
+};
+
+/* ── AI Code Analysis prompt ── */
+const buildCodeAnalysisPrompt = (mcpName: string, code: string): string => `You are a senior software engineer reviewing the source code of an MCP (Model Context Protocol) server.
+
+MCP NAME: ${mcpName}
+
+SOURCE CODE (English review required):
+\`\`\`
+${code}
+\`\`\`
+
+Produce a thorough technical code review covering:
+- Code quality, structure, readability
+- Security concerns (input validation, secrets handling, authentication)
+- Performance / scalability hot spots
+- Error handling and reliability
+- Test coverage hints (if visible)
+- MCP protocol compliance / tool registration patterns
+- Maintainability
+
+Respond with ONLY a valid JSON object (no markdown fences) in this schema:
+{
+  "language": "detected programming language (string)",
+  "summary": "Multi-paragraph Markdown analysis in English. Use ## headings for sections (e.g., ## Overview, ## Security, ## Performance, ## Reliability, ## Maintainability).",
+  "recommendations": [
+    {
+      "text": "Concise actionable recommendation in English (one line, imperative voice).",
+      "category": "Security|Performance|Reliability|Maintainability|Compliance|Testing|DevX",
+      "severity": "critical|high|medium|low"
+    }
+  ]
+}
+
+Rules:
+- Be specific and reference the code where relevant.
+- The recommendations array MUST be a flat checklist of 5-15 distinct items.
+- Sort recommendations by severity (critical first).
+- Output ONLY the JSON object.`;
+
+const stripJsonFences = (s: string) =>
+  s.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').trim();
+
+const analyzeMcpCode = async (
+  mcpName: string,
+  code: string,
+  llmConfig: LlmConfig
+): Promise<McpCodeAnalysis> => {
+  const prompt = buildCodeAnalysisPrompt(mcpName, code);
+  const raw = await runPrompt(prompt, llmConfig);
+  const cleaned = stripJsonFences(raw);
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('The AI did not return valid JSON. Try again.');
+    parsed = JSON.parse(match[0]);
+  }
+  const recs: McpCodeRecommendation[] = (Array.isArray(parsed.recommendations) ? parsed.recommendations : [])
+    .map((r: any) => ({
+      id: generateId(),
+      text: String(r.text || '').trim(),
+      category: r.category ? String(r.category) : undefined,
+      severity: ['critical', 'high', 'medium', 'low'].includes(r.severity) ? r.severity : 'medium',
+      done: false,
+    } as McpCodeRecommendation))
+    .filter((r: McpCodeRecommendation) => r.text)
+    .sort((a: McpCodeRecommendation, b: McpCodeRecommendation) =>
+      SEVERITY_RANK[a.severity!] - SEVERITY_RANK[b.severity!]
+    );
+  return {
+    summary: String(parsed.summary || '').trim(),
+    language: parsed.language ? String(parsed.language) : undefined,
+    recommendations: recs,
+    analyzedAt: new Date().toISOString(),
+    inputSize: code.length,
+  };
+};
+
 const Field: React.FC<{ label: string; children: React.ReactNode; className?: string }> = ({ label, children, className }) => (
   <div className={`space-y-1.5 ${className || ''}`}>
     <label className="label-xs">{label}</label>
@@ -82,6 +194,7 @@ export const McpHubView: React.FC<Props> = ({ state, currentUser, update }) => {
   const [editingServer, setEditingServer] = useState<McpServer | null>(null);
   const [showFamilyManager, setShowFamilyManager] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showBestPractices, setShowBestPractices] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
@@ -186,6 +299,15 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
           >
             <FileDown className="w-4 h-4 mr-2" />
             AI PDF
+          </Button>
+          <Button variant="outline" size="md" onClick={() => setShowBestPractices(true)}>
+            <BookOpen className="w-4 h-4 mr-2" />
+            Best Practices
+            {(state.mcpBestPractices || []).length > 0 && (
+              <span className="ml-2 px-1.5 py-0.5 text-[9px] font-bold bg-brand text-white">
+                {(state.mcpBestPractices || []).length}
+              </span>
+            )}
           </Button>
           {isAdmin && (
             <Button variant="outline" size="md" onClick={() => setShowFamilyManager(true)}>
@@ -483,6 +605,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
         <McpEditorModal
           server={editingServer}
           families={mcpFamilies}
+          llmConfig={state.llmConfig}
           onClose={() => { setShowEditor(false); setEditingServer(null); }}
           onSave={(srv) => {
             upsertServer(srv);
@@ -508,6 +631,17 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
           onClose={() => setShowReportModal(false)}
         />
       )}
+
+      {showBestPractices && (
+        <McpBestPracticesModal
+          practices={state.mcpBestPractices || []}
+          servers={state.mcpServers || []}
+          llmConfig={state.llmConfig}
+          canEdit={currentUser.role !== 'viewer'}
+          onClose={() => setShowBestPractices(false)}
+          onSave={(practices) => update((s) => ({ ...s, mcpBestPractices: practices }))}
+        />
+      )}
     </div>
   );
 };
@@ -517,9 +651,10 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
 const McpEditorModal: React.FC<{
   server: McpServer | null;
   families: McpFamily[];
+  llmConfig: LlmConfig;
   onClose: () => void;
   onSave: (srv: McpServer) => void;
-}> = ({ server, families, onClose, onSave }) => {
+}> = ({ server, families, llmConfig, onClose, onSave }) => {
   const isNew = !server;
   const now = new Date().toISOString();
   const [mode, setMode] = useState<'declarative' | 'url'>(server?.source ?? 'declarative');
@@ -546,6 +681,13 @@ const McpEditorModal: React.FC<{
   const [teamIT, setTeamIT] = useState(server?.teamIT ?? '');
   const [userTeamsStr, setUserTeamsStr] = useState((server?.userTeams || []).join(', '));
   const [deployStatus, setDeployStatus] = useState<McpDeployStatus | ''>(server?.deployStatus ?? '');
+
+  // AI Code Analysis
+  const [codeAnalysis, setCodeAnalysis] = useState<McpCodeAnalysis | undefined>(server?.codeAnalysis);
+  const [codeInput, setCodeInput] = useState('');
+  const [codeFileName, setCodeFileName] = useState('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState('');
 
   React.useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -590,6 +732,51 @@ const McpEditorModal: React.FC<{
 
   const removeTool = (i: number) => setTools((t) => t.filter((_, idx) => idx !== i));
 
+  // ── AI Code Analysis ────────────────────────────────────────────────
+  const handleCodeFileUpload = async (file: File) => {
+    setCodeFileName(file.name);
+    setAnalyzeError('');
+    try {
+      const text = await file.text();
+      // Cap to 80k chars so the LLM context stays manageable
+      setCodeInput(text.length > 80000 ? text.slice(0, 80000) : text);
+      if (text.length > 80000) {
+        setAnalyzeError(`File is large — truncated to first 80,000 chars (${text.length.toLocaleString()} total).`);
+      }
+    } catch (e: any) {
+      setAnalyzeError(`Could not read file: ${e.message}`);
+    }
+  };
+
+  const runAnalysis = async () => {
+    if (!codeInput.trim()) {
+      setAnalyzeError('Paste code or upload a file first.');
+      return;
+    }
+    setAnalyzing(true);
+    setAnalyzeError('');
+    try {
+      const analysis = await analyzeMcpCode(name || 'Unnamed MCP', codeInput, llmConfig);
+      setCodeAnalysis(analysis);
+    } catch (e: any) {
+      setAnalyzeError(e.message || 'Analysis failed.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const toggleRecommendation = (id: string) => {
+    if (!codeAnalysis) return;
+    setCodeAnalysis({
+      ...codeAnalysis,
+      recommendations: codeAnalysis.recommendations.map((r) =>
+        r.id === id
+          ? { ...r, done: !r.done, fixedAt: !r.done ? new Date().toISOString() : undefined }
+          : r
+      ),
+    });
+  };
+
   const handleSave = () => {
     if (!name.trim()) return;
     const srv: McpServer = {
@@ -613,6 +800,7 @@ const McpEditorModal: React.FC<{
       teamIT: teamIT.trim() || undefined,
       userTeams: userTeamsStr.split(',').map((t) => t.trim()).filter(Boolean),
       deployStatus: deployStatus || undefined,
+      codeAnalysis,
       createdAt: server?.createdAt ?? now,
       updatedAt: now,
     };
@@ -764,7 +952,136 @@ const McpEditorModal: React.FC<{
             )}
           </div>
 
-          {/* ── Section 5: Tools ── */}
+          {/* ── Section 5: AI Code Analysis ── */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand">AI Code Analysis</p>
+              {codeAnalysis && (
+                <span className="text-[9px] font-mono text-muted">
+                  Analyzed {new Date(codeAnalysis.analyzedAt).toLocaleDateString()} ·
+                  {' '}{codeAnalysis.recommendations.filter((r) => r.done).length}/{codeAnalysis.recommendations.length} fixed
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-3 border border-neutral-200 dark:border-ink-600 p-3 bg-neutral-50 dark:bg-ink-800">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <label className="border border-dashed border-neutral-300 dark:border-ink-500 hover:border-brand p-3 text-center cursor-pointer transition-colors block">
+                  <Upload className="w-4 h-4 mx-auto mb-1 text-muted" />
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em]">Upload code file</p>
+                  <p className="text-[9px] text-muted mt-0.5">{codeFileName || '.py .ts .js .go .rs .java …'}</p>
+                  <input
+                    type="file"
+                    accept=".py,.ts,.tsx,.js,.jsx,.go,.rs,.java,.rb,.cs,.cpp,.c,.h,.swift,.kt,.php,.scala,.txt"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleCodeFileUpload(f);
+                    }}
+                  />
+                </label>
+                <Textarea
+                  value={codeInput}
+                  onChange={(e) => setCodeInput(e.target.value)}
+                  rows={3}
+                  placeholder="… or paste code directly here"
+                  className="!text-[10px] !font-mono"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={runAnalysis}
+                  disabled={analyzing || !codeInput.trim()}
+                >
+                  {analyzing ? (
+                    <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Analyzing…</>
+                  ) : (
+                    <><ScanLine className="w-3 h-3 mr-1" /> {codeAnalysis ? 'Re-analyze' : 'Analyze with AI'}</>
+                  )}
+                </Button>
+                {codeAnalysis && (
+                  <Button size="sm" variant="outline" onClick={() => { setCodeAnalysis(undefined); setCodeInput(''); setCodeFileName(''); }}>
+                    Clear
+                  </Button>
+                )}
+                <span className="text-[9px] text-muted ml-auto">
+                  {codeInput.length.toLocaleString()} chars
+                </span>
+              </div>
+
+              {analyzeError && (
+                <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <p className="text-[10px]">{analyzeError}</p>
+                </div>
+              )}
+
+              {codeAnalysis && (
+                <div className="space-y-3 mt-2">
+                  {/* Summary */}
+                  {codeAnalysis.summary && (
+                    <details className="border border-neutral-200 dark:border-ink-600 bg-white dark:bg-ink-900" open>
+                      <summary className="cursor-pointer p-2.5 text-[10px] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
+                        <BookOpen className="w-3 h-3 text-brand" />
+                        Analysis summary
+                        {codeAnalysis.language && (
+                          <span className="text-[9px] font-mono text-muted ml-auto">{codeAnalysis.language}</span>
+                        )}
+                      </summary>
+                      <div className="px-3 pb-3 text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed whitespace-pre-wrap">
+                        {codeAnalysis.summary}
+                      </div>
+                    </details>
+                  )}
+                  {/* Recommendations checklist */}
+                  {codeAnalysis.recommendations.length > 0 && (
+                    <div className="border border-neutral-200 dark:border-ink-600 bg-white dark:bg-ink-900">
+                      <div className="p-2.5 border-b border-neutral-200 dark:border-ink-600 text-[10px] font-bold uppercase tracking-[0.14em] flex items-center gap-2">
+                        <ListChecks className="w-3 h-3 text-brand" />
+                        Recommendations ({codeAnalysis.recommendations.filter((r) => r.done).length}/{codeAnalysis.recommendations.length} done)
+                      </div>
+                      <div className="divide-y divide-neutral-100 dark:divide-ink-700">
+                        {codeAnalysis.recommendations.map((rec) => (
+                          <button
+                            key={rec.id}
+                            type="button"
+                            onClick={() => toggleRecommendation(rec.id)}
+                            className="w-full text-left flex items-start gap-2 p-2.5 hover:bg-brand/5 transition-colors"
+                          >
+                            {rec.done ? (
+                              <CheckSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                            ) : (
+                              <Square className="w-3.5 h-3.5 text-muted shrink-0 mt-0.5" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs ${rec.done ? 'line-through text-muted' : ''}`}>{rec.text}</p>
+                              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                {rec.severity && (
+                                  <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] border ${SEVERITY_STYLE[rec.severity]}`}>
+                                    {rec.severity}
+                                  </span>
+                                )}
+                                {rec.category && (
+                                  <span className="text-[9px] text-muted">{rec.category}</span>
+                                )}
+                                {rec.fixedAt && (
+                                  <span className="text-[9px] text-emerald-600">✓ {new Date(rec.fixedAt).toLocaleDateString()}</span>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Section 6: Tools ── */}
           <div>
             <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-brand mb-3">Tools ({tools.length})</p>
             <div className="space-y-2 mb-3">
@@ -1090,6 +1407,509 @@ const McpReportModal: React.FC<{
             <p className="text-[9px] font-mono uppercase tracking-[0.16em] text-muted text-center">
               Click "Print / Save PDF" → choose "Save as PDF" in the browser print dialog
             </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* === MCP Best Practices Modal === */
+
+type BestPracticeMode = 'list' | 'manual' | 'ai_scratch' | 'synthesize';
+
+const BP_CATEGORIES = ['Security', 'Reliability', 'Performance', 'DevX', 'Compliance', 'Architecture', 'Testing', 'Documentation'];
+
+const PRACTICE_SOURCE_LABEL: Record<McpBestPracticeSource, string> = {
+  manual: 'Manual',
+  ai_generated: 'AI generated',
+  ai_rephrased: 'AI rephrased',
+  synthesized: 'Synthesized',
+};
+
+const PRACTICE_SOURCE_STYLE: Record<McpBestPracticeSource, string> = {
+  manual: 'bg-neutral-100 text-neutral-700 dark:bg-ink-700 dark:text-neutral-300',
+  ai_generated: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
+  ai_rephrased: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+  synthesized: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+};
+
+const McpBestPracticesModal: React.FC<{
+  practices: McpBestPractice[];
+  servers: McpServer[];
+  llmConfig: LlmConfig;
+  canEdit: boolean;
+  onClose: () => void;
+  onSave: (practices: McpBestPractice[]) => void;
+}> = ({ practices: initial, servers, llmConfig, canEdit, onClose, onSave }) => {
+  const [practices, setPractices] = useState<McpBestPractice[]>(initial);
+  const [mode, setMode] = useState<BestPracticeMode>('list');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftCategory, setDraftCategory] = useState('');
+  const [draftTagsStr, setDraftTagsStr] = useState('');
+  const [draftContent, setDraftContent] = useState('');
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiCategory, setAiCategory] = useState('Security');
+  const [generating, setGenerating] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [filterCategory, setFilterCategory] = useState('');
+  const [search, setSearch] = useState('');
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const upsertPractice = (p: McpBestPractice) =>
+    setPractices((prev) => {
+      const exists = prev.some((x) => x.id === p.id);
+      return exists ? prev.map((x) => x.id === p.id ? p : x) : [p, ...prev];
+    });
+
+  const removePractice = (id: string) =>
+    setPractices((prev) => prev.filter((p) => p.id !== id));
+
+  const togglePin = (id: string) =>
+    setPractices((prev) => prev.map((p) => p.id === id ? { ...p, pinned: !p.pinned, updatedAt: new Date().toISOString() } : p));
+
+  const openEdit = (p: McpBestPractice) => {
+    setEditingId(p.id);
+    setDraftTitle(p.title);
+    setDraftCategory(p.category || '');
+    setDraftTagsStr(p.tags.join(', '));
+    setDraftContent(p.content);
+    setMode('manual');
+  };
+
+  const startNewManual = () => {
+    setEditingId(null);
+    setDraftTitle('');
+    setDraftCategory('');
+    setDraftTagsStr('');
+    setDraftContent('');
+    setMode('manual');
+  };
+
+  const saveDraft = (source: McpBestPracticeSource = 'manual') => {
+    if (!draftTitle.trim() || !draftContent.trim()) return;
+    const now = new Date().toISOString();
+    if (editingId) {
+      upsertPractice({
+        id: editingId,
+        title: draftTitle.trim(),
+        content: draftContent.trim(),
+        source: (practices.find((p) => p.id === editingId)?.source) || source,
+        category: draftCategory || undefined,
+        tags: draftTagsStr.split(',').map((t) => t.trim()).filter(Boolean),
+        pinned: practices.find((p) => p.id === editingId)?.pinned,
+        createdAt: practices.find((p) => p.id === editingId)?.createdAt || now,
+        updatedAt: now,
+      });
+    } else {
+      upsertPractice({
+        id: generateId(),
+        title: draftTitle.trim(),
+        content: draftContent.trim(),
+        source,
+        category: draftCategory || undefined,
+        tags: draftTagsStr.split(',').map((t) => t.trim()).filter(Boolean),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    setEditingId(null);
+    setMode('list');
+  };
+
+  const rephraseWithAI = async () => {
+    if (!draftContent.trim()) return;
+    setGenerating(true);
+    setAiError('');
+    try {
+      const prompt = `You are an expert technical writer. Rephrase the following best-practice draft so it is professional, concise, structured Markdown in English. Keep the substance intact, improve clarity, structure into ## sections when useful, and add concrete actionable items as bullet lists.
+
+DRAFT:
+${draftContent}
+
+Respond ONLY with the polished Markdown (no commentary, no code fences).`;
+      const raw = await runPrompt(prompt, llmConfig);
+      setDraftContent(raw.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').trim());
+    } catch (e: any) {
+      setAiError(e.message || 'Rephrase failed.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const generateFromScratch = async () => {
+    setGenerating(true);
+    setAiError('');
+    try {
+      const prompt = `You are a principal engineer producing a best-practice guide for MCP (Model Context Protocol) servers.
+
+CATEGORY: ${aiCategory}
+USER FOCUS (optional): ${aiPrompt || '(no specific focus, cover the essentials)'}
+
+Produce a high-quality best-practice document in English Markdown:
+- Start with a one-sentence "Why it matters" intro.
+- Then 4-8 concrete, actionable best-practice items as a bullet list.
+- Then a short "Anti-patterns" section.
+- Finish with "Quick checklist" — a 3-5 item checkable list.
+
+Respond ONLY with the Markdown body (no fences, no preface).`;
+      const raw = await runPrompt(prompt, llmConfig);
+      const cleaned = raw.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').trim();
+      const title = aiPrompt.trim() || `${aiCategory} best practices`;
+      const now = new Date().toISOString();
+      upsertPractice({
+        id: generateId(),
+        title,
+        content: cleaned,
+        source: 'ai_generated',
+        category: aiCategory,
+        tags: [aiCategory.toLowerCase()],
+        createdAt: now,
+        updatedAt: now,
+      });
+      setMode('list');
+      setAiPrompt('');
+    } catch (e: any) {
+      setAiError(e.message || 'Generation failed.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const synthesizeFromAnalyses = async () => {
+    const serversWithAnalysis = servers.filter((s) => s.codeAnalysis && s.codeAnalysis.recommendations.length > 0);
+    if (serversWithAnalysis.length === 0) {
+      setAiError('No MCPs have an AI Code Analysis yet. Run "AI Code Analysis" on at least one MCP first.');
+      return;
+    }
+    setGenerating(true);
+    setAiError('');
+    try {
+      const corpus = serversWithAnalysis.map((s) => {
+        const recs = (s.codeAnalysis?.recommendations || [])
+          .map((r) => `  - [${r.severity}/${r.category || 'general'}] ${r.text}`)
+          .join('\n');
+        return `### ${s.name}\n${recs}`;
+      }).join('\n\n');
+
+      const prompt = `You are a senior platform architect. The team has run AI code reviews on multiple MCP (Model Context Protocol) servers. Below is the consolidated list of recommendations across all reviewed MCPs.
+
+Your job: synthesize the most important RECURRING themes into a small set of reusable best-practice guides that the team should adopt across all future MCPs.
+
+CONSOLIDATED RECOMMENDATIONS:
+${corpus}
+
+Produce 3 to 6 best-practice guides as a JSON array (no fences, no commentary). Schema:
+[
+  {
+    "title": "Short title (e.g. 'Validate all tool inputs at the boundary')",
+    "category": "Security|Reliability|Performance|DevX|Compliance|Architecture|Testing|Documentation",
+    "content": "Markdown body: one-line 'Why it matters', then a bullet list of 3-6 concrete actions, then '### Anti-patterns' section, then '### Quick checklist' with 3-5 items.",
+    "tags": ["tag1", "tag2"]
+  }
+]
+
+Rules:
+- Each guide must consolidate a recurring theme observed in MULTIPLE MCPs.
+- Be specific and actionable. No generic platitudes.
+- Output ONLY the JSON array.`;
+
+      const raw = await runPrompt(prompt, llmConfig);
+      const cleaned = raw.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').trim();
+      let parsed: any[];
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        const match = cleaned.match(/\[[\s\S]*\]/);
+        if (!match) throw new Error('AI returned malformed output.');
+        parsed = JSON.parse(match[0]);
+      }
+      const now = new Date().toISOString();
+      const newPractices: McpBestPractice[] = (Array.isArray(parsed) ? parsed : []).map((p) => ({
+        id: generateId(),
+        title: String(p.title || 'Untitled').trim(),
+        content: String(p.content || '').trim(),
+        source: 'synthesized' as McpBestPracticeSource,
+        category: p.category && BP_CATEGORIES.includes(p.category) ? p.category : undefined,
+        tags: Array.isArray(p.tags) ? p.tags.map((t: any) => String(t).trim()).filter(Boolean) : [],
+        appliesTo: serversWithAnalysis.map((s) => s.id),
+        createdAt: now,
+        updatedAt: now,
+      })).filter((p) => p.title && p.content);
+      setPractices((prev) => [...newPractices, ...prev]);
+      setMode('list');
+    } catch (e: any) {
+      setAiError(e.message || 'Synthesis failed.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Filter & sort: pinned first, then by updatedAt
+  const visible = practices
+    .filter((p) => !filterCategory || p.category === filterCategory)
+    .filter((p) => {
+      if (!search.trim()) return true;
+      const lq = search.toLowerCase();
+      return (
+        p.title.toLowerCase().includes(lq) ||
+        p.content.toLowerCase().includes(lq) ||
+        p.tags.some((t) => t.toLowerCase().includes(lq))
+      );
+    })
+    .sort((a, b) => {
+      if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-5xl h-[92vh] flex flex-col animate-slide-up">
+        {/* Header */}
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <BookOpen className="w-5 h-5 text-brand" />
+            <div>
+              <h2 className="text-lg font-black uppercase tracking-tight">MCP Best Practices</h2>
+              <p className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">
+                {practices.length} guide{practices.length !== 1 ? 's' : ''} · {servers.filter((s) => s.codeAnalysis).length} MCP analyses available
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Mode tabs */}
+        <div className="px-5 pt-4 flex gap-1 shrink-0 border-b border-neutral-200 dark:border-ink-600 -mb-px">
+          {[
+            { id: 'list' as const, label: 'Library', icon: BookOpen },
+            { id: 'manual' as const, label: 'Manual', icon: Edit2 },
+            { id: 'ai_scratch' as const, label: 'AI from scratch', icon: Wand2 },
+            { id: 'synthesize' as const, label: 'Synthesize from analyses', icon: Sparkles },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => { setMode(id); setAiError(''); if (id === 'manual' && !editingId) startNewManual(); }}
+              className={`flex items-center gap-1.5 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] border-b-2 transition-colors ${
+                mode === id ? 'text-brand border-brand' : 'text-muted border-transparent hover:text-neutral-900 dark:hover:text-white'
+              }`}
+            >
+              <Icon className="w-3 h-3" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {aiError && (
+            <div className="mb-3 flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-xs">{aiError}</p>
+            </div>
+          )}
+
+          {/* LIST MODE */}
+          {mode === 'list' && (
+            <div className="space-y-3">
+              <div className="flex flex-col md:flex-row gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <Input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search practices…"
+                    className="pl-9"
+                  />
+                </div>
+                <Select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="md:w-48">
+                  <option value="">All categories</option>
+                  {BP_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              </div>
+
+              {visible.length === 0 ? (
+                <div className="border border-dashed border-neutral-300 dark:border-ink-500 p-12 text-center text-muted">
+                  <BookOpen className="w-8 h-8 mx-auto mb-3 opacity-30" />
+                  <p className="text-xs uppercase tracking-[0.14em]">
+                    {practices.length === 0 ? 'No best practices yet' : 'No match'}
+                  </p>
+                  <p className="text-[10px] text-muted mt-1">Use the tabs above to create or generate one.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {visible.map((p) => (
+                    <div key={p.id} className={`border ${p.pinned ? 'border-brand bg-brand/5' : 'border-neutral-200 dark:border-ink-600'} p-3`}>
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {p.pinned && <Pin className="w-3 h-3 text-brand" />}
+                            <h3 className="text-sm font-bold uppercase tracking-tight">{p.title}</h3>
+                            <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${PRACTICE_SOURCE_STYLE[p.source]}`}>
+                              {PRACTICE_SOURCE_LABEL[p.source]}
+                            </span>
+                            {p.category && (
+                              <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-brand">{p.category}</span>
+                            )}
+                          </div>
+                          <details className="mt-2">
+                            <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.12em] text-muted hover:text-brand">
+                              Show content
+                            </summary>
+                            <div className="mt-2 p-3 bg-neutral-50 dark:bg-ink-800 text-xs text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap leading-relaxed">
+                              {p.content}
+                            </div>
+                          </details>
+                          {p.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {p.tags.map((t) => (
+                                <span key={t} className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] bg-neutral-100 dark:bg-ink-700 text-muted">
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {p.appliesTo && p.appliesTo.length > 0 && (
+                            <p className="text-[9px] text-muted mt-1">
+                              Synthesized from {p.appliesTo.length} MCP{p.appliesTo.length !== 1 ? 's' : ''}
+                            </p>
+                          )}
+                        </div>
+                        {canEdit && (
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <button
+                              onClick={() => togglePin(p.id)}
+                              title={p.pinned ? 'Unpin' : 'Pin to top'}
+                              className="text-muted hover:text-brand transition-colors"
+                            >
+                              {p.pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                            </button>
+                            <button onClick={() => openEdit(p)} className="text-muted hover:text-brand transition-colors">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => removePractice(p.id)} className="text-muted hover:text-red-500 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MANUAL MODE */}
+          {mode === 'manual' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Write your own best-practice guide in Markdown. Use the AI rephrase button to polish your draft.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} placeholder="Title (e.g. Secure secret handling)" />
+                <Select value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)}>
+                  <option value="">— Category —</option>
+                  {BP_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                </Select>
+              </div>
+              <Input value={draftTagsStr} onChange={(e) => setDraftTagsStr(e.target.value)} placeholder="Tags (comma-separated)" />
+              <Textarea
+                value={draftContent}
+                onChange={(e) => setDraftContent(e.target.value)}
+                rows={14}
+                placeholder="Write your Markdown content here…"
+                className="!font-mono !text-xs"
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button size="sm" variant="outline" onClick={rephraseWithAI} disabled={generating || !draftContent.trim()}>
+                  {generating ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Rephrasing…</> : <><Wand2 className="w-3 h-3 mr-1" /> Rephrase with AI</>}
+                </Button>
+                <div className="ml-auto flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => { setMode('list'); setEditingId(null); }}>Cancel</Button>
+                  <Button size="sm" onClick={() => saveDraft(editingId ? undefined : 'manual')} disabled={!draftTitle.trim() || !draftContent.trim()}>
+                    {editingId ? 'Save changes' : 'Save practice'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* AI FROM SCRATCH */}
+          {mode === 'ai_scratch' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted">
+                Generate a fresh best-practice guide from scratch with the local LLM. Pick a category and optionally a specific focus.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="label-xs">Category</label>
+                  <Select value={aiCategory} onChange={(e) => setAiCategory(e.target.value)}>
+                    {BP_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="label-xs">Focus (optional)</label>
+                  <Input
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="e.g. handling rate limits, secret rotation…"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-2">
+                <Button variant="outline" size="sm" onClick={() => setMode('list')}>Cancel</Button>
+                <Button size="sm" onClick={generateFromScratch} disabled={generating}>
+                  {generating ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Generating…</> : <><Wand2 className="w-3 h-3 mr-1" /> Generate</>}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* SYNTHESIZE */}
+          {mode === 'synthesize' && (
+            <div className="space-y-3">
+              <div className="border-l-2 border-brand bg-brand/5 p-3">
+                <p className="text-xs">
+                  <strong>Methodology:</strong> the AI reads the recommendations checklists from every MCP that has an{' '}
+                  <em>AI Code Analysis</em> saved, identifies recurring themes across them, and synthesizes a small set of
+                  reusable best-practice guides the team should adopt for all future MCPs.
+                </p>
+                <p className="text-xs mt-2">
+                  <strong>Coverage:</strong>{' '}
+                  {servers.filter((s) => s.codeAnalysis).length} / {servers.length} MCPs analyzed (
+                  {servers.reduce((n, s) => n + (s.codeAnalysis?.recommendations.length || 0), 0)} recommendations in the corpus).
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 mt-2">
+                <Button variant="outline" size="sm" onClick={() => setMode('list')}>Cancel</Button>
+                <Button size="sm" onClick={synthesizeFromAnalyses} disabled={generating || servers.filter((s) => s.codeAnalysis).length === 0}>
+                  {generating ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Synthesizing…</> : <><Sparkles className="w-3 h-3 mr-1" /> Synthesize now</>}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-between shrink-0">
+          {mode === 'list' && canEdit ? (
+            <Button variant="outline" size="sm" onClick={startNewManual}>
+              <Plus className="w-3 h-3 mr-1" />
+              New practice
+            </Button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Close</Button>
+            <Button onClick={() => { onSave(practices); onClose(); }}>Save library</Button>
           </div>
         </div>
       </div>

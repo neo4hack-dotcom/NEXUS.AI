@@ -22,6 +22,7 @@ import {
   ProjectFamily,
   McpServer,
   McpFamily,
+  McpBestPractice,
 } from '../types';
 
 const STORAGE_KEY = 'nexus_ai_data_v1';
@@ -92,6 +93,7 @@ export const getDefaultState = (): AppState => {
     projectFamilies: [],
     mcpServers: [],
     mcpFamilies: [],
+    mcpBestPractices: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -130,8 +132,16 @@ export const sanitizeAppState = (data: any): AppState => {
       ...s,
       tags: arr(s.tags),
       userTeams: arr(s.userTeams),
+      codeAnalysis: s.codeAnalysis
+        ? { ...s.codeAnalysis, recommendations: arr(s.codeAnalysis.recommendations) }
+        : undefined,
     })),
     mcpFamilies: arr<McpFamily>(data.mcpFamilies),
+    mcpBestPractices: arr<McpBestPractice>(data.mcpBestPractices).map((b) => ({
+      ...b,
+      tags: arr(b.tags),
+      appliesTo: arr(b.appliesTo),
+    })),
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,

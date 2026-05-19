@@ -260,6 +260,184 @@ async def test_mcp_connection(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"MCP connection failed: {msg}{hint}") from e
 
 
+# --- Code-repository inventory proxy ---
+#
+# Browsers running on localhost can't reach internal Bitbucket Server /
+# GitHub Enterprise / GitLab Self-Managed instances directly (CORS, intranet
+# DNS, self-signed certs). This proxy lets the user provide the URL and
+# credentials once and we do the actual HTTP from the FastAPI process.
+
+@app.post("/api/repos/list")
+async def list_repos(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Inventory repositories from Bitbucket, GitHub or GitLab.
+
+    Expected payload:
+      {
+        "provider": "bitbucket_cloud" | "bitbucket_server" | "github" | "gitlab",
+        "baseUrl": "https://bitbucket.example.com"          (Server / self-hosted only)
+        "workspace": "my-org"                                (Bitbucket Cloud / GitHub org)
+        "projectKey": "PROJ"                                 (Bitbucket Server, optional)
+        "username": "user"                                   (Basic auth)
+        "token": "..."                                       (PAT / Bearer)
+        "disableSslVerification": false
+      }
+    Returns: { "repos": [ { name, url, description, language, visibility }, ... ] }
+    """
+    try:
+        import httpx  # bundled with FastAPI dependency chain
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail="httpx not installed on the server. Run: pip install httpx",
+        ) from e
+
+    provider = str(payload.get("provider") or "").strip().lower()
+    base_url = str(payload.get("baseUrl") or "").strip().rstrip("/")
+    workspace = str(payload.get("workspace") or "").strip()
+    project_key = str(payload.get("projectKey") or "").strip()
+    username = str(payload.get("username") or "").strip()
+    token = str(payload.get("token") or "").strip()
+    disable_ssl = bool(payload.get("disableSslVerification", False))
+
+    if not provider:
+        raise HTTPException(status_code=400, detail="provider is required")
+
+    headers: Dict[str, str] = {"Accept": "application/json"}
+    auth = None
+    if username and token:
+        auth = (username, token)
+    elif token:
+        # GitHub / GitLab personal access tokens go in Authorization
+        if provider == "github":
+            headers["Authorization"] = f"token {token}"
+        elif provider == "gitlab":
+            headers["PRIVATE-TOKEN"] = token
+        else:
+            headers["Authorization"] = f"Bearer {token}"
+
+    timeout = httpx.Timeout(20.0, read=120.0)
+
+    try:
+        async with httpx.AsyncClient(
+            headers=headers,
+            auth=auth,
+            verify=not disable_ssl,
+            timeout=timeout,
+            follow_redirects=True,
+        ) as client:
+
+            if provider == "bitbucket_cloud":
+                ws = workspace or username
+                if not ws:
+                    raise HTTPException(status_code=400, detail="workspace is required for Bitbucket Cloud")
+                url = f"https://api.bitbucket.org/2.0/repositories/{ws}?pagelen=100&sort=-updated_on"
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+                repos = [
+                    {
+                        "name": v.get("slug") or v.get("name", ""),
+                        "url": (v.get("links", {}).get("html") or {}).get("href")
+                               or f"https://bitbucket.org/{ws}/{v.get('slug', '')}",
+                        "description": v.get("description") or "",
+                        "language": v.get("language") or None,
+                        "visibility": "private" if v.get("is_private") else "public",
+                    }
+                    for v in (data.get("values") or [])
+                ]
+                return {"repos": repos, "provider": provider}
+
+            if provider == "bitbucket_server":
+                if not base_url:
+                    raise HTTPException(status_code=400, detail="baseUrl is required for Bitbucket Server")
+                if project_key:
+                    url = f"{base_url}/rest/api/1.0/projects/{project_key}/repos?limit=100"
+                else:
+                    url = f"{base_url}/rest/api/1.0/repos?limit=100"
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+                repos = []
+                for v in (data.get("values") or []):
+                    clone_links = (v.get("links") or {}).get("clone") or []
+                    http_clone = next((c.get("href") for c in clone_links if c.get("name") == "http"), None)
+                    self_links = (v.get("links") or {}).get("self") or []
+                    browse = self_links[0].get("href") if self_links else http_clone
+                    repos.append({
+                        "name": v.get("slug") or v.get("name", ""),
+                        "url": browse or f"{base_url}/projects/{(v.get('project') or {}).get('key')}/repos/{v.get('slug')}",
+                        "description": v.get("description") or "",
+                        "language": None,
+                        "visibility": "public" if v.get("public") else "private",
+                    })
+                return {"repos": repos, "provider": provider}
+
+            if provider == "github":
+                # Per-user or per-org listing
+                if workspace:
+                    url = f"https://api.github.com/orgs/{workspace}/repos?per_page=100&sort=updated"
+                    # If org listing fails (404 for users), retry as user
+                    r = await client.get(url)
+                    if r.status_code == 404:
+                        url = f"https://api.github.com/users/{workspace}/repos?per_page=100&sort=updated"
+                        r = await client.get(url)
+                else:
+                    url = "https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,organization_member"
+                    r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+                repos = [
+                    {
+                        "name": v.get("name", ""),
+                        "url": v.get("html_url") or v.get("clone_url", ""),
+                        "description": v.get("description") or "",
+                        "language": v.get("language") or None,
+                        "visibility": "private" if v.get("private") else "public",
+                    }
+                    for v in data
+                ]
+                return {"repos": repos, "provider": provider}
+
+            if provider == "gitlab":
+                root = base_url or "https://gitlab.com"
+                if workspace:
+                    # Group projects
+                    url = f"{root}/api/v4/groups/{workspace}/projects?per_page=100&order_by=last_activity_at&include_subgroups=true"
+                else:
+                    url = f"{root}/api/v4/projects?per_page=100&order_by=last_activity_at&membership=true"
+                r = await client.get(url)
+                r.raise_for_status()
+                data = r.json()
+                repos = [
+                    {
+                        "name": v.get("path") or v.get("name", ""),
+                        "url": v.get("web_url", ""),
+                        "description": v.get("description") or "",
+                        "language": None,
+                        "visibility": v.get("visibility") or "private",
+                    }
+                    for v in data
+                ]
+                return {"repos": repos, "provider": provider}
+
+            raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as e:
+        detail = f"HTTP {e.response.status_code} from {provider}"
+        try:
+            body = e.response.text
+            if body:
+                detail += f" — {body[:280]}"
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=detail) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Repo inventory failed: {e.__class__.__name__}: {e}") from e
+
+
 # --- Optional: serve built frontend from /dist ---
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
