@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -17,12 +17,18 @@ import {
   Database,
   Layers,
   Settings2,
+  FileDown,
+  Printer,
+  Maximize2,
+  Minimize2,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { AppState, McpServer, McpTool, McpFamily, McpDeployStatus, User } from '../../types';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
 import { runPrompt } from '../../services/llmService';
+import { buildMcpReportHTML, exportMcpXlsx } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -75,6 +81,7 @@ export const McpHubView: React.FC<Props> = ({ state, currentUser, update }) => {
   const [showEditor, setShowEditor] = useState(false);
   const [editingServer, setEditingServer] = useState<McpServer | null>(null);
   const [showFamilyManager, setShowFamilyManager] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
@@ -160,12 +167,33 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
             Model Context Protocol server catalog — reference, manage, and enrich your MCP integrations.
           </p>
         </div>
-        {isAdmin && (
-          <Button variant="outline" size="md" onClick={() => setShowFamilyManager(true)}>
-            <Layers className="w-4 h-4 mr-2" />
-            Families
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => exportMcpXlsx(state.mcpServers || [], mcpFamilies)}
+            title="Export MCP list to Excel"
+            disabled={(state.mcpServers || []).length === 0}
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Export xlsx
           </Button>
-        )}
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => setShowReportModal(true)}
+            disabled={(state.mcpServers || []).length === 0}
+          >
+            <FileDown className="w-4 h-4 mr-2" />
+            AI PDF
+          </Button>
+          {isAdmin && (
+            <Button variant="outline" size="md" onClick={() => setShowFamilyManager(true)}>
+              <Layers className="w-4 h-4 mr-2" />
+              Families
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex gap-6 min-h-[70vh]">
@@ -470,6 +498,14 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
           families={mcpFamilies}
           onClose={() => setShowFamilyManager(false)}
           onSave={(families) => update((s) => ({ ...s, mcpFamilies: families }))}
+        />
+      )}
+
+      {showReportModal && (
+        <McpReportModal
+          allServers={state.mcpServers || []}
+          families={mcpFamilies}
+          onClose={() => setShowReportModal(false)}
         />
       )}
     </div>
@@ -903,6 +939,158 @@ const McpFamilyManagerModal: React.FC<{
         <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end gap-2 shrink-0">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => { onSave(families); onClose(); }}>Save families</Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* === MCP Report Modal === */
+
+const McpReportModal: React.FC<{
+  allServers: McpServer[];
+  families: McpFamily[];
+  onClose: () => void;
+}> = ({ allServers, families, onClose }) => {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set(allServers.map((s) => s.id)));
+  const [fullscreen, setFullscreen] = useState(false);
+  const familyMap = new Map(families.map((f) => [f.id, f]));
+
+  const DEPLOY_CHIP: Record<string, string> = {
+    production: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+    uat: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    dev: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+  };
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const includedServers = allServers.filter((s) => selected.has(s.id));
+  const html = buildMcpReportHTML(includedServers, families);
+
+  const handlePrint = () => {
+    const iframe = iframeRef.current;
+    if (!iframe?.contentWindow) return;
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className={`surface border flex transition-all duration-200 ${fullscreen ? 'w-full h-full' : 'w-full max-w-7xl h-[94vh]'}`}>
+        {/* Left sidebar — server picker */}
+        <div className="w-64 shrink-0 flex flex-col border-r border-neutral-200 dark:border-ink-600">
+          <div className="p-4 border-b border-neutral-200 dark:border-ink-600">
+            <p className="text-[11px] font-black uppercase tracking-tight mb-1">Servers to include</p>
+            <p className="text-[9px] font-mono text-muted">{selected.size} / {allServers.length} selected</p>
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={() => setSelected(new Set(allServers.map((s) => s.id)))}
+                className="text-[9px] font-bold uppercase tracking-[0.12em] text-brand hover:underline"
+              >All</button>
+              <span className="text-muted text-[9px]">·</span>
+              <button
+                onClick={() => setSelected(new Set())}
+                className="text-[9px] font-bold uppercase tracking-[0.12em] text-muted hover:text-brand"
+              >None</button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {allServers.map((srv) => {
+              const on = selected.has(srv.id);
+              const fam = srv.familyId ? familyMap.get(srv.familyId) : undefined;
+              return (
+                <button
+                  key={srv.id}
+                  onClick={() => toggle(srv.id)}
+                  className={`w-full text-left flex items-start gap-2 p-2.5 border transition-colors ${on ? 'border-brand bg-brand/5' : 'border-neutral-200 dark:border-ink-600 opacity-50'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggle(srv.id)}
+                    className="mt-0.5 w-3.5 h-3.5 accent-brand shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-tight truncate">{srv.name}</p>
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                      {fam && <span className="text-[8px] font-bold" style={{ color: fam.color }}>{fam.name}</span>}
+                      {srv.deployStatus && (
+                        <span className={`px-1 py-px text-[7px] font-bold uppercase tracking-[0.08em] ${DEPLOY_CHIP[srv.deployStatus] || ''}`}>
+                          {srv.deployStatus}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right — preview + toolbar */}
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileDown className="w-4 h-4 text-brand shrink-0" />
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] truncate">MCP Hub Report</p>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 bg-brand/10 text-brand border border-brand/20">
+                {includedServers.length} servers
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => setFullscreen((v) => !v)}
+                className="w-8 h-8 flex items-center justify-center border border-neutral-300 dark:border-ink-500 text-muted hover:text-brand hover:border-brand transition-colors"
+              >
+                {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              </button>
+              <div className="w-px h-5 bg-neutral-200 dark:bg-ink-600 mx-0.5" />
+              <Button size="sm" onClick={handlePrint} disabled={includedServers.length === 0}>
+                <Printer className="w-3 h-3 mr-1.5" />
+                Print / Save PDF
+              </Button>
+              <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-muted hover:text-red-500 transition-colors ml-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-hidden bg-neutral-100 dark:bg-ink-900">
+            {includedServers.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted gap-3">
+                <Plug className="w-10 h-10 opacity-20" />
+                <p className="text-xs uppercase tracking-[0.16em]">Select at least one server</p>
+              </div>
+            ) : (
+              <iframe
+                key={selected.size}
+                ref={iframeRef}
+                srcDoc={html}
+                title="MCP Report Preview"
+                className="w-full h-full border-0 bg-white"
+                sandbox="allow-same-origin allow-scripts allow-modals allow-popups"
+              />
+            )}
+          </div>
+
+          <div className="px-4 py-2 border-t border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 shrink-0">
+            <p className="text-[9px] font-mono uppercase tracking-[0.16em] text-muted text-center">
+              Click "Print / Save PDF" → choose "Save as PDF" in the browser print dialog
+            </p>
+          </div>
         </div>
       </div>
     </div>
