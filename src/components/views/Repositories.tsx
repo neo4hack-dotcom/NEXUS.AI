@@ -204,16 +204,22 @@ const RepoEditor: React.FC<{
     setD({ ...d, provider: p, url: d.url.startsWith('http') ? base : d.url });
   };
 
+  // Linked-projects filter so long project lists stay manageable.
+  const [projFilter, setProjFilter] = useState('');
+  const filteredProjects = state.projects.filter(
+    (p) => !projFilter || p.name.toLowerCase().includes(projFilter.toLowerCase())
+  );
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="surface border w-full max-w-xl animate-slide-up">
-        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+      <div className="surface border w-full max-w-2xl max-h-[92vh] flex flex-col animate-slide-up">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between shrink-0">
           <h2 className="text-lg font-black uppercase tracking-tight">Repository</h2>
           <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand">
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-5 space-y-3">
+        <div className="p-5 space-y-3 overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="label-xs">Platform</label>
@@ -255,33 +261,63 @@ const RepoEditor: React.FC<{
             <Input value={d.language || ''} onChange={(e) => setD({ ...d, language: e.target.value })} />
           </div>
           <div className="space-y-1.5">
-            <label className="label-xs">Linked projects</label>
-            <div className="flex flex-wrap gap-2">
-              {state.projects.map((p) => {
-                const on = d.projectIds.includes(p.id);
-                return (
+            <div className="flex items-center justify-between gap-2">
+              <label className="label-xs">Linked projects ({d.projectIds.length})</label>
+              <div className="flex items-center gap-2">
+                {d.projectIds.length > 0 && (
                   <button
-                    key={p.id}
-                    onClick={() =>
-                      setD({
-                        ...d,
-                        projectIds: on
-                          ? d.projectIds.filter((x) => x !== p.id)
-                          : [...d.projectIds, p.id],
-                      })
-                    }
-                    className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] border transition-colors ${
-                      on ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 hover:border-brand'
-                    }`}
+                    type="button"
+                    onClick={() => setD({ ...d, projectIds: [] })}
+                    className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted hover:text-red-500 transition-colors"
                   >
-                    {p.name}
+                    Clear all
                   </button>
-                );
-              })}
+                )}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+                  <Input
+                    value={projFilter}
+                    onChange={(e) => setProjFilter(e.target.value)}
+                    placeholder="Filter…"
+                    className="pl-7 !h-7 !text-[10px] w-40"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="border border-neutral-200 dark:border-ink-600 max-h-56 overflow-y-auto p-2 surface-flat">
+              <div className="flex flex-wrap gap-2">
+                {filteredProjects.map((p) => {
+                  const on = d.projectIds.includes(p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        setD({
+                          ...d,
+                          projectIds: on
+                            ? d.projectIds.filter((x) => x !== p.id)
+                            : [...d.projectIds, p.id],
+                        })
+                      }
+                      className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        on ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 hover:border-brand'
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  );
+                })}
+                {filteredProjects.length === 0 && (
+                  <p className="text-xs text-muted italic px-1 py-2">
+                    {state.projects.length === 0 ? 'No projects available.' : 'No project matches the filter.'}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>
-        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-between">
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-between shrink-0">
           <Button variant="danger" onClick={onDelete}>
             <Trash2 className="w-4 h-4 mr-2" />
             Delete
@@ -344,58 +380,36 @@ const BitbucketImportModal: React.FC<{
     setPreviews([]);
     setFetched(false);
     try {
-      const headers: Record<string, string> = {};
-      if (username && token) {
-        headers['Authorization'] = `Basic ${btoa(`${username}:${token}`)}`;
-      } else if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      // Route through the FastAPI backend proxy: browsers running on
+      // localhost cannot reach internal Bitbucket Server / GitHub Enterprise
+      // instances directly (CORS, self-signed certs, intranet DNS). The
+      // backend uses httpx with proper auth headers.
+      const res = await fetch('/api/repos/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: mode === 'cloud' ? 'bitbucket_cloud' : 'bitbucket_server',
+          baseUrl: baseUrl.replace(/\/$/, ''),
+          workspace: workspace || username,
+          projectKey,
+          username,
+          token,
+        }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({} as { detail?: string }));
+        throw new Error(errBody.detail || `HTTP ${res.status}`);
       }
-
-      let repos: BitbucketRepoPreview[] = [];
-
-      if (mode === 'cloud') {
-        // Bitbucket Cloud: GET /2.0/repositories/{workspace}
-        const ws = workspace || username;
-        const url = `https://api.bitbucket.org/2.0/repositories/${ws}?pagelen=100&sort=-updated_on`;
-        const res = await fetch(url, { headers });
-        if (!res.ok) throw new Error(`Bitbucket API error: HTTP ${res.status}`);
-        const data = await res.json();
-        const values = data.values || [];
-        repos = values.map((r: any) => ({
-          name: r.slug || r.name,
-          url: r.links?.html?.href || `https://bitbucket.org/${ws}/${r.slug}`,
-          description: r.description || '',
-          language: r.language || undefined,
-          visibility: r.is_private ? 'private' : 'public',
-          alreadyExists: false,
-          selected: true,
-        }));
-      } else {
-        // Bitbucket Server / Data Center
-        const base = baseUrl.replace(/\/$/, '');
-        const url = projectKey
-          ? `${base}/rest/api/1.0/projects/${projectKey}/repos?limit=100`
-          : `${base}/rest/api/1.0/repos?limit=100`;
-        const res = await fetch(url, { headers });
-        if (!res.ok) throw new Error(`Bitbucket Server error: HTTP ${res.status}`);
-        const data = await res.json();
-        const values = data.values || [];
-        repos = values.map((r: any) => {
-          const cloneLinks: any[] = r.links?.clone || [];
-          const httpClone = cloneLinks.find((l: any) => l.name === 'http')?.href;
-          const browseHref = r.links?.self?.[0]?.href || httpClone || `${base}/projects/${r.project?.key}/repos/${r.slug}`;
-          return {
-            name: r.slug || r.name,
-            url: browseHref,
-            description: r.description || '',
-            language: undefined,
-            visibility: r.public ? 'public' : 'private',
-            alreadyExists: false,
-            selected: true,
-          };
-        });
-      }
-
+      const data = await res.json();
+      const repos: BitbucketRepoPreview[] = (data.repos || []).map((r: any) => ({
+        name: r.name,
+        url: r.url,
+        description: r.description || '',
+        language: r.language || undefined,
+        visibility: (r.visibility === 'private' || r.visibility === 'public' || r.visibility === 'internal') ? r.visibility : 'private',
+        alreadyExists: false,
+        selected: true,
+      }));
       const withExists = repos.map((r) => ({
         ...r,
         alreadyExists: existingUrls.some((u) => u === r.url || u.includes(r.name)),

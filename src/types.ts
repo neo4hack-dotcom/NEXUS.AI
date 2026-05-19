@@ -389,6 +389,42 @@ export interface McpFamily {
   createdAt: string;
 }
 
+export type McpRecommendationSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface McpCodeRecommendation {
+  id: string;
+  text: string;
+  category?: string;                       // "Security", "Performance", "Reliability"…
+  severity?: McpRecommendationSeverity;
+  done: boolean;                           // checkable in the UI
+  fixedAt?: string;                        // ISO date when marked done
+  fixedBy?: string;                        // userId
+}
+
+export interface McpCodeAnalysis {
+  summary: string;                         // overall AI-generated review in English
+  recommendations: McpCodeRecommendation[];
+  language?: string;                       // detected language
+  analyzedAt: string;                      // ISO
+  analyzedBy?: string;                     // userId
+  inputSize?: number;                      // chars of input analyzed
+}
+
+export type McpBestPracticeSource = 'manual' | 'ai_generated' | 'ai_rephrased' | 'synthesized';
+
+export interface McpBestPractice {
+  id: string;
+  title: string;
+  content: string;                         // Markdown
+  source: McpBestPracticeSource;
+  category?: string;                       // "Security", "Reliability", "DevX"…
+  tags: string[];
+  pinned?: boolean;                        // pin to top
+  appliesTo?: string[];                    // optional list of McpServer ids this practice applies to
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface McpServer {
   id: string;
   name: string;
@@ -413,6 +449,9 @@ export interface McpServer {
   userTeams?: string[];         // business teams using this server
   deployStatus?: McpDeployStatus;
 
+  // ── AI Code Analysis (stored per server) ─────────────────────────────
+  codeAnalysis?: McpCodeAnalysis;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -434,6 +473,7 @@ export interface AppState {
   smartTodos: SmartTodo[];
   mcpServers: McpServer[];
   mcpFamilies: McpFamily[];
+  mcpBestPractices: McpBestPractice[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;
