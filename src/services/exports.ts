@@ -2150,3 +2150,413 @@ export const buildTechStackPDF = (technologies: import('../types').Technology[])
   w.document.write(html);
   w.document.close();
 };
+
+/* ====================================================================
+   MCP HUB REPORT — executive-committee PDF booklet
+   ==================================================================== */
+
+export const buildMcpReportHTML = (
+  servers: import('../types').McpServer[],
+  families: import('../types').McpFamily[]
+): string => {
+  if (servers.length === 0) return '<p>No MCP servers selected.</p>';
+
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const INDIGO = '#6366f1';
+  const familyMap = new Map(families.map((f) => [f.id, f]));
+
+  // ── KPIs ─────────────────────────────────────────────────────────────
+  const activeCount  = servers.filter((s) => s.isActive).length;
+  const prodCount    = servers.filter((s) => s.deployStatus === 'production').length;
+  const uatCount     = servers.filter((s) => s.deployStatus === 'uat').length;
+  const devCount     = servers.filter((s) => s.deployStatus === 'dev').length;
+  const toolCount    = servers.reduce((n, s) => n + s.tools.length, 0);
+
+  // ── Category breakdown ────────────────────────────────────────────────
+  const catMap: Record<string, number> = {};
+  servers.forEach((s) => { const c = s.category || 'Other'; catMap[c] = (catMap[c] || 0) + 1; });
+  const catEntries = Object.entries(catMap).sort((a, b) => b[1] - a[1]);
+  const catMax = Math.max(...catEntries.map((e) => e[1]), 1);
+
+  // ── Family breakdown ─────────────────────────────────────────────────
+  const famMap: Record<string, number> = {};
+  servers.forEach((s) => { const k = s.familyId ? (familyMap.get(s.familyId)?.name || 'Unknown') : 'No family'; famMap[k] = (famMap[k] || 0) + 1; });
+  const famEntries = Object.entries(famMap).sort((a, b) => b[1] - a[1]);
+
+  // ── Deploy status donut ───────────────────────────────────────────────
+  const noStatusCount = servers.filter((s) => !s.deployStatus).length;
+  const deployDonut = (() => {
+    const total = servers.length || 1;
+    const C = 2 * Math.PI * 38;
+    const segments = [
+      { count: prodCount, color: COL_GREEN },
+      { count: uatCount,  color: COL_AMBER },
+      { count: devCount,  color: COL_BLUE },
+      { count: noStatusCount, color: '#d1d5db' },
+    ];
+    let start = 0;
+    const arcs = segments.map(({ count, color }) => {
+      const f = count / total;
+      const arc = f * C;
+      const rot = start * 360 - 90;
+      start += f;
+      if (arc < 0.5) return '';
+      return `<circle cx="46" cy="46" r="38" fill="none" stroke="${color}" stroke-width="14"
+        stroke-dasharray="${arc.toFixed(2)} ${(C - arc).toFixed(2)}"
+        transform="rotate(${rot.toFixed(2)} 46 46)"/>`;
+    }).join('');
+    return `<svg viewBox="0 0 92 92" width="110" height="110" style="display:block">
+      <circle cx="46" cy="46" r="38" fill="none" stroke="#e5e7eb" stroke-width="14"/>
+      ${arcs}
+      <text x="46" y="41" text-anchor="middle" font-size="18" font-weight="900" fill="#111" font-family="system-ui">${servers.length}</text>
+      <text x="46" y="55" text-anchor="middle" font-size="7.5" fill="#888" font-family="system-ui" font-weight="700" letter-spacing="0.06em">SERVERS</text>
+    </svg>`;
+  })();
+
+  // ── Category horizontal bar chart ─────────────────────────────────────
+  const catBars = catEntries.slice(0, 8).map(([cat, count]) => {
+    const pct = Math.round((count / catMax) * 100);
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+      <div style="width:90px;font-size:8pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#444;font-family:system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(cat)}</div>
+      <div style="flex:1;background:#f1f5f9;height:14px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:${INDIGO}"></div>
+      </div>
+      <div style="width:20px;font-size:9pt;font-weight:900;color:${INDIGO};font-family:system-ui;text-align:right">${count}</div>
+    </div>`;
+  }).join('');
+
+  // ── Deploy status legend ──────────────────────────────────────────────
+  const deployLegend = [
+    { label: 'Production', count: prodCount, color: COL_GREEN },
+    { label: 'UAT',        count: uatCount,  color: COL_AMBER },
+    { label: 'Dev',        count: devCount,  color: COL_BLUE },
+    { label: 'Not set',    count: noStatusCount, color: '#d1d5db' },
+  ].map(({ label, count, color }) => `
+    <div style="display:flex;align-items:center;gap:6px;margin:5px 0">
+      <span style="width:10px;height:10px;background:${color};border-radius:50%;flex-shrink:0;display:inline-block"></span>
+      <span style="flex:1;font-size:8pt;font-family:system-ui;color:#555">${esc(label)}</span>
+      <span style="font-size:10pt;font-weight:900;font-family:system-ui">${count}</span>
+    </div>`).join('');
+
+  // ── Team coverage bubble matrix ───────────────────────────────────────
+  const allUserTeams = [...new Set(servers.flatMap((s) => s.userTeams || []))].slice(0, 12);
+  const teamGrid = allUserTeams.length > 0 ? `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+      ${allUserTeams.map((team) => {
+        const mcpCount = servers.filter((s) => (s.userTeams || []).includes(team)).length;
+        const size = Math.max(28, Math.min(60, 20 + mcpCount * 10));
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px">
+          <div style="width:${size}px;height:${size}px;border-radius:50%;background:${INDIGO};display:flex;align-items:center;justify-content:center">
+            <span style="font-size:${size > 45 ? 12 : 9}pt;font-weight:900;color:#fff;font-family:system-ui">${mcpCount}</span>
+          </div>
+          <div style="font-size:6.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#666;font-family:system-ui;text-align:center;max-width:${size + 8}px">${esc(team)}</div>
+        </div>`;
+      }).join('')}
+    </div>` : '<p style="font-size:8pt;color:#aaa;font-style:italic;font-family:system-ui">No user teams recorded.</p>';
+
+  // ── Page factory ──────────────────────────────────────────────────────
+  const page = (content: string, breakAfter = true) =>
+    `<div class="page" style="page-break-after:${breakAfter ? 'always' : 'avoid'}">${content}</div>`;
+
+  // ── PAGE 1 — Cover ────────────────────────────────────────────────────
+  const coverPage = page(`
+    <div style="min-height:100vh;background:#0a0a0b;color:#fff;display:flex;flex-direction:column;justify-content:space-between;padding:0;position:relative;overflow:hidden">
+      <div style="position:absolute;top:-60px;right:-60px;width:360px;height:360px;border:2px solid ${BRAND};opacity:0.12;transform:rotate(30deg)"></div>
+      <div style="position:absolute;top:40px;right:80px;width:180px;height:180px;background:${INDIGO};opacity:0.06;transform:rotate(15deg)"></div>
+      <div style="position:absolute;bottom:-40px;left:-40px;width:280px;height:280px;border:1px solid ${INDIGO};opacity:0.1;transform:rotate(-20deg)"></div>
+      <div style="position:absolute;left:0;top:0;width:6px;height:100%;background:linear-gradient(180deg,${BRAND},${INDIGO})"></div>
+      <!-- Top bar -->
+      <div style="padding:40px 52px 0;display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="font-size:9pt;letter-spacing:0.32em;text-transform:uppercase;color:${BRAND};font-weight:900;font-family:system-ui">Confidential</div>
+        <div style="font-size:22pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
+      </div>
+      <!-- Main -->
+      <div style="padding:0 52px;position:relative;z-index:1">
+        <div style="font-size:9pt;letter-spacing:0.36em;text-transform:uppercase;color:${INDIGO};font-weight:900;font-family:system-ui;margin-bottom:20px">MCP Hub Report</div>
+        <div style="font-size:56pt;font-weight:900;line-height:0.88;font-family:system-ui;letter-spacing:-0.04em;margin-bottom:24px">
+          MODEL<br>CONTEXT<br><span style="color:${BRAND}">PROTOCOL</span>
+        </div>
+        <div style="width:80px;height:4px;background:${BRAND};margin-bottom:24px"></div>
+        <div style="font-size:12pt;color:#888;font-family:system-ui;letter-spacing:0.08em">${servers.length} server${servers.length !== 1 ? 's' : ''} · ${toolCount} tools · ${today}</div>
+      </div>
+      <!-- Bottom bar -->
+      <div style="padding:28px 52px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #ffffff0a">
+        <div style="font-size:9pt;color:#444;font-family:system-ui;letter-spacing:0.1em;text-transform:uppercase">AI Project Operations Platform</div>
+        <div style="display:flex;gap:16px">
+          ${[
+            { v: prodCount, c: COL_GREEN, l: 'Prod' },
+            { v: uatCount,  c: COL_AMBER, l: 'UAT' },
+            { v: devCount,  c: COL_BLUE,  l: 'Dev' },
+          ].map(({ v, c, l }) => `<div style="text-align:center">
+            <div style="font-size:20pt;font-weight:900;color:${c};font-family:system-ui;line-height:1">${v}</div>
+            <div style="font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;color:#555;font-family:system-ui">${l}</div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>`);
+
+  // ── PAGE 2 — Executive Dashboard ──────────────────────────────────────
+  const dashPage = page(`
+    <div style="padding:36px 40px;font-family:system-ui">
+      ${pdfHeader('Executive Dashboard', 'MCP Landscape', `${servers.length} servers in scope`, INDIGO)}
+
+      <!-- KPI strip -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:24px">
+        ${kpiTile('Total Servers',  servers.length, INDIGO, `${activeCount} active`)}
+        ${kpiTile('Production',     prodCount, COL_GREEN, `${servers.length ? Math.round((prodCount / servers.length) * 100) : 0}% of portfolio`)}
+        ${kpiTile('UAT',            uatCount,  COL_AMBER, 'pending validation')}
+        ${kpiTile('Dev',            devCount,  COL_BLUE,  'in development')}
+        ${kpiTile('Total Tools',    toolCount, '#8b5cf6', `avg ${servers.length ? (toolCount / servers.length).toFixed(1) : 0} / server`)}
+      </div>
+
+      <!-- Two-column charts -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+        <!-- Deploy status donut -->
+        <div style="border:1px solid #e5e7eb;padding:18px 20px">
+          ${sectionHeader('Deploy Status', INDIGO)}
+          <div style="display:flex;align-items:center;gap:20px;margin-top:8px">
+            ${deployDonut}
+            <div style="flex:1">${deployLegend}</div>
+          </div>
+        </div>
+        <!-- Category bar chart -->
+        <div style="border:1px solid #e5e7eb;padding:18px 20px">
+          ${sectionHeader('By Category', INDIGO)}
+          <div style="margin-top:8px">${catBars}</div>
+        </div>
+      </div>
+
+      <!-- Family breakdown -->
+      ${famEntries.length > 0 ? `
+      <div style="border:1px solid #e5e7eb;padding:18px 20px;margin-bottom:20px">
+        ${sectionHeader('By Family', BRAND)}
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px">
+          ${famEntries.map(([name, count]) => {
+            const fam = families.find((f) => f.name === name);
+            const color = fam?.color || INDIGO;
+            return `<div style="border:1px solid ${color}30;border-left:4px solid ${color};padding:10px 14px;min-width:100px">
+              <div style="font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:${color};font-family:system-ui">${esc(name)}</div>
+              <div style="font-size:22pt;font-weight:900;color:${color};line-height:1;margin-top:4px;font-family:system-ui">${count}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>` : ''}
+
+      <!-- Team bubble matrix -->
+      <div style="border:1px solid #e5e7eb;padding:18px 20px">
+        ${sectionHeader('Team Coverage', '#0ea5e9')}
+        ${teamGrid}
+      </div>
+    </div>`);
+
+  // ── PER-SERVER PAGES (2 per page) ─────────────────────────────────────
+  const DEPLOY_COLOR: Record<string, string> = { production: COL_GREEN, uat: COL_AMBER, dev: COL_BLUE };
+  const DEPLOY_LABEL: Record<string, string> = { production: 'Production', uat: 'UAT', dev: 'Dev' };
+
+  const serverCard = (srv: import('../types').McpServer) => {
+    const fam = srv.familyId ? familyMap.get(srv.familyId) : undefined;
+    const deployColor = srv.deployStatus ? DEPLOY_COLOR[srv.deployStatus] || INDIGO : INDIGO;
+    const toolsSample = srv.tools.slice(0, 6);
+    const metaItem = (label: string, value?: string) =>
+      value ? `<div style="display:flex;gap:8px;margin-bottom:5px;font-family:system-ui">
+        <div style="width:88px;font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#aaa;flex-shrink:0">${esc(label)}</div>
+        <div style="font-size:8pt;color:#333;flex:1">${esc(value)}</div>
+      </div>` : '';
+    return `
+    <div style="border:1px solid #e5e7eb;border-top:4px solid ${deployColor};padding:16px 18px;page-break-inside:avoid;background:#fff">
+      <!-- Header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px">
+        <div style="flex:1;min-width:0">
+          ${fam ? `<div style="font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:${fam.color};margin-bottom:3px">${esc(fam.name)}</div>` : ''}
+          <div style="font-size:13pt;font-weight:900;text-transform:uppercase;letter-spacing:0.02em;color:#111;line-height:1.1;font-family:system-ui">${esc(srv.name)}</div>
+          ${srv.category ? `<div style="font-size:8pt;color:#888;margin-top:3px;font-family:system-ui">${esc(srv.category)}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;shrink:0">
+          ${srv.deployStatus ? `<span style="background:${deployColor}18;color:${deployColor};font-size:7pt;font-weight:900;text-transform:uppercase;padding:2px 8px;letter-spacing:0.1em;font-family:system-ui">${DEPLOY_LABEL[srv.deployStatus] || esc(srv.deployStatus)}</span>` : ''}
+          <span style="background:${srv.isActive ? COL_GREEN + '18' : '#f1f5f9'};color:${srv.isActive ? COL_GREEN : '#888'};font-size:7pt;font-weight:700;text-transform:uppercase;padding:2px 8px;letter-spacing:0.1em;font-family:system-ui">${srv.isActive ? 'Active' : 'Inactive'}</span>
+        </div>
+      </div>
+      <!-- Description -->
+      <div style="font-size:8.5pt;color:#555;line-height:1.55;margin-bottom:10px;font-family:system-ui">
+        ${esc((srv.enrichedDescription || srv.description || '').slice(0, 200))}${(srv.enrichedDescription || srv.description || '').length > 200 ? '…' : ''}
+      </div>
+      <!-- 2-col meta -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;padding:10px 0;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0;margin-bottom:10px">
+        ${metaItem('Scope', srv.scope)}
+        ${metaItem('IT Team', srv.teamIT)}
+        ${metaItem('Origin Data', srv.originData)}
+        ${metaItem('Data Scope', srv.dataScope)}
+        ${metaItem('Data Sources', srv.dataSourceUsed)}
+        ${metaItem('User Teams', (srv.userTeams || []).join(', '))}
+      </div>
+      <!-- Use case -->
+      ${srv.useCase ? `<div style="font-size:8pt;color:#666;font-style:italic;margin-bottom:10px;font-family:system-ui"><span style="font-weight:700;font-style:normal;color:#888;text-transform:uppercase;letter-spacing:0.1em;font-size:7pt">Use case</span><br>${esc(srv.useCase.slice(0, 180))}${srv.useCase.length > 180 ? '…' : ''}</div>` : ''}
+      <!-- Tools -->
+      ${toolsSample.length > 0 ? `
+      <div style="font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;color:#aaa;margin-bottom:6px;font-family:system-ui">Tools (${srv.tools.length})</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        ${toolsSample.map((t) => `
+          <div style="border:1px solid #e5e7eb;padding:4px 8px;background:#fafafa">
+            <div style="font-size:7.5pt;font-weight:900;font-family:monospace;color:${INDIGO}">${esc(t.name)}</div>
+            ${(t.enrichedDescription || t.description) ? `<div style="font-size:7pt;color:#888;font-family:system-ui;margin-top:1px">${esc((t.enrichedDescription || t.description).slice(0, 70))}${(t.enrichedDescription || t.description).length > 70 ? '…' : ''}</div>` : ''}
+          </div>`).join('')}
+        ${srv.tools.length > 6 ? `<div style="border:1px solid #e5e7eb;padding:4px 8px;background:#fafafa;font-size:7pt;color:#aaa;font-family:system-ui;display:flex;align-items:center">+${srv.tools.length - 6} more</div>` : ''}
+      </div>` : `<div style="font-size:8pt;color:#ccc;font-style:italic;font-family:system-ui">No tools documented.</div>`}
+      <!-- Tags -->
+      ${(srv.tags || []).length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">
+        ${srv.tags.map((tag) => `<span style="background:#f1f5f9;color:#666;font-size:7pt;font-weight:700;text-transform:uppercase;padding:2px 6px;letter-spacing:0.08em;font-family:system-ui">${esc(tag)}</span>`).join('')}
+      </div>` : ''}
+    </div>`;
+  };
+
+  // Pair servers: 2 per page
+  const serverPages: string[] = [];
+  for (let i = 0; i < servers.length; i += 2) {
+    const pair = servers.slice(i, i + 2);
+    const isLast = i + 2 >= servers.length;
+    serverPages.push(page(`
+      <div style="padding:32px 36px;font-family:system-ui">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid ${INDIGO}">
+          <div style="font-size:9pt;font-weight:900;text-transform:uppercase;letter-spacing:0.22em;color:${INDIGO};font-family:system-ui">MCP Server Catalog</div>
+          <div style="font-size:16pt;font-weight:900;font-family:system-ui">DOINg<span style="color:${BRAND}">.AI</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          ${pair.map(serverCard).join('')}
+        </div>
+        ${pdfFooter('MCP Hub Report')}
+      </div>`, !isLast));
+  }
+
+  // ── Closing page ──────────────────────────────────────────────────────
+  const closingPage = page(`
+    <div style="min-height:100vh;background:#0a0a0b;color:#fff;display:flex;flex-direction:column;justify-content:center;align-items:center;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;right:0;width:4px;height:100%;background:${BRAND}"></div>
+      <div style="position:absolute;bottom:0;left:0;width:100%;height:3px;background:linear-gradient(90deg,${INDIGO},${BRAND})"></div>
+      <div style="position:absolute;font-size:260pt;font-weight:900;color:#ffffff04;font-family:system-ui;line-height:1;user-select:none;pointer-events:none;right:-10px">M</div>
+      <div style="text-align:center;position:relative;z-index:1;padding:60px">
+        <div style="font-size:44pt;font-weight:900;line-height:0.95;font-family:system-ui;letter-spacing:-0.04em;margin-bottom:20px">
+          DOINg<span style="color:${BRAND}">.AI</span>
+        </div>
+        <div style="width:60px;height:3px;background:${BRAND};margin:20px auto"></div>
+        <div style="font-size:11pt;color:#666;font-family:system-ui;letter-spacing:0.08em;text-transform:uppercase">MCP Hub Report</div>
+        <div style="font-size:9pt;color:#444;font-family:system-ui;margin-top:8px">${today}</div>
+      </div>
+    </div>`, false);
+
+  // ── Full document ─────────────────────────────────────────────────────
+  const body = [coverPage, dashPage, ...serverPages, closingPage].join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DOINg.AI — MCP Hub Report</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #fff; color: #0a0a0b; font-size: 10pt; }
+    .page { min-height: 297mm; position: relative; }
+    @media screen { .page { min-height: unset; box-shadow: 0 2px 12px rgba(0,0,0,0.1); margin-bottom: 16px; } }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:1000;background:#0a0a0b;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:10px 24px">
+    <div style="font-size:11pt;font-weight:900;font-family:system-ui">DOINg<span style="color:#FF3E00">.AI</span> <span style="font-weight:400;color:#888;font-size:9pt">— MCP Hub Report &middot; ${servers.length} servers</span></div>
+    <button onclick="window.print()" style="background:#FF3E00;color:#fff;border:none;padding:8px 24px;font-size:10pt;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;font-family:system-ui">🖨 Print / Save PDF</button>
+  </div>
+  <div class="no-print" style="height:44px"></div>
+  ${body}
+</body>
+</html>`;
+};
+
+/* ====================================================================
+   MCP XLSX EXPORT — full metadata + tools
+   ==================================================================== */
+
+export const exportMcpXlsx = (
+  servers: import('../types').McpServer[],
+  families: import('../types').McpFamily[]
+): void => {
+  // Lazy-import SheetJS (already in package.json)
+  import('xlsx').then((XLSX) => {
+    const wb = XLSX.utils.book_new();
+    const familyMap = new Map(families.map((f) => [f.id, f]));
+
+    // ── Sheet 1: Servers ──────────────────────────────────────────────
+    const serverRows = servers.map((s) => ({
+      'Name':             s.name,
+      'Family':           s.familyId ? (familyMap.get(s.familyId)?.name || '') : '',
+      'Category':         s.category || '',
+      'Deploy Status':    s.deployStatus || '',
+      'Active':           s.isActive ? 'Yes' : 'No',
+      'Description':      s.description,
+      'AI Description':   s.enrichedDescription || '',
+      'Scope':            s.scope || '',
+      'Origin Data':      s.originData || '',
+      'Data Scope':       s.dataScope || '',
+      'Data Sources':     s.dataSourceUsed || '',
+      'Use Case':         s.useCase || '',
+      'IT Team':          s.teamIT || '',
+      'User Teams':       (s.userTeams || []).join(', '),
+      'URL':              s.url || '',
+      'Token Set':        s.token ? 'Yes' : 'No',
+      'Source Mode':      s.source,
+      'Tags':             (s.tags || []).join(', '),
+      'Tool Count':       s.tools.length,
+      'Created At':       s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '',
+      'Updated At':       s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : '',
+    }));
+    const wsServers = XLSX.utils.json_to_sheet(serverRows);
+    // Column widths
+    wsServers['!cols'] = [
+      { wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 8 },
+      { wch: 50 }, { wch: 60 }, { wch: 20 }, { wch: 24 }, { wch: 20 },
+      { wch: 30 }, { wch: 50 }, { wch: 22 }, { wch: 30 }, { wch: 40 },
+      { wch: 10 }, { wch: 14 }, { wch: 22 }, { wch: 8 },  { wch: 14 }, { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsServers, 'MCP Servers');
+
+    // ── Sheet 2: Tools ────────────────────────────────────────────────
+    const toolRows = servers.flatMap((s) =>
+      s.tools.map((t) => ({
+        'Server Name':        s.name,
+        'Server Family':      s.familyId ? (familyMap.get(s.familyId)?.name || '') : '',
+        'Server Category':    s.category || '',
+        'Server Deploy':      s.deployStatus || '',
+        'Tool Name':          t.name,
+        'Tool Description':   t.description || '',
+        'AI Description':     t.enrichedDescription || '',
+      }))
+    );
+    if (toolRows.length > 0) {
+      const wsTools = XLSX.utils.json_to_sheet(toolRows);
+      wsTools['!cols'] = [
+        { wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 14 },
+        { wch: 28 }, { wch: 60 }, { wch: 70 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsTools, 'Tools');
+    }
+
+    // ── Sheet 3: Families ─────────────────────────────────────────────
+    if (families.length > 0) {
+      const famRows = families.map((f) => ({
+        'Family Name':  f.name,
+        'Description':  f.description || '',
+        'Color':        f.color,
+        'Server Count': servers.filter((s) => s.familyId === f.id).length,
+        'Created At':   f.createdAt ? new Date(f.createdAt).toLocaleDateString() : '',
+      }));
+      const wsFam = XLSX.utils.json_to_sheet(famRows);
+      wsFam['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
+      XLSX.utils.book_append_sheet(wb, wsFam, 'Families');
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `doing-ai-mcp-export-${date}.xlsx`);
+  }).catch(() => {
+    alert('XLSX library not available. Run: npm install xlsx');
+  });
+};
