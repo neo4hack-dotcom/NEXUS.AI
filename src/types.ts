@@ -379,6 +379,16 @@ export interface McpTool {
   enrichedDescription?: string; // LLM-enriched version
 }
 
+export type McpDeployStatus = 'dev' | 'uat' | 'production';
+
+export interface McpFamily {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;   // hex colour, used as accent in the UI
+  createdAt: string;
+}
+
 export interface McpServer {
   id: string;
   name: string;
@@ -388,9 +398,21 @@ export interface McpServer {
   token?: string;
   source: 'declarative' | 'url';
   tools: McpTool[];
-  category?: string; // e.g. "Productivity", "Data", "Dev Tools"
+  category?: string;            // "Productivity", "Data", "Dev Tools"…
   tags: string[];
   isActive: boolean;
+
+  // ── Extended metadata ────────────────────────────────────────────────
+  familyId?: string;            // links to McpFamily
+  scope?: string;               // e.g. "Internal", "External", "Cross-team"
+  originData?: string;          // e.g. "Internal DB", "Public API", "Partner feed"
+  dataScope?: string;           // e.g. "Finance", "HR", "All", "Europe"
+  dataSourceUsed?: string;      // concrete sources: "PostgreSQL", "Salesforce"…
+  useCase?: string;             // free-text use-case description
+  teamIT?: string;              // IT team responsible
+  userTeams?: string[];         // business teams using this server
+  deployStatus?: McpDeployStatus;
+
   createdAt: string;
   updatedAt: string;
 }
@@ -411,6 +433,7 @@ export interface AppState {
   workingGroups: WorkingGroup[];
   smartTodos: SmartTodo[];
   mcpServers: McpServer[];
+  mcpFamilies: McpFamily[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;
