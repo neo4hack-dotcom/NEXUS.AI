@@ -2480,83 +2480,771 @@ export const exportMcpXlsx = (
   servers: import('../types').McpServer[],
   families: import('../types').McpFamily[]
 ): void => {
-  // Lazy-import SheetJS (already in package.json)
-  import('xlsx').then((XLSX) => {
-    const wb = XLSX.utils.book_new();
+  // Lazy-import ExcelJS (replaces SheetJS — no known security vulnerabilities)
+  import('exceljs').then(async ({ default: ExcelJS }) => {
+    const workbook = new ExcelJS.Workbook();
     const familyMap = new Map(families.map((f) => [f.id, f]));
 
+    // Helper: bold the header row of a worksheet
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const styleHeader = (ws: any) => {
+      const headerRow = ws.getRow(1);
+      headerRow.font = { bold: true };
+      headerRow.commit();
+    };
+
     // ── Sheet 1: Servers ──────────────────────────────────────────────
-    const serverRows = servers.map((s) => ({
-      'Name':             s.name,
-      'Family':           s.familyId ? (familyMap.get(s.familyId)?.name || '') : '',
-      'Category':         s.category || '',
-      'Deploy Status':    s.deployStatus || '',
-      'Active':           s.isActive ? 'Yes' : 'No',
-      'Description':      s.description,
-      'AI Description':   s.enrichedDescription || '',
-      'Scope':            s.scope || '',
-      'Origin Data':      s.originData || '',
-      'Data Scope':       s.dataScope || '',
-      'Data Sources':     s.dataSourceUsed || '',
-      'Use Case':         s.useCase || '',
-      'IT Team':          s.teamIT || '',
-      'User Teams':       (s.userTeams || []).join(', '),
-      'URL':              s.url || '',
-      'Token Set':        s.token ? 'Yes' : 'No',
-      'Source Mode':      s.source,
-      'Tags':             (s.tags || []).join(', '),
-      'Tool Count':       s.tools.length,
-      'Created At':       s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '',
-      'Updated At':       s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : '',
-    }));
-    const wsServers = XLSX.utils.json_to_sheet(serverRows);
-    // Column widths
-    wsServers['!cols'] = [
-      { wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 8 },
-      { wch: 50 }, { wch: 60 }, { wch: 20 }, { wch: 24 }, { wch: 20 },
-      { wch: 30 }, { wch: 50 }, { wch: 22 }, { wch: 30 }, { wch: 40 },
-      { wch: 10 }, { wch: 14 }, { wch: 22 }, { wch: 8 },  { wch: 14 }, { wch: 14 },
+    const wsServers = workbook.addWorksheet('MCP Servers');
+    wsServers.columns = [
+      { header: 'Name',           key: 'Name',           width: 28 },
+      { header: 'Family',         key: 'Family',         width: 18 },
+      { header: 'Category',       key: 'Category',       width: 16 },
+      { header: 'Deploy Status',  key: 'Deploy Status',  width: 14 },
+      { header: 'Active',         key: 'Active',         width:  8 },
+      { header: 'Description',    key: 'Description',    width: 50 },
+      { header: 'AI Description', key: 'AI Description', width: 60 },
+      { header: 'Scope',          key: 'Scope',          width: 20 },
+      { header: 'Origin Data',    key: 'Origin Data',    width: 24 },
+      { header: 'Data Scope',     key: 'Data Scope',     width: 20 },
+      { header: 'Data Sources',   key: 'Data Sources',   width: 30 },
+      { header: 'Use Case',       key: 'Use Case',       width: 50 },
+      { header: 'IT Team',        key: 'IT Team',        width: 22 },
+      { header: 'User Teams',     key: 'User Teams',     width: 30 },
+      { header: 'URL',            key: 'URL',            width: 40 },
+      { header: 'Token Set',      key: 'Token Set',      width: 10 },
+      { header: 'Source Mode',    key: 'Source Mode',    width: 14 },
+      { header: 'Tags',           key: 'Tags',           width: 22 },
+      { header: 'Tool Count',     key: 'Tool Count',     width:  8 },
+      { header: 'Created At',     key: 'Created At',     width: 14 },
+      { header: 'Updated At',     key: 'Updated At',     width: 14 },
     ];
-    XLSX.utils.book_append_sheet(wb, wsServers, 'MCP Servers');
+    servers.forEach((s) => wsServers.addRow({
+      'Name':           s.name,
+      'Family':         s.familyId ? (familyMap.get(s.familyId)?.name || '') : '',
+      'Category':       s.category || '',
+      'Deploy Status':  s.deployStatus || '',
+      'Active':         s.isActive ? 'Yes' : 'No',
+      'Description':    s.description,
+      'AI Description': s.enrichedDescription || '',
+      'Scope':          s.scope || '',
+      'Origin Data':    s.originData || '',
+      'Data Scope':     s.dataScope || '',
+      'Data Sources':   s.dataSourceUsed || '',
+      'Use Case':       s.useCase || '',
+      'IT Team':        s.teamIT || '',
+      'User Teams':     (s.userTeams || []).join(', '),
+      'URL':            s.url || '',
+      'Token Set':      s.token ? 'Yes' : 'No',
+      'Source Mode':    s.source,
+      'Tags':           (s.tags || []).join(', '),
+      'Tool Count':     s.tools.length,
+      'Created At':     s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '',
+      'Updated At':     s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : '',
+    }));
+    styleHeader(wsServers);
 
     // ── Sheet 2: Tools ────────────────────────────────────────────────
     const toolRows = servers.flatMap((s) =>
       s.tools.map((t) => ({
-        'Server Name':        s.name,
-        'Server Family':      s.familyId ? (familyMap.get(s.familyId)?.name || '') : '',
-        'Server Category':    s.category || '',
-        'Server Deploy':      s.deployStatus || '',
-        'Tool Name':          t.name,
-        'Tool Description':   t.description || '',
-        'AI Description':     t.enrichedDescription || '',
+        'Server Name':      s.name,
+        'Server Family':    s.familyId ? (familyMap.get(s.familyId)?.name || '') : '',
+        'Server Category':  s.category || '',
+        'Server Deploy':    s.deployStatus || '',
+        'Tool Name':        t.name,
+        'Tool Description': t.description || '',
+        'AI Description':   t.enrichedDescription || '',
       }))
     );
     if (toolRows.length > 0) {
-      const wsTools = XLSX.utils.json_to_sheet(toolRows);
-      wsTools['!cols'] = [
-        { wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 14 },
-        { wch: 28 }, { wch: 60 }, { wch: 70 },
+      const wsTools = workbook.addWorksheet('Tools');
+      wsTools.columns = [
+        { header: 'Server Name',      key: 'Server Name',      width: 28 },
+        { header: 'Server Family',    key: 'Server Family',    width: 18 },
+        { header: 'Server Category',  key: 'Server Category',  width: 16 },
+        { header: 'Server Deploy',    key: 'Server Deploy',    width: 14 },
+        { header: 'Tool Name',        key: 'Tool Name',        width: 28 },
+        { header: 'Tool Description', key: 'Tool Description', width: 60 },
+        { header: 'AI Description',   key: 'AI Description',   width: 70 },
       ];
-      XLSX.utils.book_append_sheet(wb, wsTools, 'Tools');
+      toolRows.forEach((r) => wsTools.addRow(r));
+      styleHeader(wsTools);
     }
 
     // ── Sheet 3: Families ─────────────────────────────────────────────
     if (families.length > 0) {
-      const famRows = families.map((f) => ({
+      const wsFam = workbook.addWorksheet('Families');
+      wsFam.columns = [
+        { header: 'Family Name',  key: 'Family Name',  width: 22 },
+        { header: 'Description',  key: 'Description',  width: 40 },
+        { header: 'Color',        key: 'Color',        width: 10 },
+        { header: 'Server Count', key: 'Server Count', width: 12 },
+        { header: 'Created At',   key: 'Created At',   width: 14 },
+      ];
+      families.forEach((f) => wsFam.addRow({
         'Family Name':  f.name,
         'Description':  f.description || '',
         'Color':        f.color,
         'Server Count': servers.filter((s) => s.familyId === f.id).length,
         'Created At':   f.createdAt ? new Date(f.createdAt).toLocaleDateString() : '',
       }));
-      const wsFam = XLSX.utils.json_to_sheet(famRows);
-      wsFam['!cols'] = [{ wch: 22 }, { wch: 40 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
-      XLSX.utils.book_append_sheet(wb, wsFam, 'Families');
+      styleHeader(wsFam);
     }
 
+    // ── Write buffer and trigger download ─────────────────────────────
     const date = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `doing-ai-mcp-export-${date}.xlsx`);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `doing-ai-mcp-export-${date}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }).catch(() => {
-    alert('XLSX library not available. Run: npm install xlsx');
+    alert('ExcelJS library not available. Run: npm install exceljs');
   });
+};
+
+/* ====================================================================
+   MCP ID CARD — slide-deck PDF per server
+   Generates a professional 7-page A4 landscape slide deck with LLM-
+   generated executive content, SVG infographics, and DOINg.AI branding.
+   ==================================================================== */
+
+interface IdCardAiContent {
+  executiveSummary: string;
+  valueProposition: string;
+  technicalHighlights: string[];
+  recommendedUseCases: string[];
+  targetAudience: string;
+}
+
+const buildIdCardPrompt = (
+  server: import('../types').McpServer,
+  family: import('../types').McpFamily | null
+): string => `You are creating an executive-grade ID card for an MCP (Model Context Protocol) server.
+
+SERVER METADATA:
+- Name: ${server.name}
+- Description: ${server.description || 'N/A'}
+${server.enrichedDescription ? `- Enriched description: ${server.enrichedDescription}` : ''}
+- Category: ${server.category || 'N/A'}
+- Family: ${family?.name || 'N/A'}
+- Scope: ${server.scope || 'N/A'}
+- Origin data: ${server.originData || 'N/A'}
+- Data sources: ${server.dataSourceUsed || 'N/A'}
+- Use case: ${server.useCase || 'N/A'}
+- IT team: ${server.teamIT || 'N/A'}
+- User teams: ${(server.userTeams || []).join(', ') || 'N/A'}
+- Deploy status: ${server.deployStatus || 'N/A'}
+- Tools (${server.tools.length}): ${server.tools.slice(0, 12).map((t) => `${t.name}: ${t.description}`).join(' | ') || 'None documented'}
+
+Generate a polished JSON object with EXACTLY these fields:
+{
+  "executiveSummary": "2-3 sentence summary of what this MCP does and its primary purpose. Professional, business-focused, concrete.",
+  "valueProposition": "1 punchy sentence stating the strategic value — why this MCP matters.",
+  "technicalHighlights": ["highlight 1", "highlight 2", "highlight 3"],
+  "recommendedUseCases": ["use case 1", "use case 2", "use case 3"],
+  "targetAudience": "1 sentence describing the primary user persona/role/team"
+}
+
+Rules:
+- Be concrete and factual, NOT generic marketing fluff
+- Each highlight/use case: 1 short sentence (max 15 words)
+- Output ONLY valid JSON, no markdown fences, no commentary`;
+
+const stripJsonFences = (s: string): string =>
+  s.replace(/^```[a-zA-Z]*\n?/, '').replace(/```\s*$/, '').trim();
+
+const escapeHtml = (s: string): string =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+
+/** Compute a 0-100 maturity score based on documentation/security/adoption signals. */
+const computeMaturityScore = (server: import('../types').McpServer): number => {
+  let score = 0;
+  if (server.description && server.description.length > 30) score += 15;
+  if (server.enrichedDescription) score += 10;
+  if (server.tools.length > 0) score += 15;
+  if (server.tools.every((t) => t.description && t.description.length > 5)) score += 10;
+  if (server.token) score += 10;
+  if (server.deployStatus === 'production') score += 15;
+  else if (server.deployStatus === 'uat') score += 10;
+  else if (server.deployStatus === 'dev') score += 5;
+  if (server.isActive) score += 5;
+  if (server.teamIT) score += 5;
+  if ((server.userTeams || []).length > 0) score += 5;
+  if (server.useCase) score += 5;
+  if (server.codeAnalysis) score += 5;
+  return Math.min(100, score);
+};
+
+/** Build an SVG donut chart from values. Total of values determines proportions. */
+const svgDonut = (
+  segments: { label: string; value: number; color: string }[],
+  size = 200,
+  thickness = 28
+): string => {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const radius = (size - thickness) / 2;
+  const cx = size / 2;
+  const cy = size / 2;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const arcs = segments
+    .map((seg) => {
+      const len = (seg.value / total) * circumference;
+      const dash = `${len} ${circumference - len}`;
+      const el = `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${seg.color}" stroke-width="${thickness}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" />`;
+      offset += len;
+      return el;
+    })
+    .join('');
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${arcs}</svg>`;
+};
+
+/** Build an SVG gauge (semicircle progress) for a 0-100 score. */
+const svgGauge = (score: number, size = 220): string => {
+  const stroke = 22;
+  const radius = (size - stroke) / 2;
+  const cx = size / 2;
+  const cy = size / 2 + radius / 2;
+  const circumference = Math.PI * radius;
+  const filled = (score / 100) * circumference;
+  const color = score >= 75 ? '#22c55e' : score >= 50 ? '#f59e0b' : '#ef4444';
+  return `
+    <svg viewBox="0 0 ${size} ${size * 0.6}" width="${size}" height="${size * 0.6}">
+      <path d="M ${stroke / 2} ${cy} A ${radius} ${radius} 0 0 1 ${size - stroke / 2} ${cy}" stroke="#e5e7eb" stroke-width="${stroke}" fill="none" stroke-linecap="round" />
+      <path d="M ${stroke / 2} ${cy} A ${radius} ${radius} 0 0 1 ${size - stroke / 2} ${cy}" stroke="${color}" stroke-width="${stroke}" fill="none" stroke-linecap="round" stroke-dasharray="${filled} ${circumference}" />
+      <text x="${cx}" y="${cy - 12}" text-anchor="middle" font-size="36" font-weight="900" font-family="system-ui" fill="${color}">${score}</text>
+      <text x="${cx}" y="${cy + 12}" text-anchor="middle" font-size="9" font-weight="700" letter-spacing="2" font-family="system-ui" fill="#6b7280">/ 100</text>
+    </svg>`;
+};
+
+const buildIdCardHTML = (
+  server: import('../types').McpServer,
+  family: import('../types').McpFamily | null,
+  ai: IdCardAiContent | null
+): string => {
+  const BRAND = '#FF3E00';
+  const INDIGO = '#6366f1';
+  const INK = '#0f0f1a';
+  const TEXT = '#1a1a2e';
+  const MUTED = '#6b7280';
+  const familyColor = family?.color || INDIGO;
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const maturity = computeMaturityScore(server);
+  const deployBadge = server.deployStatus
+    ? { label: server.deployStatus === 'production' ? 'PROD' : server.deployStatus.toUpperCase(), color: server.deployStatus === 'production' ? '#22c55e' : server.deployStatus === 'uat' ? '#f59e0b' : '#3b82f6' }
+    : { label: server.isActive ? 'ACTIVE' : 'INACTIVE', color: server.isActive ? '#22c55e' : '#9ca3af' };
+
+  // Fallback content if LLM was unavailable
+  const aiSafe: IdCardAiContent = ai || {
+    executiveSummary: server.enrichedDescription || server.description || 'No description available.',
+    valueProposition: server.useCase || 'A Model Context Protocol server integrated into the AI operations platform.',
+    technicalHighlights: [
+      `Exposes ${server.tools.length} tool${server.tools.length === 1 ? '' : 's'} via the MCP standard`,
+      server.source === 'declarative' ? 'Declarative configuration' : 'URL-based discovery',
+      server.token ? 'Authentication token configured' : 'Public / unauthenticated access',
+    ],
+    recommendedUseCases: server.useCase ? [server.useCase] : ['No documented use cases yet.'],
+    targetAudience: (server.userTeams || []).join(', ') || 'Cross-functional teams within the organization',
+  };
+
+  // Donut: distribution of "maturity contributions"
+  const donutSegments = [
+    { label: 'Documentation', value: (server.description ? 10 : 0) + (server.enrichedDescription ? 10 : 0), color: BRAND },
+    { label: 'Tools', value: server.tools.length > 0 ? 25 : 0, color: INDIGO },
+    { label: 'Security', value: server.token ? 10 : 0, color: '#22c55e' },
+    { label: 'Adoption', value: ((server.userTeams || []).length * 5) + (server.teamIT ? 5 : 0), color: '#f59e0b' },
+    { label: 'Deploy', value: server.deployStatus === 'production' ? 15 : server.deployStatus === 'uat' ? 10 : server.deployStatus === 'dev' ? 5 : 0, color: '#3b82f6' },
+  ].filter((s) => s.value > 0);
+  const donutFallback = [{ label: 'Untracked', value: 1, color: '#e5e7eb' }];
+  const donutData = donutSegments.length > 0 ? donutSegments : donutFallback;
+
+  const toolCount = server.tools.length;
+  const teamCount = (server.userTeams || []).length;
+  const tagsCount = (server.tags || []).length;
+
+  // CSS shared by all slides
+  const css = `
+    @page { size: A4 landscape; margin: 0; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+      color: ${TEXT};
+      background: #e5e7eb;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .no-print { position: fixed; top: 16px; right: 16px; z-index: 1000; }
+    .print-btn {
+      background: ${BRAND}; color: white; border: 0; padding: 10px 20px;
+      font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;
+      font-size: 11px; cursor: pointer; font-family: inherit;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .print-btn:hover { background: #e63600; }
+    .slide {
+      width: 297mm; height: 210mm;
+      padding: 16mm 18mm;
+      background: white;
+      margin: 10mm auto;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+      page-break-after: always;
+      position: relative;
+      overflow: hidden;
+    }
+    .slide:last-child { page-break-after: auto; }
+    @media print {
+      body { background: white; }
+      .no-print { display: none; }
+      .slide { margin: 0; box-shadow: none; }
+    }
+
+    /* Common building blocks */
+    .label {
+      font-size: 8pt; letter-spacing: 0.24em; text-transform: uppercase;
+      font-weight: 800; color: ${BRAND};
+    }
+    .title-xl {
+      font-size: 48pt; font-weight: 900; letter-spacing: -0.02em;
+      line-height: 1.05; text-transform: uppercase;
+    }
+    .title-lg {
+      font-size: 28pt; font-weight: 900; letter-spacing: -0.02em;
+      line-height: 1.1; text-transform: uppercase; margin: 0 0 16px 0;
+    }
+    .body-lg { font-size: 14pt; line-height: 1.5; color: ${TEXT}; }
+    .body-md { font-size: 11pt; line-height: 1.55; color: ${TEXT}; }
+    .body-sm { font-size: 9pt; line-height: 1.5; color: ${MUTED}; }
+    .logo {
+      font-size: 16pt; font-weight: 900; letter-spacing: -0.02em;
+      font-family: system-ui;
+    }
+    .logo .dot { color: ${BRAND}; }
+    .footer {
+      position: absolute; bottom: 10mm; left: 18mm; right: 18mm;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 7.5pt; letter-spacing: 0.18em; text-transform: uppercase;
+      color: ${MUTED}; font-weight: 700;
+      border-top: 1px solid #e5e7eb; padding-top: 6mm;
+    }
+    .badge {
+      display: inline-block; padding: 5px 11px; font-size: 8pt;
+      letter-spacing: 0.16em; font-weight: 800; text-transform: uppercase;
+    }
+    .badge-family {
+      color: white;
+    }
+    .badge-deploy {
+      color: white;
+    }
+    .badge-tag {
+      background: #f3f4f6; color: #4b5563; font-weight: 700;
+    }
+    .card {
+      border: 1px solid #e5e7eb; padding: 16px 18px; background: white;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+    .stat-kpi {
+      border: 1px solid #e5e7eb; padding: 18px; text-align: left;
+    }
+    .stat-num {
+      font-size: 36pt; font-weight: 900; line-height: 1;
+      color: ${BRAND}; font-family: system-ui;
+    }
+    .stat-label {
+      font-size: 7.5pt; letter-spacing: 0.18em; text-transform: uppercase;
+      font-weight: 800; color: ${MUTED}; margin-top: 8px;
+    }
+  `;
+
+  // ── Slide 1: Cover ────────────────────────────────────────────────────
+  const slideCover = `
+    <div class="slide" style="background:linear-gradient(135deg,${INK} 0%,#1f1f3a 60%,${familyColor}22 100%);color:white;padding:0;">
+      <!-- Decorative circles -->
+      <div style="position:absolute;top:-100px;right:-100px;width:340px;height:340px;background:${BRAND};opacity:0.18;border-radius:50%;"></div>
+      <div style="position:absolute;bottom:-80px;left:-60px;width:240px;height:240px;background:${familyColor};opacity:0.22;border-radius:50%;"></div>
+      <div style="position:absolute;top:120px;right:60mm;width:80px;height:80px;background:${BRAND};opacity:0.10;border-radius:50%;"></div>
+
+      <div style="position:relative;padding:18mm 22mm;height:100%;display:flex;flex-direction:column;justify-content:space-between;">
+        <!-- Top: Logo + badges -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div style="font-size:7.5pt;letter-spacing:0.32em;text-transform:uppercase;color:${BRAND};font-weight:800;margin-bottom:6px;">MCP ID Card</div>
+            <div class="logo" style="color:white;font-size:18pt;">DOINg<span class="dot">.AI</span></div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+            ${family ? `<div class="badge badge-family" style="background:${familyColor};">${escapeHtml(family.name)}</div>` : ''}
+            <div class="badge badge-deploy" style="background:${deployBadge.color};">${deployBadge.label}</div>
+            ${server.category ? `<div class="badge" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3);">${escapeHtml(server.category)}</div>` : ''}
+          </div>
+        </div>
+
+        <!-- Center: Name -->
+        <div>
+          <div style="font-size:8pt;letter-spacing:0.32em;text-transform:uppercase;color:rgba(255,255,255,0.55);font-weight:700;margin-bottom:14px;">Model Context Protocol Server</div>
+          <div class="title-xl" style="color:white;">${escapeHtml(server.name)}</div>
+          <div style="height:4px;width:80px;background:${BRAND};margin-top:18px;"></div>
+        </div>
+
+        <!-- Bottom: Date + tagline -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+          <div style="font-size:10pt;color:rgba(255,255,255,0.75);max-width:140mm;line-height:1.5;">
+            ${escapeHtml(aiSafe.valueProposition)}
+          </div>
+          <div style="font-size:7.5pt;letter-spacing:0.24em;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700;text-align:right;">
+            <div>Generated ${today}</div>
+            <div style="margin-top:4px;">AI Operations Platform</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ── Slide 2: Executive Summary ────────────────────────────────────────
+  const slideExec = `
+    <div class="slide">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;">
+        <div>
+          <div class="label">01 · Executive Summary</div>
+          <div class="title-lg" style="margin-top:10px;">What is ${escapeHtml(server.name)}?</div>
+        </div>
+        <div class="logo">DOINg<span class="dot">.AI</span></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:28px;margin-top:18px;">
+        <div>
+          <div style="border-left:4px solid ${BRAND};padding:8px 0 8px 22px;margin-bottom:24px;">
+            <div style="font-size:18pt;font-weight:800;line-height:1.35;color:${TEXT};">
+              "${escapeHtml(aiSafe.valueProposition)}"
+            </div>
+          </div>
+          <div class="body-lg" style="margin-bottom:18px;">
+            ${escapeHtml(aiSafe.executiveSummary)}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div class="card" style="background:${BRAND}08;border-color:${BRAND}33;">
+            <div class="label" style="margin-bottom:6px;">Target Audience</div>
+            <div class="body-md" style="font-weight:600;">${escapeHtml(aiSafe.targetAudience)}</div>
+          </div>
+          <div class="card">
+            <div class="label" style="color:${MUTED};margin-bottom:8px;">Quick Facts</div>
+            <div style="font-size:9pt;line-height:1.9;">
+              <div><strong style="color:${BRAND};">${toolCount}</strong> tool${toolCount === 1 ? '' : 's'}</div>
+              ${family ? `<div><strong style="color:${familyColor};">${escapeHtml(family.name)}</strong> family</div>` : ''}
+              ${server.category ? `<div><strong>Category:</strong> ${escapeHtml(server.category)}</div>` : ''}
+              <div><strong>Source:</strong> ${server.source === 'declarative' ? 'Declarative' : 'URL Discovery'}</div>
+              <div><strong>Status:</strong> ${deployBadge.label}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer"><span>${escapeHtml(server.name)} · ID Card</span><span>2 / 7</span></div>
+    </div>
+  `;
+
+  // ── Slide 3: Technical Highlights ─────────────────────────────────────
+  const slideTech = `
+    <div class="slide">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;">
+        <div>
+          <div class="label">02 · Technical Highlights</div>
+          <div class="title-lg" style="margin-top:10px;">Capabilities & Architecture</div>
+        </div>
+        <div class="logo">DOINg<span class="dot">.AI</span></div>
+      </div>
+
+      <div class="grid-3" style="margin-bottom:24px;">
+        ${aiSafe.technicalHighlights.slice(0, 3).map((h, i) => `
+          <div class="card" style="border-top:4px solid ${BRAND};padding:20px;display:flex;flex-direction:column;gap:10px;min-height:120px;">
+            <div style="font-size:24pt;font-weight:900;color:${BRAND};line-height:1;font-family:system-ui;">${String(i + 1).padStart(2, '0')}</div>
+            <div class="body-md" style="font-weight:600;">${escapeHtml(h)}</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="label" style="margin-bottom:14px;color:${INDIGO};">Connection & Scope</div>
+          <table style="width:100%;font-size:10pt;border-collapse:collapse;">
+            <tr><td style="padding:6px 0;color:${MUTED};width:42%;">Mode</td><td style="padding:6px 0;font-weight:700;">${server.source === 'declarative' ? 'Declarative' : 'URL Discovery'}</td></tr>
+            ${server.url ? `<tr><td style="padding:6px 0;color:${MUTED};">URL</td><td style="padding:6px 0;font-family:monospace;font-size:8.5pt;word-break:break-all;">${escapeHtml(server.url)}</td></tr>` : ''}
+            <tr><td style="padding:6px 0;color:${MUTED};">Auth</td><td style="padding:6px 0;font-weight:700;color:${server.token ? '#22c55e' : '#9ca3af'};">${server.token ? '✓ Token configured' : 'No token'}</td></tr>
+            ${server.scope ? `<tr><td style="padding:6px 0;color:${MUTED};">Scope</td><td style="padding:6px 0;font-weight:700;">${escapeHtml(server.scope)}</td></tr>` : ''}
+            ${server.originData ? `<tr><td style="padding:6px 0;color:${MUTED};">Origin</td><td style="padding:6px 0;font-weight:700;">${escapeHtml(server.originData)}</td></tr>` : ''}
+          </table>
+        </div>
+        <div class="card">
+          <div class="label" style="margin-bottom:14px;color:${INDIGO};">Data Foundation</div>
+          <table style="width:100%;font-size:10pt;border-collapse:collapse;">
+            ${server.dataScope ? `<tr><td style="padding:6px 0;color:${MUTED};width:42%;">Data scope</td><td style="padding:6px 0;font-weight:700;">${escapeHtml(server.dataScope)}</td></tr>` : ''}
+            ${server.dataSourceUsed ? `<tr><td style="padding:6px 0;color:${MUTED};">Data sources</td><td style="padding:6px 0;font-weight:700;">${escapeHtml(server.dataSourceUsed)}</td></tr>` : ''}
+            <tr><td style="padding:6px 0;color:${MUTED};">Deploy stage</td><td style="padding:6px 0;font-weight:700;"><span class="badge badge-deploy" style="background:${deployBadge.color};">${deployBadge.label}</span></td></tr>
+            <tr><td style="padding:6px 0;color:${MUTED};">Active</td><td style="padding:6px 0;font-weight:700;color:${server.isActive ? '#22c55e' : '#9ca3af'};">${server.isActive ? '✓ Yes' : 'No'}</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="footer"><span>${escapeHtml(server.name)} · ID Card</span><span>3 / 7</span></div>
+    </div>
+  `;
+
+  // ── Slide 4: Tools Matrix ─────────────────────────────────────────────
+  const toolsDisplay = server.tools.slice(0, 12);
+  const slideTools = `
+    <div class="slide">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
+        <div>
+          <div class="label">03 · Tools Matrix</div>
+          <div class="title-lg" style="margin-top:10px;">Exposed Capabilities (${toolCount})</div>
+        </div>
+        <div class="logo">DOINg<span class="dot">.AI</span></div>
+      </div>
+
+      ${toolCount === 0 ? `
+        <div style="text-align:center;padding:80px 0;color:${MUTED};font-size:11pt;">
+          No tools documented yet.
+        </div>
+      ` : `
+        <div style="display:grid;grid-template-columns:repeat(${toolsDisplay.length >= 6 ? 3 : 2},1fr);gap:10px;">
+          ${toolsDisplay.map((t) => `
+            <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:6px;border-left:3px solid ${BRAND};">
+              <div style="font-family:'SF Mono',Consolas,monospace;font-size:9.5pt;font-weight:800;color:${BRAND};text-transform:uppercase;letter-spacing:0.04em;">${escapeHtml(t.name)}</div>
+              <div style="font-size:8.5pt;color:${TEXT};line-height:1.4;">${escapeHtml(t.description || 'No description.')}</div>
+              ${t.enrichedDescription ? `<div style="font-size:8pt;color:${MUTED};line-height:1.4;font-style:italic;border-top:1px dashed #e5e7eb;padding-top:5px;margin-top:2px;">${escapeHtml(t.enrichedDescription)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+        ${toolCount > 12 ? `<div style="margin-top:14px;text-align:center;font-size:8.5pt;color:${MUTED};font-style:italic;">+ ${toolCount - 12} more tool${toolCount - 12 === 1 ? '' : 's'} not shown</div>` : ''}
+      `}
+
+      <div class="footer"><span>${escapeHtml(server.name)} · ID Card</span><span>4 / 7</span></div>
+    </div>
+  `;
+
+  // ── Slide 5: Use Cases & Teams ────────────────────────────────────────
+  const slideUseCases = `
+    <div class="slide">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;">
+        <div>
+          <div class="label">04 · Use Cases & Adoption</div>
+          <div class="title-lg" style="margin-top:10px;">Who Uses This & Why</div>
+        </div>
+        <div class="logo">DOINg<span class="dot">.AI</span></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:24px;">
+        <div>
+          <div class="label" style="color:${MUTED};margin-bottom:14px;">Recommended Use Cases</div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            ${aiSafe.recommendedUseCases.slice(0, 4).map((uc, i) => `
+              <div style="display:flex;gap:14px;align-items:flex-start;border:1px solid #e5e7eb;padding:14px 16px;">
+                <div style="background:${BRAND};color:white;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:11pt;flex-shrink:0;">${i + 1}</div>
+                <div class="body-md" style="font-weight:500;">${escapeHtml(uc)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div class="card" style="border-top:4px solid ${INDIGO};">
+            <div class="label" style="margin-bottom:10px;color:${INDIGO};">IT Ownership</div>
+            <div class="body-md" style="font-weight:700;">${escapeHtml(server.teamIT || 'Unassigned')}</div>
+            <div class="body-sm" style="margin-top:4px;">Owner & maintainer</div>
+          </div>
+
+          <div class="card" style="border-top:4px solid #22c55e;">
+            <div class="label" style="margin-bottom:10px;color:#22c55e;">User Teams (${teamCount})</div>
+            ${teamCount > 0 ? `
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                ${(server.userTeams || []).map((t) => `<span class="badge" style="background:#22c55e22;color:#15803d;font-size:8pt;">${escapeHtml(t)}</span>`).join('')}
+              </div>
+            ` : `<div class="body-sm">No user teams yet.</div>`}
+          </div>
+
+          ${tagsCount > 0 ? `
+            <div class="card">
+              <div class="label" style="margin-bottom:8px;color:${MUTED};">Tags</div>
+              <div style="display:flex;flex-wrap:wrap;gap:5px;">
+                ${(server.tags || []).map((t) => `<span class="badge badge-tag" style="font-size:7.5pt;">${escapeHtml(t)}</span>`).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+
+      <div class="footer"><span>${escapeHtml(server.name)} · ID Card</span><span>5 / 7</span></div>
+    </div>
+  `;
+
+  // ── Slide 6: Visual Dashboard ─────────────────────────────────────────
+  const slideDashboard = `
+    <div class="slide">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+        <div>
+          <div class="label">05 · Visual Dashboard</div>
+          <div class="title-lg" style="margin-top:10px;">Metrics at a Glance</div>
+        </div>
+        <div class="logo">DOINg<span class="dot">.AI</span></div>
+      </div>
+
+      <!-- KPI row -->
+      <div class="grid-4" style="margin-bottom:22px;">
+        <div class="stat-kpi" style="border-top:4px solid ${BRAND};">
+          <div class="stat-num">${toolCount}</div>
+          <div class="stat-label">Tools exposed</div>
+        </div>
+        <div class="stat-kpi" style="border-top:4px solid ${INDIGO};">
+          <div class="stat-num" style="color:${INDIGO};">${teamCount}</div>
+          <div class="stat-label">User teams</div>
+        </div>
+        <div class="stat-kpi" style="border-top:4px solid #22c55e;">
+          <div class="stat-num" style="color:#22c55e;">${tagsCount}</div>
+          <div class="stat-label">Tags</div>
+        </div>
+        <div class="stat-kpi" style="border-top:4px solid ${deployBadge.color};">
+          <div class="stat-num" style="color:${deployBadge.color};font-size:24pt;line-height:1.3;">${deployBadge.label}</div>
+          <div class="stat-label">Deploy stage</div>
+        </div>
+      </div>
+
+      <!-- Charts row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+        <div class="card" style="display:flex;flex-direction:column;align-items:center;padding:20px;">
+          <div class="label" style="align-self:flex-start;margin-bottom:12px;">Maturity Score</div>
+          ${svgGauge(maturity)}
+          <div class="body-sm" style="text-align:center;margin-top:8px;max-width:200px;">
+            ${maturity >= 75 ? 'Production-ready: well documented, secured, and adopted.' : maturity >= 50 ? 'Healthy but room for improvement.' : 'Early stage — needs documentation, security or adoption work.'}
+          </div>
+        </div>
+
+        <div class="card" style="display:flex;align-items:center;gap:20px;padding:20px;">
+          <div>${svgDonut(donutData, 170, 24)}</div>
+          <div style="flex:1;">
+            <div class="label" style="margin-bottom:12px;">Maturity Breakdown</div>
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              ${donutData.map((seg) => `
+                <div style="display:flex;align-items:center;gap:8px;font-size:9pt;">
+                  <span style="display:inline-block;width:10px;height:10px;background:${seg.color};flex-shrink:0;"></span>
+                  <span style="flex:1;color:${TEXT};font-weight:600;">${escapeHtml(seg.label)}</span>
+                  <span style="color:${MUTED};font-weight:700;font-variant-numeric:tabular-nums;">${seg.value}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer"><span>${escapeHtml(server.name)} · ID Card</span><span>6 / 7</span></div>
+    </div>
+  `;
+
+  // ── Slide 7: Closing ──────────────────────────────────────────────────
+  const slideClosing = `
+    <div class="slide" style="background:linear-gradient(135deg,${INK} 0%,#1a1a2e 100%);color:white;padding:0;">
+      <div style="position:absolute;top:-80px;left:-80px;width:280px;height:280px;background:${BRAND};opacity:0.16;border-radius:50%;"></div>
+      <div style="position:absolute;bottom:-100px;right:-60px;width:300px;height:300px;background:${familyColor};opacity:0.18;border-radius:50%;"></div>
+
+      <div style="position:relative;padding:24mm;height:100%;display:flex;flex-direction:column;justify-content:space-between;">
+        <div class="logo" style="color:white;font-size:20pt;">DOINg<span class="dot">.AI</span></div>
+
+        <div style="text-align:center;">
+          <div style="font-size:8pt;letter-spacing:0.32em;text-transform:uppercase;color:${BRAND};font-weight:800;margin-bottom:18px;">End of ID Card</div>
+          <div style="font-size:42pt;font-weight:900;letter-spacing:-0.02em;line-height:1.1;color:white;text-transform:uppercase;">${escapeHtml(server.name)}</div>
+          <div style="height:3px;width:80px;background:${BRAND};margin:24px auto;"></div>
+          <div style="font-size:11pt;color:rgba(255,255,255,0.7);max-width:160mm;margin:0 auto;line-height:1.6;">
+            ${escapeHtml(aiSafe.valueProposition)}
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;font-size:8pt;letter-spacing:0.24em;text-transform:uppercase;color:rgba(255,255,255,0.55);font-weight:700;">
+          <div>
+            <div>Generated by DOINg.AI</div>
+            <div style="margin-top:4px;color:rgba(255,255,255,0.4);">AI Operations Platform</div>
+          </div>
+          <div style="text-align:right;">
+            <div>${today}</div>
+            <div style="margin-top:4px;color:rgba(255,255,255,0.4);">100% Local-First</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtml(server.name)} — MCP ID Card</title>
+  <style>${css}</style>
+</head>
+<body>
+  <div class="no-print">
+    <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+  ${slideCover}
+  ${slideExec}
+  ${slideTech}
+  ${slideTools}
+  ${slideUseCases}
+  ${slideDashboard}
+  ${slideClosing}
+</body>
+</html>`;
+};
+
+export const exportMcpIdCard = async (
+  server: import('../types').McpServer,
+  family: import('../types').McpFamily | null,
+  llmConfig: import('../types').LlmConfig
+): Promise<void> => {
+  // 1. Try to generate AI content (graceful fallback if LLM unavailable)
+  let aiContent: IdCardAiContent | null = null;
+  if (llmConfig?.provider) {
+    try {
+      const { runPrompt } = await import('./llmService');
+      const raw = await runPrompt(buildIdCardPrompt(server, family), llmConfig);
+      const cleaned = stripJsonFences(raw);
+      const match = cleaned.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        // Validate shape
+        aiContent = {
+          executiveSummary: String(parsed.executiveSummary || ''),
+          valueProposition: String(parsed.valueProposition || ''),
+          technicalHighlights: Array.isArray(parsed.technicalHighlights)
+            ? parsed.technicalHighlights.slice(0, 3).map((s: unknown) => String(s))
+            : [],
+          recommendedUseCases: Array.isArray(parsed.recommendedUseCases)
+            ? parsed.recommendedUseCases.slice(0, 4).map((s: unknown) => String(s))
+            : [],
+          targetAudience: String(parsed.targetAudience || ''),
+        };
+      }
+    } catch (e) {
+      console.warn('[ID Card] LLM enrichment failed, using fallback content:', e);
+    }
+  }
+
+  // 2. Build HTML
+  const html = buildIdCardHTML(server, family, aiContent);
+
+  // 3. Open print window
+  const win = window.open('', '_blank', 'width=1200,height=800');
+  if (!win) {
+    alert('Pop-up blocked. Please allow pop-ups for this site to export the ID Card.');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
 };

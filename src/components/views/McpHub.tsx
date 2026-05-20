@@ -32,6 +32,12 @@ import {
   Pin,
   PinOff,
   Upload,
+  SlidersHorizontal,
+  ArrowUpDown,
+  ChevronDown,
+  LayoutGrid,
+  List,
+  IdCard,
 } from 'lucide-react';
 import {
   AppState,
@@ -51,7 +57,7 @@ import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
 import { runPrompt } from '../../services/llmService';
-import { buildMcpReportHTML, exportMcpXlsx } from '../../services/exports';
+import { buildMcpReportHTML, exportMcpXlsx, exportMcpIdCard } from '../../services/exports';
 
 interface Props {
   state: AppState;
@@ -198,13 +204,47 @@ export const McpHubView: React.FC<Props> = ({ state, currentUser, update }) => {
   const [enriching, setEnriching] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [deployFilter, setDeployFilter] = useState<McpDeployStatus | 'all'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'declarative' | 'url'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'updated' | 'created' | 'tools'>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [previewServer, setPreviewServer] = useState<McpServer | null>(null);
   const isAdmin = currentUser.role === 'admin';
 
   const mcpFamilies: McpFamily[] = state.mcpFamilies || [];
 
+  // Extract unique categories from existing servers, sorted alphabetically.
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    (state.mcpServers || []).forEach((s) => {
+      if (s.category && s.category.trim()) set.add(s.category.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [state.mcpServers]);
+
+  // Count active filters (excluding search query) for the badge display.
+  const activeFilterCount =
+    (familyFilter !== null ? 1 : 0) +
+    (categoryFilter !== null ? 1 : 0) +
+    (deployFilter !== 'all' ? 1 : 0) +
+    (sourceFilter !== 'all' ? 1 : 0) +
+    (activeFilter !== 'all' ? 1 : 0);
+
+  const resetFilters = () => {
+    setFamilyFilter(null);
+    setCategoryFilter(null);
+    setDeployFilter('all');
+    setSourceFilter('all');
+    setActiveFilter('all');
+  };
+
   const servers = useMemo(() => {
     const lq = q.toLowerCase();
-    return (state.mcpServers || []).filter((s) => {
+    const filtered = (state.mcpServers || []).filter((s) => {
       const matchesQ =
         s.name.toLowerCase().includes(lq) ||
         (s.category || '').toLowerCase().includes(lq) ||
@@ -214,9 +254,38 @@ export const McpHubView: React.FC<Props> = ({ state, currentUser, update }) => {
         (s.userTeams || []).some((t) => t.toLowerCase().includes(lq)) ||
         s.tags.some((t) => t.toLowerCase().includes(lq));
       const matchesFamily = familyFilter === null || s.familyId === familyFilter;
-      return matchesQ && matchesFamily;
+      const matchesCategory = categoryFilter === null || s.category === categoryFilter;
+      const matchesDeploy = deployFilter === 'all' || s.deployStatus === deployFilter;
+      const matchesSource = sourceFilter === 'all' || s.source === sourceFilter;
+      const matchesActive =
+        activeFilter === 'all' ||
+        (activeFilter === 'active' && s.isActive) ||
+        (activeFilter === 'inactive' && !s.isActive);
+      return matchesQ && matchesFamily && matchesCategory && matchesDeploy && matchesSource && matchesActive;
     });
-  }, [state.mcpServers, q, familyFilter]);
+
+    // Sort
+    const sorted = [...filtered].sort((a, b) => {
+      let cmp = 0;
+      switch (sortBy) {
+        case 'name':
+          cmp = a.name.localeCompare(b.name);
+          break;
+        case 'created':
+          cmp = new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+          break;
+        case 'updated':
+          cmp = new Date(a.updatedAt || 0).getTime() - new Date(b.updatedAt || 0).getTime();
+          break;
+        case 'tools':
+          cmp = a.tools.length - b.tools.length;
+          break;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    return sorted;
+  }, [state.mcpServers, q, familyFilter, categoryFilter, deployFilter, sourceFilter, activeFilter, sortBy, sortDir]);
 
   const selected = (state.mcpServers || []).find((s) => s.id === selectedId) ?? null;
   const selectedFamily = selected?.familyId ? mcpFamilies.find((f) => f.id === selected.familyId) : null;
@@ -315,9 +384,31 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
               Families
             </Button>
           )}
+          {/* View mode toggle */}
+          <div className="flex border border-neutral-300 dark:border-ink-500">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-2.5 py-2 transition-colors ${
+                viewMode === 'list' ? 'bg-brand text-white' : 'text-muted hover:text-brand'
+              }`}
+              title="List view"
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`px-2.5 py-2 transition-colors ${
+                viewMode === 'grid' ? 'bg-brand text-white' : 'text-muted hover:text-brand'
+              }`}
+              title="Grid view"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
+      {viewMode === 'list' ? (
       <div className="flex gap-6 min-h-[70vh]">
         {/* LEFT PANEL */}
         <aside className="w-72 shrink-0 flex flex-col gap-3">
@@ -357,6 +448,150 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
               ))}
             </div>
           )}
+
+          {/* Filter / Sort / View toolbar */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] border transition-colors ${
+                showFilters || activeFilterCount > 0
+                  ? 'border-brand text-brand bg-brand/5'
+                  : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand hover:text-brand'
+              }`}
+              title="Toggle advanced filters"
+            >
+              <SlidersHorizontal className="w-3 h-3" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="ml-1 px-1 py-0 bg-brand text-white text-[9px] font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <div className="relative">
+              <select
+                value={`${sortBy}:${sortDir}`}
+                onChange={(e) => {
+                  const [sb, sd] = e.target.value.split(':') as [typeof sortBy, typeof sortDir];
+                  setSortBy(sb);
+                  setSortDir(sd);
+                }}
+                className="appearance-none pl-6 pr-6 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-500 bg-transparent text-muted hover:text-brand hover:border-brand cursor-pointer transition-colors"
+                title="Sort servers"
+              >
+                <option value="name:asc">Name A→Z</option>
+                <option value="name:desc">Name Z→A</option>
+                <option value="updated:desc">Recently updated</option>
+                <option value="updated:asc">Oldest updated</option>
+                <option value="created:desc">Newest first</option>
+                <option value="created:asc">Oldest first</option>
+                <option value="tools:desc">Most tools</option>
+                <option value="tools:asc">Fewest tools</option>
+              </select>
+              <ArrowUpDown className="w-3 h-3 absolute left-1.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+              <ChevronDown className="w-3 h-3 absolute right-1.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+            </div>
+          </div>
+
+          {/* Collapsible advanced filters panel */}
+          {showFilters && (
+            <div className="border border-neutral-200 dark:border-ink-600 surface p-3 space-y-3 animate-fade-in">
+              {/* Category */}
+              {availableCategories.length > 0 && (
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Category</p>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      onClick={() => setCategoryFilter(null)}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        categoryFilter === null ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      All
+                    </button>
+                    {availableCategories.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setCategoryFilter(categoryFilter === c ? null : c)}
+                        className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                          categoryFilter === c ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Deploy Status */}
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Deploy Status</p>
+                <div className="flex gap-1">
+                  {(['all', 'dev', 'uat', 'production'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setDeployFilter(s)}
+                      className={`flex-1 px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        deployFilter === s ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      {s === 'all' ? 'All' : s === 'production' ? 'Prod' : s.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Source */}
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Source</p>
+                <div className="flex gap-1">
+                  {(['all', 'declarative', 'url'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSourceFilter(s)}
+                      className={`flex-1 px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        sourceFilter === s ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      {s === 'all' ? 'All' : s === 'declarative' ? 'Decl.' : 'URL'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Active */}
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Status</p>
+                <div className="flex gap-1">
+                  {(['all', 'active', 'inactive'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setActiveFilter(s)}
+                      className={`flex-1 px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        activeFilter === s ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={resetFilters}
+                  className="w-full text-[9px] font-bold uppercase tracking-[0.14em] text-brand hover:underline pt-1"
+                >
+                  Clear all filters ({activeFilterCount})
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Results count */}
+          <p className="text-[9px] uppercase tracking-[0.14em] text-muted px-1">
+            {servers.length} {servers.length === 1 ? 'server' : 'servers'}
+            {(state.mcpServers || []).length !== servers.length && (
+              <span className="text-brand"> · filtered from {(state.mcpServers || []).length}</span>
+            )}
+          </p>
 
           {isAdmin && (
             <Button
@@ -483,6 +718,14 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
                       )}
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPreviewServer(selected)}
+                    title="Open detailed preview & export ID card"
+                  >
+                    <IdCard className="w-3 h-3 mr-1" /> ID Card
+                  </Button>
                   {isAdmin && (
                     <>
                       <Button variant="outline" size="sm" onClick={() => { setEditingServer(selected); setShowEditor(true); }}>
@@ -600,6 +843,244 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
           )}
         </main>
       </div>
+      ) : (
+        /* ==================== GRID VIEW ==================== */
+        <div className="min-h-[70vh] flex flex-col gap-4">
+          {/* Horizontal toolbar */}
+          <div className="flex flex-wrap items-center gap-3 p-4 border border-neutral-200 dark:border-ink-600 surface">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <Input
+                placeholder="Search MCP servers…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] border transition-colors ${
+                showFilters || activeFilterCount > 0
+                  ? 'border-brand text-brand bg-brand/5'
+                  : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand hover:text-brand'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="ml-1 px-1.5 py-0 bg-brand text-white text-[9px] font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <div className="relative">
+              <select
+                value={`${sortBy}:${sortDir}`}
+                onChange={(e) => {
+                  const [sb, sd] = e.target.value.split(':') as [typeof sortBy, typeof sortDir];
+                  setSortBy(sb);
+                  setSortDir(sd);
+                }}
+                className="appearance-none pl-8 pr-8 py-2 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-500 bg-transparent text-muted hover:text-brand hover:border-brand cursor-pointer transition-colors"
+              >
+                <option value="name:asc">Name A→Z</option>
+                <option value="name:desc">Name Z→A</option>
+                <option value="updated:desc">Recently updated</option>
+                <option value="updated:asc">Oldest updated</option>
+                <option value="created:desc">Newest first</option>
+                <option value="created:asc">Oldest first</option>
+                <option value="tools:desc">Most tools</option>
+                <option value="tools:asc">Fewest tools</option>
+              </select>
+              <ArrowUpDown className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
+            </div>
+            {/* Family chips */}
+            {mcpFamilies.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted">Family:</span>
+                <button
+                  onClick={() => setFamilyFilter(null)}
+                  className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                    familyFilter === null ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                  }`}
+                >
+                  All
+                </button>
+                {mcpFamilies.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setFamilyFilter(familyFilter === f.id ? null : f.id)}
+                    className={`flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                      familyFilter === f.id ? 'text-white border-transparent' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                    }`}
+                    style={familyFilter === f.id ? { backgroundColor: f.color, borderColor: f.color } : {}}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: f.color }} />
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex-1" />
+            <p className="text-[10px] uppercase tracking-[0.14em] text-muted">
+              {servers.length} {servers.length === 1 ? 'server' : 'servers'}
+              {(state.mcpServers || []).length !== servers.length && (
+                <span className="text-brand"> · filtered</span>
+              )}
+            </p>
+            {isAdmin && (
+              <Button onClick={() => { setEditingServer(null); setShowEditor(true); }} size="sm">
+                <Plus className="w-4 h-4 mr-1" /> Add MCP
+              </Button>
+            )}
+          </div>
+
+          {/* Collapsible advanced filters panel */}
+          {showFilters && (
+            <div className="border border-neutral-200 dark:border-ink-600 surface p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
+              {availableCategories.length > 0 && (
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Category</p>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      onClick={() => setCategoryFilter(null)}
+                      className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        categoryFilter === null ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      All
+                    </button>
+                    {availableCategories.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setCategoryFilter(categoryFilter === c ? null : c)}
+                        className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                          categoryFilter === c ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Deploy Status</p>
+                <div className="flex gap-1">
+                  {(['all', 'dev', 'uat', 'production'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setDeployFilter(s)}
+                      className={`flex-1 px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        deployFilter === s ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      {s === 'all' ? 'All' : s === 'production' ? 'Prod' : s.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Source</p>
+                <div className="flex gap-1">
+                  {(['all', 'declarative', 'url'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSourceFilter(s)}
+                      className={`flex-1 px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        sourceFilter === s ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      {s === 'all' ? 'All' : s === 'declarative' ? 'Decl.' : 'URL'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1.5">Status</p>
+                <div className="flex gap-1">
+                  {(['all', 'active', 'inactive'] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setActiveFilter(s)}
+                      className={`flex-1 px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                        activeFilter === s ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-brand'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {activeFilterCount > 0 && (
+                <div className="md:col-span-2 lg:col-span-4">
+                  <button
+                    onClick={resetFilters}
+                    className="text-[9px] font-bold uppercase tracking-[0.14em] text-brand hover:underline"
+                  >
+                    Clear all filters ({activeFilterCount})
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Grid of cards */}
+          {servers.length === 0 ? (
+            <div className="border border-dashed border-neutral-300 dark:border-ink-500 p-16 text-center text-muted">
+              <Plug className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm uppercase tracking-[0.16em]">
+                {q || activeFilterCount > 0 ? 'No results match the current filters' : 'No MCP servers yet'}
+              </p>
+              {isAdmin && !q && activeFilterCount === 0 && (
+                <button
+                  onClick={() => { setEditingServer(null); setShowEditor(true); }}
+                  className="text-[11px] text-brand font-bold mt-3 uppercase tracking-[0.14em]"
+                >
+                  + Add your first MCP
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {servers.map((srv) => {
+                const fam = srv.familyId ? mcpFamilies.find((f) => f.id === srv.familyId) : null;
+                return (
+                  <McpServerCard
+                    key={srv.id}
+                    server={srv}
+                    family={fam || null}
+                    onClick={() => setPreviewServer(srv)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Preview modal (used by grid view + ID Card button) */}
+      {previewServer && (
+        <McpPreviewModal
+          server={previewServer}
+          family={previewServer.familyId ? mcpFamilies.find((f) => f.id === previewServer.familyId) || null : null}
+          isAdmin={isAdmin}
+          llmConfig={state.llmConfig}
+          onClose={() => setPreviewServer(null)}
+          onEdit={() => {
+            setEditingServer(previewServer);
+            setShowEditor(true);
+            setPreviewServer(null);
+          }}
+          onDelete={() => {
+            if (window.confirm(`Delete "${previewServer.name}"?`)) {
+              deleteServer(previewServer.id);
+              setPreviewServer(null);
+            }
+          }}
+        />
+      )}
 
       {showEditor && (
         <McpEditorModal
@@ -642,6 +1123,254 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
           onSave={(practices) => update((s) => ({ ...s, mcpBestPractices: practices }))}
         />
       )}
+    </div>
+  );
+};
+
+/* === MCP Server Card (grid view) === */
+
+const McpServerCard: React.FC<{
+  server: McpServer;
+  family: McpFamily | null;
+  onClick: () => void;
+}> = ({ server, family, onClick }) => {
+  return (
+    <button
+      onClick={onClick}
+      className="group text-left border border-neutral-200 dark:border-ink-600 surface hover:border-brand hover:shadow-lg transition-all flex flex-col h-full"
+    >
+      {/* Family colour bar */}
+      <div className="h-1 w-full" style={{ backgroundColor: family?.color || '#d4d4d4' }} />
+      <div className="p-4 flex-1 flex flex-col gap-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-black uppercase tracking-tight truncate group-hover:text-brand transition-colors">{server.name}</p>
+            {server.category && (
+              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-brand mt-0.5">{server.category}</p>
+            )}
+          </div>
+          {server.deployStatus ? (
+            <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.1em] ${DEPLOY_STATUS_STYLE[server.deployStatus]} shrink-0`}>
+              {DEPLOY_STATUS_LABEL[server.deployStatus]}
+            </span>
+          ) : (
+            <span className={`w-2 h-2 ${server.isActive ? 'bg-emerald-500' : 'bg-neutral-400'} shrink-0 mt-1`} title={server.isActive ? 'Active' : 'Inactive'} />
+          )}
+        </div>
+        <p className="text-xs text-muted line-clamp-3 flex-1">{server.description || 'No description.'}</p>
+        {family && (
+          <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.14em]" style={{ color: family.color }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: family.color }} />
+            {family.name}
+          </p>
+        )}
+        <div className="flex items-center justify-between gap-2 pt-2 mt-auto border-t border-neutral-100 dark:border-ink-700">
+          <span className="text-[9px] font-mono text-muted">
+            {server.tools.length} {server.tools.length === 1 ? 'tool' : 'tools'}
+          </span>
+          {server.tags && server.tags.length > 0 && (
+            <div className="flex gap-1 flex-wrap items-center">
+              {server.tags.slice(0, 2).map((t) => (
+                <span key={t} className="text-[8px] font-bold uppercase tracking-[0.1em] text-muted bg-neutral-100 dark:bg-ink-700 px-1 py-0.5">{t}</span>
+              ))}
+              {server.tags.length > 2 && (
+                <span className="text-[8px] text-muted">+{server.tags.length - 2}</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+};
+
+/* === MCP Preview Modal (read-only detailed view) === */
+
+const McpPreviewModal: React.FC<{
+  server: McpServer;
+  family: McpFamily | null;
+  isAdmin: boolean;
+  llmConfig: LlmConfig;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}> = ({ server, family, isAdmin, llmConfig, onClose, onEdit, onDelete }) => {
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const handleIdCard = async () => {
+    setGeneratingPdf(true);
+    try {
+      await exportMcpIdCard(server, family, llmConfig);
+    } catch (e) {
+      console.error('ID Card export failed', e);
+      alert('Failed to generate ID Card. Check the console for details.');
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-3xl max-h-[90vh] flex flex-col animate-slide-up">
+        {family && <div className="h-1 w-full shrink-0" style={{ backgroundColor: family.color }} />}
+
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-start justify-between gap-4 shrink-0">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <Plug className="w-5 h-5 text-brand shrink-0" />
+              <h2 className="text-xl font-black uppercase tracking-tight">{server.name}</h2>
+              {server.deployStatus ? (
+                <span className={`px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${DEPLOY_STATUS_STYLE[server.deployStatus]}`}>
+                  {DEPLOY_STATUS_LABEL[server.deployStatus]}
+                </span>
+              ) : (
+                <span className={`w-2.5 h-2.5 shrink-0 ${server.isActive ? 'bg-emerald-500' : 'bg-neutral-400'}`} />
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap text-[9px] font-bold uppercase tracking-[0.14em]">
+              {server.category && <span className="text-brand">{server.category}</span>}
+              {family && (
+                <span className="flex items-center gap-1" style={{ color: family.color }}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: family.color }} />
+                  {family.name}
+                </span>
+              )}
+              <span className="text-muted">· {server.source === 'declarative' ? 'Declarative' : 'URL/Discovery'}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          <div>
+            <p className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed">{server.description || 'No description.'}</p>
+            {server.enrichedDescription && (
+              <div className="mt-3 p-3 border-l-2 border-brand bg-brand/5">
+                <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-brand mb-1">AI Enriched</p>
+                <p className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed">{server.enrichedDescription}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border border-neutral-200 dark:border-ink-600 p-4">
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand mb-2">Context & Scope</p>
+              <MetaRow icon={<Settings2 className="w-3 h-3" />} label="Scope" value={server.scope} />
+              <MetaRow icon={<Database className="w-3 h-3" />} label="Origin data" value={server.originData} />
+              <MetaRow icon={<Layers className="w-3 h-3" />} label="Data scope" value={server.dataScope} />
+              <MetaRow icon={<Database className="w-3 h-3" />} label="Data sources" value={server.dataSourceUsed} />
+              <MetaRow icon={<Sparkles className="w-3 h-3" />} label="Use case" value={server.useCase} />
+            </div>
+            <div className="border border-neutral-200 dark:border-ink-600 p-4">
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-brand mb-2">Teams & Connection</p>
+              <MetaRow icon={<Shield className="w-3 h-3" />} label="IT team" value={server.teamIT} />
+              {(server.userTeams || []).length > 0 && (
+                <div className="flex items-start gap-2.5 py-2 border-b border-neutral-100 dark:border-ink-700 last:border-0">
+                  <Users className="w-3 h-3 text-muted mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">User teams</p>
+                    <div className="flex flex-wrap gap-1">
+                      {(server.userTeams || []).map((t) => (
+                        <span key={t} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] bg-neutral-100 dark:bg-ink-700 text-muted">{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {server.url && (
+                <div className="flex items-start gap-2.5 py-2 border-b border-neutral-100 dark:border-ink-700 last:border-0">
+                  <Link className="w-3 h-3 text-muted mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-0.5">URL</p>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono text-muted truncate">{server.url}</span>
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(server.url!); setCopiedUrl(true); setTimeout(() => setCopiedUrl(false), 1500); }}
+                        className="text-muted hover:text-brand transition-colors shrink-0"
+                      >
+                        {copiedUrl ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2 py-2">
+                <Shield className="w-3 h-3 text-muted shrink-0" />
+                {server.token ? (
+                  <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-emerald-600 dark:text-emerald-400">Token configured ✓</span>
+                ) : (
+                  <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-muted">No token</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {(server.tags || []).length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {server.tags.map((t) => (
+                <span key={t} className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] bg-neutral-100 dark:bg-ink-700 text-muted">{t}</span>
+              ))}
+            </div>
+          )}
+
+          <div>
+            <p className="label-xs mb-3">Tools ({server.tools.length})</p>
+            {server.tools.length === 0 ? (
+              <p className="text-xs text-muted">No tools documented.</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {server.tools.map((tool, i) => (
+                  <div key={i} className="border border-neutral-200 dark:border-ink-600 p-3 surface-flat">
+                    <p className="text-[11px] font-bold uppercase tracking-tight font-mono text-brand">{tool.name}</p>
+                    <p className="text-xs text-muted mt-1">{tool.description}</p>
+                    {tool.enrichedDescription && (
+                      <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1.5 italic">{tool.enrichedDescription}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-between gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleIdCard}
+            disabled={generatingPdf || !llmConfig?.provider}
+            title={!llmConfig?.provider ? 'Configure a local LLM first' : 'Export a slide-deck ID card as PDF'}
+          >
+            {generatingPdf ? (
+              <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> Generating…</>
+            ) : (
+              <><IdCard className="w-3.5 h-3.5 mr-1.5" /> Export ID Card</>
+            )}
+          </Button>
+          <div className="flex gap-2">
+            {isAdmin && (
+              <>
+                <Button variant="outline" size="sm" onClick={onEdit}>
+                  <Edit2 className="w-3 h-3 mr-1" /> Edit
+                </Button>
+                <Button variant="danger" size="sm" onClick={onDelete}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </>
+            )}
+            <Button size="sm" onClick={onClose}>Close</Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1126,8 +1855,11 @@ const McpFamilyManagerModal: React.FC<{
   families: McpFamily[];
   onClose: () => void;
   onSave: (families: McpFamily[]) => void;
-}> = ({ families: initial, onClose, onSave }) => {
-  const [families, setFamilies] = useState<McpFamily[]>(initial);
+}> = ({ families, onClose, onSave }) => {
+  // Auto-save pattern: every mutation persists immediately via onSave().
+  // No local buffer of the families array → impossible to "lose" data by
+  // closing the modal or pressing Escape. The local state only holds the
+  // in-progress form fields (name/description/color) for the currently-edited entry.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -1155,6 +1887,7 @@ const McpFamilyManagerModal: React.FC<{
 
   const saveEntry = () => {
     if (!name.trim()) return;
+    let next: McpFamily[];
     if (editingId === '__new__') {
       const nf: McpFamily = {
         id: generateId(),
@@ -1163,16 +1896,22 @@ const McpFamilyManagerModal: React.FC<{
         color,
         createdAt: new Date().toISOString(),
       };
-      setFamilies((prev) => [...prev, nf]);
+      next = [...families, nf];
     } else {
-      setFamilies((prev) =>
-        prev.map((f) => f.id === editingId ? { ...f, name: name.trim(), description: description.trim() || undefined, color } : f)
+      next = families.map((f) =>
+        f.id === editingId
+          ? { ...f, name: name.trim(), description: description.trim() || undefined, color }
+          : f
       );
     }
+    onSave(next);
     setEditingId(null);
   };
 
-  const deleteFamily = (id: string) => setFamilies((prev) => prev.filter((f) => f.id !== id));
+  const deleteFamily = (id: string) => {
+    if (!window.confirm('Delete this family? Servers assigned to it will lose the link.')) return;
+    onSave(families.filter((f) => f.id !== id));
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1187,6 +1926,12 @@ const McpFamilyManagerModal: React.FC<{
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {/* Auto-save notice */}
+          <p className="text-[10px] text-muted uppercase tracking-[0.16em] flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+            Changes are saved automatically
+          </p>
+
           {/* Family list */}
           <div className="space-y-2">
             {families.length === 0 && (
@@ -1254,8 +1999,7 @@ const McpFamilyManagerModal: React.FC<{
         </div>
 
         <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end gap-2 shrink-0">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => { onSave(families); onClose(); }}>Save families</Button>
+          <Button onClick={onClose}>Done</Button>
         </div>
       </div>
     </div>
