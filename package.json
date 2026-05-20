@@ -11,10 +11,10 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.563.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "xlsx": "^0.18.5"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

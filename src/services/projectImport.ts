@@ -2,7 +2,7 @@
  * AI-assisted bulk project import from spreadsheet files.
  *
  * Flow:
- *  1. parseSpreadsheet(file) reads xlsx/csv via SheetJS into a sheet preview
+ *  1. parseSpreadsheet(file) reads xlsx/csv via ExcelJS into a sheet preview
  *     (headers + rows as plain objects).
  *  2. extractProjectsFromSheet(...) calls the local LLM with the sheet contents
  *     and asks it to (a) detect whether each row is a project or whether rows
@@ -10,7 +10,7 @@
  *  3. The UI lets the user toggle / edit drafts before bulk-creating them with
  *     botCreated = true.
  */
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { LlmConfig, Project, ProjectStatus, InnovationStatus, DevStatus, ProjectRole } from '../types';
 import { runPrompt } from './llmService';
 import { generateId } from './storage';
@@ -47,22 +47,86 @@ export interface ExtractionResult {
 
 const MAX_PREVIEW_ROWS = 200;
 
+/** Parse a CSV text into a SheetPreview (no third-party dependency needed). */
+function parseCsv(text: string, fileName: string): SheetPreview {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
+  if (lines.length === 0) throw new Error('Empty CSV file.');
+
+  const parseRow = (line: string): string[] => {
+    const result: string[] = [];
+    let inQuotes = false;
+    let current = '';
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"') {
+        if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      } else if (line[i] === ',' && !inQuotes) {
+        result.push(current); current = '';
+      } else {
+        current += line[i];
+      }
+    }
+    result.push(current);
+    return result;
+  };
+
+  const headers = parseRow(lines[0]);
+  const rows = lines.slice(1).map((line) => {
+    const values = parseRow(line);
+    const obj: Record<string, unknown> = {};
+    headers.forEach((h, i) => { obj[h] = values[i] ?? ''; });
+    return obj;
+  });
+
+  return {
+    sheetName: fileName.replace(/\.csv$/i, ''),
+    headers,
+    rows: rows.slice(0, MAX_PREVIEW_ROWS),
+    totalRowCount: rows.length,
+  };
+}
+
 export const parseSpreadsheet = async (file: File): Promise<SheetPreview> => {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) throw new Error('No sheet found in workbook.');
-  const sheet = wb.Sheets[sheetName];
-  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-    defval: '',
-    raw: false, // strings — dates already formatted thanks to cellDates
+
+  // ── CSV: parse natively without any library ──────────────────────────────
+  if (file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv') {
+    const text = new TextDecoder().decode(buf);
+    return parseCsv(text, file.name);
+  }
+
+  // ── XLSX / XLS: use ExcelJS ──────────────────────────────────────────────
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buf);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) throw new Error('No sheet found in workbook.');
+
+  const rows: Record<string, unknown>[] = [];
+  let headers: string[] = [];
+
+  worksheet.eachRow((row, rowNumber) => {
+    // row.values is 1-indexed; slice(1) drops the empty [0]
+    const values = (row.values as ExcelJS.CellValue[]).slice(1);
+    if (rowNumber === 1) {
+      headers = values.map((v) => String(v ?? ''));
+    } else {
+      const obj: Record<string, unknown> = {};
+      values.forEach((val, i) => {
+        const key = headers[i] ?? `col${i + 1}`;
+        // Format dates as ISO strings; everything else as string
+        obj[key] = val instanceof Date
+          ? val.toISOString().slice(0, 10)
+          : String(val ?? '');
+      });
+      rows.push(obj);
+    }
   });
-  const headers = json.length > 0 ? Object.keys(json[0]) : [];
+
   return {
-    sheetName,
+    sheetName: worksheet.name,
     headers,
-    rows: json.slice(0, MAX_PREVIEW_ROWS),
-    totalRowCount: json.length,
+    rows: rows.slice(0, MAX_PREVIEW_ROWS),
+    totalRowCount: rows.length,
   };
 };
 
