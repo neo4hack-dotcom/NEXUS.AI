@@ -3,3 +3,5 @@ uvicorn[standard]>=0.32.0
 # MCP SDK for /api/mcp/test (browser cannot speak the MCP protocol directly,
 # so the backend proxies discovery)
 mcp>=1.2.0
+# Server-Sent Events for real-time push to connected clients (replaces polling)
+sse-starlette>=2.0.0

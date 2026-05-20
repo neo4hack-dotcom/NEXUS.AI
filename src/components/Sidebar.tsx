@@ -20,6 +20,7 @@ import {
   BookOpen,
   CheckSquare,
   Plug,
+  Bot,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 
@@ -38,7 +39,8 @@ export type TabId =
   | 'settings'
   | 'guide'
   | 'todos'
-  | 'mcp';
+  | 'mcp'
+  | 'agents';
 
 interface Props {
   activeTab: TabId;
@@ -87,6 +89,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'repos', label: 'Code Repositories', icon: GitBranch },
       { id: 'hackathons', label: 'Hackathons', icon: Zap },
       { id: 'mcp', label: 'MCP Hub', icon: Plug },
+      { id: 'agents', label: 'AI Agents', icon: Bot },
     ],
   },
   {

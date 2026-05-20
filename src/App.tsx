@@ -9,6 +9,10 @@ import {
   stopPolling,
   generateId,
   getFilteredState,
+  hasPendingSave,
+  flushPendingSave,
+  startSSE,
+  stopSSE,
 } from './services/storage';
 import { Sidebar, TabId } from './components/Sidebar';
 import { Login } from './components/Login';
@@ -32,6 +36,7 @@ import { UserGuide } from './components/views/UserGuide';
 import { OnboardingModal } from './components/OnboardingModal';
 import { SmartTodoView } from './components/views/SmartTodo';
 import { McpHubView } from './components/views/McpHub';
+import { Agents } from './components/views/Agents';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -162,25 +167,42 @@ const App: React.FC = () => {
       applyThemeDom(next.theme);
     });
 
-    // Conflict resolution: prefer server data.
-    // Use functional setAppState so we always read the live currentUserId / theme
-    // rather than the stale `local` snapshot captured at initial load.
-    // We do NOT call saveState() here — the useEffect that watches appState will
-    // handle the persist, and an extra saveState call could trigger another 409 loop.
+    // Conflict resolution: a 409 means another writer beat us to the punch.
+    // CRITICAL: do NOT blindly overwrite local state with server state — that
+    // would silently destroy whatever the user just typed. Instead, preserve
+    // local state and notify; the next save attempt will re-try with the new
+    // base version. If we have NO pending local changes, accept the server data
+    // (we are simply out of date).
     const onConflict = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail?.serverData) {
-        setAppState((curr): AppState => ({
-          ...detail.serverData,
-          currentUserId: curr?.currentUserId ?? null,
-          theme: curr?.theme ?? 'dark',
-        }));
+      if (!detail?.serverData) return;
+      if (hasPendingSave()) {
+        console.warn('[DOInG] Sync conflict — local changes preserved; will retry on next save.');
+        // Optional: surface a soft toast — we just log for now.
+        return;
       }
+      setAppState((curr): AppState => ({
+        ...detail.serverData,
+        currentUserId: curr?.currentUserId ?? null,
+        theme: curr?.theme ?? 'dark',
+      }));
     };
     window.addEventListener('nexus_conflict', onConflict);
 
-    // Real-time collaboration: poll server for remote changes every 5 s
-    startPolling(async () => {
+    // Real-time collaboration.
+    // Primary channel: SSE (Server-Sent Events) — the backend pushes a
+    // 'data_updated' event the instant any client writes. Latency <100ms.
+    // Safety net: polling every 30s — covers the case where SSE proxies drop
+    // the connection silently and the EventSource auto-reconnect hasn't kicked in.
+    // CRITICAL (both channels): skip refresh if we have unflushed local changes —
+    // otherwise we'd overwrite local state with a stale server snapshot, silently
+    // losing whatever the user just created (the classic family-disappears bug).
+    const refreshFromServer = async (origin: string) => {
+      if (hasPendingSave()) {
+        // Local changes haven't reached the server yet. Skip this refresh —
+        // the saveState debounce will flush and the next event/poll will see them.
+        return;
+      }
       const serverState = await fetchFromServer();
       if (serverState) {
         setAppState((curr) =>
@@ -191,12 +213,17 @@ const App: React.FC = () => {
         setIsOnline(true);
         setSyncFlash(true);
         setTimeout(() => setSyncFlash(false), 2500);
+        if (origin === 'sse') console.debug('[DOInG] State refreshed via SSE push');
       }
-    });
+    };
+
+    startSSE(() => { void refreshFromServer('sse'); });
+    startPolling(() => { void refreshFromServer('poll'); }, 30000);
 
     return () => {
       unsub();
       stopPolling();
+      stopSSE();
       window.removeEventListener('nexus_conflict', onConflict);
     };
   }, []);
@@ -332,6 +359,8 @@ const App: React.FC = () => {
         return <UserGuide currentUser={currentUser} />;
       case 'mcp':
         return <McpHubView state={appState} currentUser={currentUser} update={update} />;
+      case 'agents':
+        return <Agents state={appState} currentUser={currentUser} update={update} />;
       default:
         return null;
     }
