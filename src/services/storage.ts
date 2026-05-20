@@ -23,6 +23,8 @@ import {
   McpServer,
   McpFamily,
   McpBestPractice,
+  Agent,
+  AgentFamily,
 } from '../types';
 
 const STORAGE_KEY = 'nexus_ai_data_v1';
@@ -38,6 +40,65 @@ let _saveQueue: Promise<void> = Promise.resolve();
 // Debounces the server POST: localStorage updates are instant, network only after idle.
 let _postTimer: ReturnType<typeof setTimeout> | null = null;
 let _pendingPayload: Record<string, unknown> | null = null;
+// Tracks whether a POST is currently in-flight (between fetch() and response).
+// Used by callers to know if local state has unflushed changes.
+let _postInFlight = 0;
+
+/**
+ * Returns true if there are unflushed local changes:
+ * - A debounced POST is still waiting, OR
+ * - A POST is in-flight (sent but no response yet).
+ * Used by App.tsx to skip polling refresh and conflict overwrites while local
+ * state is ahead of the server — prevents the classic "create A → poll → server
+ * returns state without A → local A is wiped" race condition.
+ */
+export const hasPendingSave = (): boolean =>
+  _pendingPayload !== null || _postTimer !== null || _postInFlight > 0;
+
+/**
+ * Forces the debounced POST to fire immediately and waits for it to complete.
+ * Call this before any operation that needs to see fully-synced server state
+ * (e.g. a deliberate refresh, leaving the page).
+ */
+export const flushPendingSave = async (): Promise<void> => {
+  if (_postTimer) {
+    clearTimeout(_postTimer);
+    _postTimer = null;
+    // Trigger the queued POST synchronously by running the same logic now.
+    const payload = _pendingPayload;
+    _pendingPayload = null;
+    if (payload) {
+      _saveQueue = _saveQueue.then(async () => {
+        _postInFlight++;
+        try {
+          const response = await fetch(API_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Base-Version': String(_serverVersion),
+            },
+            body: JSON.stringify(payload),
+          });
+          if (response.ok) {
+            const result = await response.json();
+            _serverVersion = result.timestamp ?? _serverVersion;
+          } else if (response.status === 409) {
+            const conflictData = await response.json();
+            window.dispatchEvent(
+              new CustomEvent('nexus_conflict', { detail: { serverData: conflictData.serverData } })
+            );
+          }
+        } catch (err) {
+          console.warn('[DOINg] Flush failed', err);
+        } finally {
+          _postInFlight--;
+        }
+      });
+    }
+  }
+  // Wait for the queue to drain (covers both the just-triggered POST and any in-flight ones).
+  await _saveQueue;
+};
 
 const DEFAULT_LLM_CONFIG: LlmConfig = {
   provider: 'ollama',
@@ -94,6 +155,8 @@ export const getDefaultState = (): AppState => {
     mcpServers: [],
     mcpFamilies: [],
     mcpBestPractices: [],
+    agents: [],
+    agentFamilies: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -142,6 +205,17 @@ export const sanitizeAppState = (data: any): AppState => {
       tags: arr(b.tags),
       appliesTo: arr(b.appliesTo),
     })),
+    agents: arr<Agent>(data.agents).map((a) => ({
+      ...a,
+      tags: arr(a.tags),
+      tools: arr(a.tools),
+      mcpServerIds: arr(a.mcpServerIds),
+      knowledgeBases: arr(a.knowledgeBases),
+      userTeams: arr(a.userTeams),
+      releases: arr(a.releases),
+      evaluations: arr(a.evaluations),
+    })),
+    agentFamilies: arr<AgentFamily>(data.agentFamilies),
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,
@@ -252,11 +326,13 @@ export const saveState = (state: AppState): void => {
 
     if (_postTimer) clearTimeout(_postTimer);
     _postTimer = setTimeout(() => {
+      _postTimer = null;
       const payload = _pendingPayload;
       _pendingPayload = null;
       _saveQueue = _saveQueue.then(async () => {
         if (!payload) return;
         const baseVersion = _serverVersion;
+        _postInFlight++;
         try {
           const response = await fetch(API_URL, {
             method: 'POST',
@@ -277,6 +353,8 @@ export const saveState = (state: AppState): void => {
           }
         } catch (err) {
           console.warn('[DOINg] Server save failed', err);
+        } finally {
+          _postInFlight--;
         }
       });
     }, 400);
@@ -322,6 +400,58 @@ export const subscribeToStoreUpdates = (callback: () => void) => {
   };
   window.addEventListener('storage', handler);
   return () => window.removeEventListener('storage', handler);
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// SSE — Real-time push from the FastAPI backend.
+// Replaces polling for the common case. Polling is kept as a safety net so
+// users still get refreshes if SSE proxies/middleboxes drop the connection.
+// ──────────────────────────────────────────────────────────────────────────
+let _sse: EventSource | null = null;
+
+export const startSSE = (onUpdate: () => void): void => {
+  if (_sse) return;
+  if (typeof EventSource === 'undefined') {
+    console.warn('[DOInG] EventSource not supported — relying on polling only');
+    return;
+  }
+  try {
+    _sse = new EventSource('/api/events');
+
+    // Initial handshake: server tells us its current version on connect.
+    _sse.addEventListener('hello', (e) => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data);
+        if (data.lastUpdated > _serverVersion) onUpdate();
+      } catch { /* ignore malformed payload */ }
+    });
+
+    // Broadcast event fired every time the backend writes new data.
+    _sse.addEventListener('data_updated', (e) => {
+      try {
+        const data = JSON.parse((e as MessageEvent).data);
+        if (data.lastUpdated > _serverVersion) onUpdate();
+      } catch { /* ignore malformed payload */ }
+    });
+
+    // Heartbeat — ignored, just keeps the connection alive through proxies.
+    _sse.addEventListener('ping', () => { /* no-op */ });
+
+    _sse.onerror = () => {
+      // EventSource auto-reconnects with exponential backoff. We don't need to
+      // do anything here — the polling safety net handles the gap.
+    };
+  } catch (e) {
+    console.warn('[DOInG] SSE startup failed, falling back to polling', e);
+    _sse = null;
+  }
+};
+
+export const stopSSE = (): void => {
+  if (_sse) {
+    _sse.close();
+    _sse = null;
+  }
 };
 
 export const clearState = () => {

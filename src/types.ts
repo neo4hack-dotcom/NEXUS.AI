@@ -456,6 +456,103 @@ export interface McpServer {
   updatedAt: string;
 }
 
+/* === AI Agents — internal agent tracking (development → production) ===
+ *
+ * Designed to mirror the MCP Hub pattern (family grouping, deploy status,
+ * tools, teams) but adds AI-specific fields: model, framework, system prompt,
+ * version history, and operational metrics.
+ */
+
+export type AgentStatus = 'idea' | 'design' | 'dev' | 'testing' | 'production' | 'deprecated';
+export type AgentFramework = 'langchain' | 'llamaindex' | 'crewai' | 'autogen' | 'custom' | 'n8n' | 'other';
+export type AgentToolSource = 'native' | 'mcp' | 'custom';
+
+export interface AgentTool {
+  name: string;
+  description: string;
+  source?: AgentToolSource;
+  mcpServerId?: string;   // optional link to an MCP server (when source = 'mcp')
+}
+
+export interface AgentRelease {
+  version: string;          // ex: "1.0.0"
+  date: string;             // ISO
+  notes: string;            // changelog
+  authorUserId?: string;
+}
+
+export interface AgentEvaluation {
+  id: string;
+  date: string;             // ISO
+  testSetName: string;      // ex: "Q4 regression set"
+  score: number;            // 0-100
+  notes?: string;
+  authorUserId?: string;
+}
+
+export interface AgentMetrics {
+  avgResponseTimeMs?: number;
+  successRatePct?: number;
+  monthlyInvocations?: number;
+  costPerMonthEur?: number;
+  userSatisfaction?: number;  // 0-5
+  lastEvaluatedAt?: string;   // ISO
+}
+
+export interface AgentFamily {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;            // hex, used everywhere for visual grouping
+  createdAt: string;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  enrichedDescription?: string;
+
+  // Identity & classification
+  category?: string;        // ex: "Customer Support", "Data Analysis", "DevOps"
+  familyId?: string;
+  tags: string[];
+
+  // Lifecycle
+  status: AgentStatus;
+  isActive: boolean;
+  version: string;          // current version, ex: "1.0.0"
+
+  // Technical stack
+  llmProvider?: string;     // OpenAI, Anthropic, Ollama, Mistral, …
+  llmModel?: string;        // ex: "gpt-4o", "claude-haiku-4-5", "llama3"
+  framework?: AgentFramework;
+  systemPrompt?: string;
+  contextWindow?: number;   // tokens
+
+  // Capabilities
+  tools: AgentTool[];
+  mcpServerIds: string[];   // MCP servers this agent depends on
+  knowledgeBases: string[]; // RAG sources (free-text)
+
+  // Ownership & adoption
+  ownerUserId?: string;
+  teamIT?: string;
+  userTeams: string[];
+
+  // Operations
+  metrics?: AgentMetrics;
+  releases: AgentRelease[];
+  evaluations: AgentEvaluation[];
+
+  // Documentation
+  repoUrl?: string;         // link to source repo (if internal)
+  docsUrl?: string;         // link to external documentation
+
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -474,6 +571,8 @@ export interface AppState {
   mcpServers: McpServer[];
   mcpFamilies: McpFamily[];
   mcpBestPractices: McpBestPractice[];
+  agents: Agent[];
+  agentFamilies: AgentFamily[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

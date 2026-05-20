@@ -12,16 +12,18 @@ Run:  python3 server.py
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional, Set
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -110,6 +112,27 @@ def _write_db(payload: Dict[str, Any]) -> None:
     tmp.replace(DB_FILE)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# SSE — Server-Sent Events for real-time push to connected clients.
+# Replaces the previous polling-based sync. Each connected client gets its own
+# asyncio.Queue; a successful POST broadcasts an event into every queue.
+# ────────────────────────────────────────────────────────────────────────────
+_sse_clients: Set[asyncio.Queue] = set()
+_sse_lock = asyncio.Lock()
+
+
+async def _broadcast_update(event_type: str, payload: Dict[str, Any]) -> None:
+    """Push an event to every connected SSE client (best-effort, drops dead queues)."""
+    async with _sse_lock:
+        dead = set()
+        for q in _sse_clients:
+            try:
+                q.put_nowait({"type": event_type, "data": payload})
+            except asyncio.QueueFull:
+                dead.add(q)
+        _sse_clients.difference_update(dead)
+
+
 @app.get("/api/health")
 async def health() -> Dict[str, Any]:
     return {"ok": True, "db": str(DB_FILE), "ts": int(time.time() * 1000)}
@@ -146,6 +169,12 @@ async def save_data(
     new_data["lastUpdated"] = int(time.time() * 1000)
     _write_db(new_data)
     print(f"[NEXUS] Saved at {time.strftime('%H:%M:%S')} ({len(json.dumps(new_data))} bytes)")
+
+    # Notify every SSE-connected client that fresh data is available.
+    # We send only the new timestamp — clients then call GET /api/data to fetch
+    # the full payload (keeps the SSE channel lightweight).
+    await _broadcast_update("data_updated", {"lastUpdated": new_data["lastUpdated"]})
+
     return JSONResponse({"ok": True, "timestamp": new_data["lastUpdated"]})
 
 
@@ -153,6 +182,48 @@ async def save_data(
 async def get_version() -> Dict[str, Any]:
     data = _read_db()
     return {"lastUpdated": data.get("lastUpdated", 0)}
+
+
+@app.get("/api/events")
+async def sse_events(request: Request) -> EventSourceResponse:
+    """
+    Server-Sent Events stream. Pushes a 'data_updated' event each time
+    POST /api/data succeeds, so connected clients can refresh instantly
+    instead of polling. A 'ping' is emitted every 25s as a keepalive
+    (proxies often drop idle SSE connections after 30-60s).
+    """
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+
+    async with _sse_lock:
+        _sse_clients.add(queue)
+
+    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
+        try:
+            # Initial event: tell the client the current server version so it
+            # can immediately decide whether it's out of date.
+            current = _read_db()
+            yield {
+                "event": "hello",
+                "data": json.dumps({"lastUpdated": current.get("lastUpdated", 0)}),
+            }
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield {
+                        "event": event.get("type", "message"),
+                        "data": json.dumps(event.get("data", {})),
+                    }
+                except asyncio.TimeoutError:
+                    # Heartbeat — keeps the connection alive through proxies.
+                    yield {"event": "ping", "data": str(int(time.time() * 1000))}
+        finally:
+            async with _sse_lock:
+                _sse_clients.discard(queue)
+
+    return EventSourceResponse(event_generator())
 
 
 @app.get("/api/config/db-path")

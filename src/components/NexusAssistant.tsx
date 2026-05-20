@@ -16,6 +16,11 @@ const buildContext = (state: AppState): string => {
   const hackathons = state.hackathons || [];
   const wgs = state.workingGroups || [];
   const checkIns = state.weeklyCheckIns || [];
+  const mcpServers = state.mcpServers || [];
+  const mcpFamilies = state.mcpFamilies || [];
+  const mcpBestPractices = state.mcpBestPractices || [];
+  const agents = state.agents || [];
+  const agentFamilies = state.agentFamilies || [];
 
   const now = Date.now();
 
@@ -83,8 +88,71 @@ const buildContext = (state: AppState): string => {
     })
     .filter(Boolean);
 
+  // ── MCP catalog ──────────────────────────────────────────────────────
+  const familyMap = new Map(mcpFamilies.map((f) => [f.id, f.name]));
+  const mcpServerLines = mcpServers.map((s) => {
+    const fam = s.familyId ? familyMap.get(s.familyId) || '' : '';
+    const toolList = s.tools.length > 0
+      ? s.tools.slice(0, 8).map((t) => t.name).join(', ') + (s.tools.length > 8 ? `, +${s.tools.length - 8} more` : '')
+      : 'no tools';
+    return [
+      `MCP: ${s.name}`,
+      `  Category: ${s.category || '—'} | Family: ${fam || '—'} | Deploy: ${s.deployStatus || (s.isActive ? 'active' : 'inactive')}`,
+      `  Source: ${s.source}${s.url ? ' | URL: ' + s.url : ''}${s.token ? ' | Auth: configured' : ''}`,
+      s.scope ? `  Scope: ${s.scope}` : '',
+      s.useCase ? `  Use case: ${s.useCase.slice(0, 200)}` : '',
+      s.teamIT ? `  IT owner: ${s.teamIT}` : '',
+      (s.userTeams || []).length > 0 ? `  User teams: ${(s.userTeams || []).join(', ')}` : '',
+      (s.tags || []).length > 0 ? `  Tags: ${s.tags.join(', ')}` : '',
+      `  Tools (${s.tools.length}): ${toolList}`,
+      s.description ? `  Description: ${s.description.slice(0, 250)}` : '',
+    ].filter(Boolean).join('\n');
+  });
+
+  // Build a fast keyword index over MCP tools so the LLM can answer
+  // "which MCP exposes a tool for X?" without scanning every server's prose.
+  const toolIndex: string[] = [];
+  mcpServers.forEach((s) => {
+    s.tools.forEach((t) => {
+      toolIndex.push(`  - ${t.name} [${s.name}]: ${(t.description || t.enrichedDescription || '').slice(0, 120)}`);
+    });
+  });
+
+  const familyLines = mcpFamilies.map((f) => {
+    const memberCount = mcpServers.filter((s) => s.familyId === f.id).length;
+    return `Family: ${f.name} (${memberCount} server${memberCount === 1 ? '' : 's'})${f.description ? ' — ' + f.description : ''}`;
+  });
+
+  const bestPracticeLines = mcpBestPractices.map((bp) => {
+    const summary = (bp.content || '').replace(/\s+/g, ' ').slice(0, 180);
+    return `BestPractice: ${bp.title}${bp.category ? ` [${bp.category}]` : ''}${bp.pinned ? ' [PINNED]' : ''} — ${summary}`;
+  });
+
+  // ── AI Agents catalog ────────────────────────────────────────────────
+  const agentFamilyMap = new Map(agentFamilies.map((f) => [f.id, f.name]));
+  const agentLines = agents.map((a) => {
+    const fam = a.familyId ? agentFamilyMap.get(a.familyId) || '' : '';
+    const mcpLinks = a.mcpServerIds.length > 0
+      ? a.mcpServerIds.map((id) => mcpServers.find((s) => s.id === id)?.name).filter(Boolean).join(', ')
+      : '';
+    const m = a.metrics;
+    const metricsStr = m && (m.monthlyInvocations || m.successRatePct || m.costPerMonthEur)
+      ? ` | Metrics: ${m.monthlyInvocations ? `${m.monthlyInvocations}/mo invocations` : ''}${m.successRatePct ? `, ${m.successRatePct}% success` : ''}${m.costPerMonthEur ? `, €${m.costPerMonthEur}/mo` : ''}`
+      : '';
+    return [
+      `Agent: ${a.name} (v${a.version || '0.1.0'})`,
+      `  Status: ${a.status} | Family: ${fam || '—'} | Category: ${a.category || '—'}`,
+      `  Stack: ${a.llmProvider || '—'}${a.llmModel ? ' / ' + a.llmModel : ''}${a.framework ? ' [' + a.framework + ']' : ''}`,
+      a.description ? `  Description: ${a.description.slice(0, 200)}` : '',
+      a.tools.length > 0 ? `  Tools (${a.tools.length}): ${a.tools.slice(0, 8).map((t) => t.name).join(', ')}` : '',
+      mcpLinks ? `  MCP servers used: ${mcpLinks}` : '',
+      (a.userTeams || []).length > 0 ? `  User teams: ${a.userTeams.join(', ')}` : '',
+      metricsStr ? `  ${metricsStr.trim()}` : '',
+    ].filter(Boolean).join('\n');
+  });
+
   const sections: string[] = [
-    `=== DOINg.AI CONTEXT (${new Date().toLocaleDateString('en-GB')} — ${projects.length} projects, ${users.length} users) ===`,
+    `=== DOINg.AI CONTEXT (${new Date().toLocaleDateString('en-GB')} — ${projects.length} projects, ${users.length} users, ${mcpServers.length} MCP servers) ===`,
     '',
     '--- PROJECTS ---',
     ...projectLines,
@@ -97,6 +165,11 @@ const buildContext = (state: AppState): string => {
     ...(hackathonLines.length > 0 ? ['--- HACKATHONS ---', ...hackathonLines, ''] : []),
     ...(wgLines.length > 0 ? ['--- WORKING GROUPS ---', ...wgLines, ''] : []),
     ...(moods.length > 0 ? ['--- TEAM MOOD (latest check-ins) ---', ...moods, ''] : []),
+    ...(familyLines.length > 0 ? ['--- MCP FAMILIES ---', ...familyLines, ''] : []),
+    ...(mcpServerLines.length > 0 ? ['--- MCP SERVERS ---', ...mcpServerLines, ''] : []),
+    ...(toolIndex.length > 0 ? ['--- MCP TOOL INDEX (tool [server]: description) ---', ...toolIndex, ''] : []),
+    ...(bestPracticeLines.length > 0 ? ['--- MCP BEST PRACTICES ---', ...bestPracticeLines, ''] : []),
+    ...(agentLines.length > 0 ? ['--- AI AGENTS ---', ...agentLines, ''] : []),
   ];
 
   return sections.join('\n');
@@ -104,16 +177,191 @@ const buildContext = (state: AppState): string => {
 
 /* ─── Suggested questions ────────────────────────────────────────── */
 
-const SUGGESTIONS = [
-  'What is the overall health of our project portfolio?',
-  'Which projects are at risk or overdue?',
-  'Give me a team workload analysis.',
-  'What are the top blockers across all projects?',
-  'Summarize recent team moods and flag concerns.',
-  'Which technologies are we using the most?',
-  'What milestones are coming up in the next 30 days?',
-  'Give me an executive summary for leadership.',
-];
+/** Suggestions adapt to what's in the dataset. */
+const buildSuggestions = (state: AppState | null): { label: string; q: string; section: string }[] => {
+  const hasProjects = (state?.projects || []).length > 0;
+  const hasMcp = (state?.mcpServers || []).length > 0;
+  const hasCheckIns = (state?.weeklyCheckIns || []).length > 0;
+
+  const list: { label: string; q: string; section: string }[] = [];
+
+  if (hasProjects) {
+    list.push(
+      { section: 'Portfolio', label: '📊 Portfolio health snapshot', q: 'Give me a concise health snapshot of the project portfolio: active vs at-risk projects, top 3 blockers, and one chart breakdown.' },
+      { section: 'Portfolio', label: '⚠️ At-risk projects', q: 'List projects that are overdue or at risk. For each, explain why in one sentence.' },
+      { section: 'Portfolio', label: '🧑‍💻 Team workload analysis', q: 'Analyse team workload across active projects. Flag people who appear over-allocated.' },
+    );
+  }
+  if (hasMcp) {
+    list.push(
+      { section: 'MCP', label: '🔌 MCP catalog synthesis', q: 'Synthesise the MCP catalog: number of servers, families, deploy maturity breakdown. Include a chart.' },
+      { section: 'MCP', label: '🔎 Find MCP tools for...', q: 'Which MCP servers expose tools for searching, fetching, or summarising data? Group by purpose.' },
+      { section: 'MCP', label: '🚦 MCPs not yet in production', q: 'Which MCP servers are still in dev or UAT? Tell me what is missing for them to reach prod.' },
+      { section: 'MCP', label: '👥 MCP recommendations per team', q: 'For each user team, recommend the most relevant MCP servers based on use case and tools.' },
+      { section: 'MCP', label: '📈 MCP family breakdown chart', q: 'Show me a bar chart of MCP servers grouped by family.' },
+    );
+  }
+  if ((state?.agents || []).length > 0) {
+    list.push(
+      { section: 'Agents', label: '🤖 AI agents lifecycle snapshot', q: 'Give me a lifecycle snapshot of all AI agents: how many in idea/design/dev/testing/production. Include a chart.' },
+      { section: 'Agents', label: '💰 Agent cost & performance', q: 'List agents in production with their monthly cost, invocations and success rate. Flag the worst ROI ones.' },
+      { section: 'Agents', label: '🧩 Agents using MCP', q: 'Which agents depend on which MCP servers? Show as a list grouped by MCP server.' },
+      { section: 'Agents', label: '🏗️ Agent stack inventory', q: 'Break down agents by LLM provider and framework. Include a bar chart.' },
+    );
+  }
+  if (hasCheckIns) {
+    list.push({ section: 'Team', label: '🌡️ Team mood summary', q: 'Summarise the latest team moods and flag any concerning patterns.' });
+  }
+  list.push({ section: 'Executive', label: '📋 Executive summary for leadership', q: 'Produce a one-page executive summary: portfolio status, MCP catalog maturity, top risks, recommendations.' });
+
+  return list;
+};
+
+/* ─── Inline chart blocks ──────────────────────────────────────────
+   The LLM can embed visualisations in its answers by emitting:
+
+     ```chart
+     { "type": "bar" | "donut" | "kpi", "title": "...",
+       "data": [ { "label": "Foo", "value": 5, "color": "#FF3E00" }, ... ] }
+     ```
+
+   parseChartBlocks() splits a response into alternating markdown
+   segments and chart blocks; ChartBlock renders the chart as inline SVG. */
+
+const CHART_PALETTE = ['#FF3E00', '#6366f1', '#22c55e', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#0ea5e9'];
+
+interface ChartDataPoint { label: string; value: number; color?: string }
+interface ChartSpec {
+  type: 'bar' | 'donut' | 'kpi';
+  title?: string;
+  data: ChartDataPoint[];
+}
+
+type ContentBlock =
+  | { kind: 'md'; text: string }
+  | { kind: 'chart'; spec: ChartSpec };
+
+const parseChartBlocks = (content: string): ContentBlock[] => {
+  const blocks: ContentBlock[] = [];
+  const regex = /```chart\s*\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(content)) !== null) {
+    if (m.index > lastIndex) {
+      blocks.push({ kind: 'md', text: content.slice(lastIndex, m.index) });
+    }
+    try {
+      const spec = JSON.parse(m[1].trim()) as ChartSpec;
+      if (spec && Array.isArray(spec.data) && spec.type) {
+        blocks.push({ kind: 'chart', spec });
+      } else {
+        blocks.push({ kind: 'md', text: '```json\n' + m[1].trim() + '\n```' });
+      }
+    } catch {
+      blocks.push({ kind: 'md', text: '```json\n' + m[1].trim() + '\n```' });
+    }
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < content.length) {
+    blocks.push({ kind: 'md', text: content.slice(lastIndex) });
+  }
+  if (blocks.length === 0) blocks.push({ kind: 'md', text: content });
+  return blocks;
+};
+
+const ChartBlock: React.FC<{ spec: ChartSpec }> = ({ spec }) => {
+  const data = spec.data.filter((d) => d && typeof d.value === 'number').slice(0, 20);
+  if (data.length === 0) return null;
+  const total = data.reduce((s, d) => s + d.value, 0) || 1;
+  const max = Math.max(...data.map((d) => d.value), 1);
+
+  if (spec.type === 'bar') {
+    return (
+      <div className="my-3 border border-neutral-200 dark:border-ink-600 p-4 bg-neutral-50 dark:bg-ink-800">
+        {spec.title && <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-3">{spec.title}</p>}
+        <div className="space-y-1.5">
+          {data.map((d, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-[10px] font-bold w-28 truncate text-right" title={d.label}>{d.label}</span>
+              <div className="flex-1 bg-neutral-200 dark:bg-ink-700 h-4 relative overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 transition-all"
+                  style={{ width: `${(d.value / max) * 100}%`, backgroundColor: d.color || CHART_PALETTE[i % CHART_PALETTE.length] }}
+                />
+              </div>
+              <span className="text-[10px] font-mono font-bold w-10 text-right tabular-nums">{d.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (spec.type === 'donut') {
+    const size = 140;
+    const thickness = 20;
+    const radius = (size - thickness) / 2;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * radius;
+    let offset = 0;
+    return (
+      <div className="my-3 border border-neutral-200 dark:border-ink-600 p-4 bg-neutral-50 dark:bg-ink-800 flex items-center gap-4">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+          {data.map((d, i) => {
+            const len = (d.value / total) * circumference;
+            const dash = `${len} ${circumference - len}`;
+            const color = d.color || CHART_PALETTE[i % CHART_PALETTE.length];
+            const el = (
+              <circle
+                key={i} cx={cx} cy={cy} r={radius} fill="none"
+                stroke={color} strokeWidth={thickness}
+                strokeDasharray={dash} strokeDashoffset={-offset}
+                transform={`rotate(-90 ${cx} ${cy})`}
+              />
+            );
+            offset += len;
+            return el;
+          })}
+          <text x={cx} y={cy + 6} textAnchor="middle" className="text-[16px] font-black" fill="currentColor">{total}</text>
+        </svg>
+        <div className="flex-1 min-w-0">
+          {spec.title && <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-2">{spec.title}</p>}
+          <div className="space-y-1">
+            {data.map((d, i) => (
+              <div key={i} className="flex items-center gap-2 text-[11px]">
+                <span className="inline-block w-3 h-3 shrink-0" style={{ backgroundColor: d.color || CHART_PALETTE[i % CHART_PALETTE.length] }} />
+                <span className="flex-1 truncate" title={d.label}>{d.label}</span>
+                <span className="font-mono font-bold tabular-nums">{d.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (spec.type === 'kpi') {
+    return (
+      <div className="my-3">
+        {spec.title && <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-2">{spec.title}</p>}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {data.map((d, i) => {
+            const color = d.color || CHART_PALETTE[i % CHART_PALETTE.length];
+            return (
+              <div key={i} className="border border-neutral-200 dark:border-ink-600 p-3 bg-white dark:bg-ink-800" style={{ borderTopColor: color, borderTopWidth: 3 }}>
+                <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-muted truncate" title={d.label}>{d.label}</p>
+                <p className="text-2xl font-black mt-1 tabular-nums" style={{ color }}>{d.value}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
 
 /* ─── Types ─────────────────────────────────────────────────────── */
 
@@ -178,13 +426,39 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
         .join('\n\n');
 
       const systemPrompt =
-        `You are DOINg.AI, an expert AI Operations assistant. ` +
-        `Answer questions precisely using ONLY the data provided below. ` +
-        `When asked for charts or graphs, produce clean ASCII/Unicode diagrams or SVG-style text tables. ` +
-        `When asked for analysis, be concrete and cite project names, numbers, and dates. ` +
-        `Use markdown (bold, lists, tables) to structure your response clearly.\n\n` +
-        `SCOPE: You only have access to the data shown below — do not speculate beyond it.\n\n` +
-        `${context}`;
+        `You are DOINg.AI, an expert AI Operations assistant for an AI project portfolio that also catalogs MCP (Model Context Protocol) servers.
+
+YOU CAN ANSWER QUESTIONS ABOUT:
+- Projects (status, progress, blockers, deadlines, owners, budget)
+- Team (users, roles, workload, moods)
+- Technologies & repositories
+- Hackathons & working groups
+- MCP servers (search by name/category/family/team/tag/use-case, list exposed tools)
+- MCP tools (find which MCP exposes a given capability, e.g. "search", "fetch", "post message")
+- MCP families and best practices
+- Cross-cutting: maturity, deployment readiness, recommendations per team
+
+STYLE:
+- Be concrete: cite project names, MCP names, tool names, numbers, dates.
+- Use markdown (bold, lists, tables, headers) to structure.
+- Prefer short, scannable answers. Use bullet points and tables.
+
+INLINE CHARTS — Whenever you compare quantities, show a distribution, or summarise stats, embed a chart block alongside the prose. Format (the JSON MUST be valid):
+
+\`\`\`chart
+{ "type": "bar", "title": "MCP servers by family", "data": [ { "label": "Data", "value": 5 }, { "label": "Comms", "value": 3 } ] }
+\`\`\`
+
+Chart types:
+- "bar"   → horizontal bars (use for comparing counts across labels)
+- "donut" → distribution / share of total
+- "kpi"   → 2-4 headline metrics displayed as big numbers
+
+Optional per-data-point "color" as a hex string (e.g. "#FF3E00"). Limit to 10 data points max.
+
+SCOPE: Only use the data provided below — never invent projects, MCPs or tools that aren't listed.
+
+${context}`;
 
       const fullPrompt = historyText
         ? `${systemPrompt}\n\n--- CONVERSATION HISTORY ---\n${historyText}\n\n--- CURRENT QUESTION ---\n${q}`
@@ -286,18 +560,29 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted px-1 mb-2">Suggested questions</p>
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => send(s)}
-                    className="w-full text-left px-3 py-2.5 text-[11px] border border-neutral-200 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors bg-white dark:bg-ink-800 group"
-                  >
-                    <span className="text-brand mr-2 group-hover:mr-3 transition-all">›</span>
-                    {s}
-                  </button>
-                ))}
+              <div className="space-y-3">
+                {(() => {
+                  const suggestions = buildSuggestions(state);
+                  const grouped = suggestions.reduce((acc, s) => {
+                    (acc[s.section] = acc[s.section] || []).push(s);
+                    return acc;
+                  }, {} as Record<string, typeof suggestions>);
+                  return Object.entries(grouped).map(([section, items]) => (
+                    <div key={section} className="space-y-1.5">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-muted px-1">{section}</p>
+                      {items.map((s) => (
+                        <button
+                          key={s.label}
+                          onClick={() => send(s.q)}
+                          className="w-full text-left px-3 py-2.5 text-[11px] border border-neutral-200 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors bg-white dark:bg-ink-800 group"
+                        >
+                          <span className="text-brand mr-2 group-hover:mr-3 transition-all">›</span>
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
           )}
@@ -318,7 +603,11 @@ export const NexusAssistant: React.FC<Props> = ({ open, onClose, state, llmConfi
               ) : (
                 <div className="group relative w-full max-w-[95%]">
                   <div className="bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 rounded-sm shadow-sm px-4 py-3.5 text-[12px] leading-relaxed">
-                    <MarkdownView content={msg.content} />
+                    {parseChartBlocks(msg.content).map((b, i) =>
+                      b.kind === 'chart'
+                        ? <ChartBlock key={i} spec={b.spec} />
+                        : <MarkdownView key={i} content={b.text} />
+                    )}
                   </div>
                   <button
                     onClick={() => copy(msg.id, msg.content)}
