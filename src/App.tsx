@@ -381,6 +381,19 @@ const App: React.FC = () => {
       <Login
         users={appState.users}
         onLogin={onLogin}
+        onPasswordChange={(userId, newPasswordHash, newPasswordSalt) => {
+          // Persist the new credentials and clear the must-change flag.
+          // The legacy plaintext field is wiped at the same time so the
+          // hash becomes the single source of truth going forward.
+          update((s) => ({
+            ...s,
+            users: s.users.map((u) =>
+              u.id === userId
+                ? { ...u, passwordHash: newPasswordHash, passwordSalt: newPasswordSalt, password: undefined, mustChangePassword: false }
+                : u
+            ),
+          }));
+        }}
         theme={appState.theme}
         toggleTheme={toggleTheme}
       />
