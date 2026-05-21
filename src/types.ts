@@ -193,6 +193,7 @@ export interface Repository {
   language?: string;
   visibility: 'public' | 'private' | 'internal';
   projectIds: string[];
+  createdByUserId?: string;     // owner — used for role-based edit permissions
   createdAt: string;
 }
 
@@ -309,6 +310,7 @@ export interface Hackathon {
   results?: string;
   aiSynthesis?: string;
   tags: string[];
+  createdByUserId?: string;     // owner — used for role-based edit permissions
   createdAt: string;
   updatedAt: string;
 }
@@ -460,6 +462,7 @@ export interface McpServer {
   // ── AI Code Analysis (stored per server) ─────────────────────────────
   codeAnalysis?: McpCodeAnalysis;
 
+  createdByUserId?: string;     // owner — used for role-based edit permissions
   createdAt: string;
   updatedAt: string;
 }
