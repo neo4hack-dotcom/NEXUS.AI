@@ -34,7 +34,15 @@ export enum ProjectRole {
 export interface User {
   id: string;
   uid: string;                     // login handle (unique)
-  password: string;
+  /** @deprecated Legacy plaintext password kept only for backwards
+   *  compatibility with seed data. Once a user signs in or changes their
+   *  password, this is cleared and `passwordHash`+`passwordSalt` take over. */
+  password?: string;
+  passwordHash?: string;           // PBKDF2-SHA256, base64
+  passwordSalt?: string;           // 16-byte salt, base64
+  /** When true, the next successful sign-in forces a password change before
+   *  the app is reachable. Cleared automatically after the change. */
+  mustChangePassword?: boolean;
   firstName: string;
   lastName: string;
   email: string;

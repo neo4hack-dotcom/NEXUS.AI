@@ -18,14 +18,19 @@ import {
   Plus,
   Pencil,
   X,
+  KeyRound,
+  Copy,
+  Check,
+  ShieldCheck,
 } from 'lucide-react';
-import { AppState, LlmConfig, ProjectFamily } from '../../types';
+import { AppState, LlmConfig, ProjectFamily, User } from '../../types';
 import { generateId } from '../../services/storage';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { Badge } from '../ui/Badge';
 import { testConnection, DEFAULT_PROMPTS } from '../../services/llmService';
 import { clearState, exportBackup, importBackup } from '../../services/storage';
+import { hashPassword, generateTempPassword } from '../../services/crypto';
 
 interface Props {
   state: AppState;
@@ -293,51 +298,226 @@ const PromptsSection: React.FC<Props> = ({ state, update }) => {
 
 /* === Security === */
 
+/**
+ * Security section — manages credentials for ALL users.
+ *
+ *  1. "Force password reset" per user: admin sets a temporary password and the
+ *     `mustChangePassword` flag. The user uses the temp password to sign in,
+ *     then is required to pick a new one before reaching the app.
+ *
+ *  2. The temporary password is shown ONCE in a confirmation dialog so the
+ *     admin can transmit it out of band (Slack, email, in person).
+ *
+ *  Passwords are hashed with PBKDF2-SHA256 (200k iterations) — see
+ *  src/services/crypto.ts. The legacy plaintext field on User is cleared
+ *  whenever a hash is set.
+ */
 const SecuritySection: React.FC<Props> = ({ state, update }) => {
-  const admin = state.users.find((u) => u.role === 'admin');
-  const [pw, setPw] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
+  const [filter, setFilter] = useState('');
 
-  if (!admin) return <p className="text-sm text-muted">No admin user found.</p>;
+  const users = state.users
+    .filter((u) => {
+      const q = filter.toLowerCase();
+      if (!q) return true;
+      return (
+        u.uid.toLowerCase().includes(q) ||
+        u.firstName.toLowerCase().includes(q) ||
+        u.lastName.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        u.team.toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => a.uid.localeCompare(b.uid));
 
-  const apply = () => {
-    if (!pw.trim()) return;
-    update((s) => ({
-      ...s,
-      users: s.users.map((u) => (u.id === admin.id ? { ...u, password: pw } : u)),
-    }));
-    setPw('');
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+  return (
+    <div className="space-y-4">
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <ShieldCheck className="w-5 h-5 text-brand" />
+          <div className="flex-1">
+            <h3 className="text-lg font-black uppercase tracking-tight">User credentials</h3>
+            <p className="text-xs text-muted mt-1">
+              Force any user to change their password at next sign-in. Only admins can do this.
+              Passwords are stored as PBKDF2-SHA256 hashes (200 000 iterations).
+            </p>
+          </div>
+        </div>
+
+        <div className="p-4 border-b border-neutral-200 dark:border-ink-600">
+          <Input
+            placeholder="Filter by uid, name, email or team…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        </div>
+
+        <div className="divide-y divide-neutral-100 dark:divide-ink-700">
+          {users.length === 0 && (
+            <p className="p-8 text-center text-sm text-muted">No users match the filter.</p>
+          )}
+          {users.map((u) => {
+            const hashed = !!u.passwordHash;
+            const forced = !!u.mustChangePassword;
+            return (
+              <div key={u.id} className="px-5 py-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[12px] font-bold truncate">{u.firstName} {u.lastName}</p>
+                    <Badge>{u.role}</Badge>
+                    {forced && (
+                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                        Reset pending
+                      </span>
+                    )}
+                    {!hashed && !forced && (
+                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-neutral-100 text-neutral-600 dark:bg-ink-700 dark:text-neutral-300" title="Still using legacy plaintext password — will be migrated on next sign-in">
+                        Legacy
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted truncate font-mono">{u.uid} · {u.email}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setResetTarget(u)}
+                  title="Set a temporary password and force the user to change it at next login"
+                >
+                  <KeyRound className="w-3.5 h-3.5 mr-1.5" />
+                  Force reset
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {resetTarget && (
+        <ForceResetDialog
+          target={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onConfirm={async (tempPlain) => {
+            const { hash, salt } = await hashPassword(tempPlain);
+            update((s) => ({
+              ...s,
+              users: s.users.map((u) =>
+                u.id === resetTarget.id
+                  ? { ...u, passwordHash: hash, passwordSalt: salt, password: undefined, mustChangePassword: true }
+                  : u
+              ),
+            }));
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+const ForceResetDialog: React.FC<{
+  target: User;
+  onClose: () => void;
+  onConfirm: (tempPassword: string) => Promise<void>;
+}> = ({ target, onClose, onConfirm }) => {
+  // Pre-generate a temp password the admin can edit. Re-roll on demand.
+  const [tempPw, setTempPw] = useState(() => generateTempPassword(12));
+  const [copied, setCopied] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape' && !submitting) onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose, submitting]);
+
+  const copy = () => {
+    navigator.clipboard?.writeText(tempPw);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const confirm = async () => {
+    setSubmitting(true);
+    try {
+      await onConfirm(tempPw);
+      setDone(true);
+    } catch (e) {
+      console.error('[Settings] reset error', e);
+      alert('Could not reset password. See console.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div className="surface border">
-      <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
-        <Key className="w-5 h-5 text-brand" />
-        <div>
-          <h3 className="text-lg font-black uppercase tracking-tight">Admin credentials</h3>
-          <p className="text-xs text-muted mt-1">
-            Update password for <span className="font-mono text-brand">{admin.uid}</span>.
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="surface border w-full max-w-md flex flex-col animate-slide-up">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <h2 className="text-lg font-black uppercase tracking-tight flex items-center gap-2">
+            <KeyRound className="w-5 h-5 text-brand" /> Force password reset
+          </h2>
+          <button onClick={onClose} disabled={submitting} className="w-9 h-9 flex items-center justify-center hover:text-brand disabled:opacity-40">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <p className="text-sm">
+            Reset the password for <span className="font-mono font-bold text-brand">{target.uid}</span>
+            {' '}({target.firstName} {target.lastName})?
           </p>
+          <p className="text-xs text-muted">
+            A temporary password is generated below. The user will be required to choose a new one
+            at next sign-in. Share this temporary password with them out of band — it is shown only once.
+          </p>
+
+          <div className="space-y-1.5">
+            <label className="label-xs">Temporary password</label>
+            <div className="flex gap-2">
+              <Input
+                value={tempPw}
+                onChange={(e) => setTempPw(e.target.value)}
+                disabled={submitting || done}
+                className="font-mono"
+              />
+              <Button
+                variant="outline"
+                size="md"
+                onClick={() => setTempPw(generateTempPassword(12))}
+                disabled={submitting || done}
+                title="Re-roll"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="md" onClick={copy} disabled={!tempPw}>
+                {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+              </Button>
+            </div>
+          </div>
+
+          {done && (
+            <div className="border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs text-emerald-700 dark:text-emerald-400">
+              <p className="font-bold flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Reset applied.</p>
+              <p className="mt-1 text-muted">
+                Make sure you copied the temporary password — it cannot be retrieved later.
+              </p>
+            </div>
+          )}
         </div>
-      </div>
-      <div className="p-5 space-y-3">
-        <div className="space-y-1.5">
-          <label className="label-xs">New password</label>
-          <Input
-            type="password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            placeholder="••••••••"
-          />
+
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end gap-2">
+          {done ? (
+            <Button onClick={onClose}>Done</Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+              <Button onClick={confirm} disabled={submitting || tempPw.length < 6}>
+                {submitting ? 'Applying…' : 'Apply reset'}
+              </Button>
+            </>
+          )}
         </div>
-      </div>
-      <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end">
-        <Button onClick={apply} disabled={!pw.trim()}>
-          <Save className="w-4 h-4 mr-2" />
-          {saved ? 'Saved!' : 'Update password'}
-        </Button>
       </div>
     </div>
   );
