@@ -19,6 +19,7 @@ import {
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
+import { canCreate, canEdit } from '../../services/permissions';
 
 interface Props {
   state: AppState;
@@ -62,7 +63,11 @@ export const Agents: React.FC<Props> = ({ state, currentUser, update }) => {
   const [preview, setPreview] = useState<Agent | null>(null);
   const [showFamilyMgr, setShowFamilyMgr] = useState(false);
 
-  const isAdmin = currentUser.role === 'admin';
+  // Role-aware helpers — see src/services/permissions.ts.
+  const canCreateAgent = canCreate('agent', currentUser);
+  const canManageFamilies = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const canEditAgent = (a: Agent) => canEdit(a, 'agent', currentUser);
+
   const agents = state.agents || [];
   const families = state.agentFamilies || [];
   const mcpServers = state.mcpServers || [];
@@ -99,12 +104,20 @@ export const Agents: React.FC<Props> = ({ state, currentUser, update }) => {
   }, [agents, q, statusFilter, familyFilter, frameworkFilter, sortBy, sortDir]);
 
   const upsert = (a: Agent) => {
-    update((s) => ({
-      ...s,
-      agents: s.agents.some((x) => x.id === a.id)
-        ? s.agents.map((x) => (x.id === a.id ? a : x))
-        : [...s.agents, a],
-    }));
+    // Stamp the current user as owner on first save so contributors/viewers
+    // can later edit "their own" agents under the new role matrix.
+    update((s) => {
+      const exists = s.agents.some((x) => x.id === a.id);
+      const stamped: Agent = exists
+        ? a
+        : { ...a, ownerUserId: a.ownerUserId ?? currentUser.id };
+      return {
+        ...s,
+        agents: exists
+          ? s.agents.map((x) => (x.id === a.id ? stamped : x))
+          : [...s.agents, stamped],
+      };
+    });
   };
   const remove = (id: string) => update((s) => ({ ...s, agents: s.agents.filter((x) => x.id !== id) }));
 
@@ -133,7 +146,7 @@ export const Agents: React.FC<Props> = ({ state, currentUser, update }) => {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && (
+          {canManageFamilies && (
             <Button variant="outline" size="md" onClick={() => setShowFamilyMgr(true)}>
               <Layers className="w-4 h-4 mr-2" /> Families
             </Button>
@@ -248,7 +261,7 @@ export const Agents: React.FC<Props> = ({ state, currentUser, update }) => {
           {filtered.length} agent{filtered.length === 1 ? '' : 's'}
           {agents.length !== filtered.length && <span className="text-brand"> · filtered</span>}
         </p>
-        {isAdmin && (
+        {canCreateAgent && (
           <Button onClick={() => { setEditing(null); setShowEditor(true); }} size="sm">
             <Plus className="w-4 h-4 mr-1" /> Add Agent
           </Button>
@@ -289,7 +302,7 @@ export const Agents: React.FC<Props> = ({ state, currentUser, update }) => {
           <p className="text-sm uppercase tracking-[0.16em]">
             {q || activeFilterCount > 0 ? 'No agents match the current filters' : 'No agents yet'}
           </p>
-          {isAdmin && !q && activeFilterCount === 0 && (
+          {canCreateAgent && !q && activeFilterCount === 0 && (
             <button onClick={() => { setEditing(null); setShowEditor(true); }} className="text-[11px] text-brand font-bold mt-3 uppercase tracking-[0.14em]">
               + Add your first agent
             </button>
@@ -375,7 +388,7 @@ export const Agents: React.FC<Props> = ({ state, currentUser, update }) => {
           family={preview.familyId ? families.find((f) => f.id === preview.familyId) || null : null}
           owner={preview.ownerUserId ? state.users.find((u) => u.id === preview.ownerUserId) || null : null}
           mcpServers={mcpServers}
-          isAdmin={isAdmin}
+          canEdit={canEditAgent(preview)}
           onClose={() => setPreview(null)}
           onEdit={() => { setEditing(preview); setShowEditor(true); setPreview(null); }}
           onDelete={() => { if (window.confirm(`Delete "${preview.name}"?`)) { remove(preview.id); setPreview(null); } }}
@@ -438,11 +451,11 @@ const AgentPreviewModal: React.FC<{
   family: AgentFamily | null;
   owner: User | null;
   mcpServers: McpServer[];
-  isAdmin: boolean;
+  canEdit: boolean;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
-}> = ({ agent, family, owner, mcpServers, isAdmin, onClose, onEdit, onDelete }) => {
+}> = ({ agent, family, owner, mcpServers, canEdit, onClose, onEdit, onDelete }) => {
   React.useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', fn);
@@ -615,7 +628,7 @@ const AgentPreviewModal: React.FC<{
         </div>
 
         <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end gap-2 shrink-0">
-          {isAdmin && (
+          {canEdit && (
             <>
               <Button variant="outline" size="sm" onClick={onEdit}><Edit2 className="w-3 h-3 mr-1" /> Edit</Button>
               <Button variant="danger" size="sm" onClick={onDelete}><Trash2 className="w-3.5 h-3.5" /></Button>

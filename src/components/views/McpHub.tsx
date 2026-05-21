@@ -58,6 +58,7 @@ import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
 import { runPrompt } from '../../services/llmService';
 import { buildMcpReportHTML, exportMcpXlsx, exportMcpIdCard } from '../../services/exports';
+import { canCreate, canEdit, canUseAI } from '../../services/permissions';
 
 interface Props {
   state: AppState;
@@ -214,6 +215,12 @@ export const McpHubView: React.FC<Props> = ({ state, currentUser, update }) => {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [previewServer, setPreviewServer] = useState<McpServer | null>(null);
   const isAdmin = currentUser.role === 'admin';
+  // New role-aware helpers — see src/services/permissions.ts for the matrix.
+  const canCreateMcp = canCreate('mcpServer', currentUser);
+  // Family / catalog-level management is reserved for admin + manager (shared catalog).
+  const canManageFamilies = currentUser.role === 'admin' || currentUser.role === 'manager';
+  const canEditServer = (s: McpServer) => canEdit(s, 'mcpServer', currentUser);
+  const canAIServer = (s: McpServer) => canUseAI(s, 'mcpServer', currentUser);
 
   const mcpFamilies: McpFamily[] = state.mcpFamilies || [];
 
@@ -291,12 +298,21 @@ export const McpHubView: React.FC<Props> = ({ state, currentUser, update }) => {
   const selectedFamily = selected?.familyId ? mcpFamilies.find((f) => f.id === selected.familyId) : null;
 
   const upsertServer = (srv: McpServer) => {
-    update((s) => ({
-      ...s,
-      mcpServers: s.mcpServers.some((x) => x.id === srv.id)
-        ? s.mcpServers.map((x) => (x.id === srv.id ? srv : x))
-        : [...s.mcpServers, srv],
-    }));
+    // Stamp the creator on first save so role-based edit permissions can later
+    // gate "edit own only" for contributors/viewers. Never overwrite an existing
+    // createdByUserId — the original creator is the canonical owner.
+    update((s) => {
+      const exists = s.mcpServers.some((x) => x.id === srv.id);
+      const stamped: McpServer = exists
+        ? srv
+        : { ...srv, createdByUserId: srv.createdByUserId ?? currentUser.id };
+      return {
+        ...s,
+        mcpServers: exists
+          ? s.mcpServers.map((x) => (x.id === srv.id ? stamped : x))
+          : [...s.mcpServers, stamped],
+      };
+    });
   };
 
   const deleteServer = (id: string) => {
@@ -378,7 +394,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
               </span>
             )}
           </Button>
-          {isAdmin && (
+          {canManageFamilies && (
             <Button variant="outline" size="md" onClick={() => setShowFamilyManager(true)}>
               <Layers className="w-4 h-4 mr-2" />
               Families
@@ -593,7 +609,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
             )}
           </p>
 
-          {isAdmin && (
+          {canCreateMcp && (
             <Button
               onClick={() => {
                 setEditingServer(null);
@@ -612,7 +628,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
                 <p className="text-xs uppercase tracking-[0.14em]">
                   {q || familyFilter ? 'No results' : 'No MCP servers yet'}
                 </p>
-                {isAdmin && !q && !familyFilter && (
+                {canCreateMcp && !q && !familyFilter && (
                   <button
                     onClick={() => { setEditingServer(null); setShowEditor(true); }}
                     className="text-[10px] text-brand font-bold mt-2"
@@ -709,7 +725,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {isAdmin && state.llmConfig?.provider && (
+                  {canAIServer(selected) && state.llmConfig?.provider && (
                     <Button variant="outline" size="sm" onClick={handleEnrich} disabled={enriching}>
                       {enriching ? (
                         <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Enriching…</>
@@ -726,7 +742,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
                   >
                     <IdCard className="w-3 h-3 mr-1" /> ID Card
                   </Button>
-                  {isAdmin && (
+                  {canEditServer(selected) && (
                     <>
                       <Button variant="outline" size="sm" onClick={() => { setEditingServer(selected); setShowEditor(true); }}>
                         <Edit2 className="w-3 h-3 mr-1" /> Edit
@@ -929,7 +945,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
                 <span className="text-brand"> · filtered</span>
               )}
             </p>
-            {isAdmin && (
+            {canCreateMcp && (
               <Button onClick={() => { setEditingServer(null); setShowEditor(true); }} size="sm">
                 <Plus className="w-4 h-4 mr-1" /> Add MCP
               </Button>
@@ -1033,7 +1049,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
               <p className="text-sm uppercase tracking-[0.16em]">
                 {q || activeFilterCount > 0 ? 'No results match the current filters' : 'No MCP servers yet'}
               </p>
-              {isAdmin && !q && activeFilterCount === 0 && (
+              {canCreateMcp && !q && activeFilterCount === 0 && (
                 <button
                   onClick={() => { setEditingServer(null); setShowEditor(true); }}
                   className="text-[11px] text-brand font-bold mt-3 uppercase tracking-[0.14em]"
@@ -1065,7 +1081,7 @@ Respond as JSON: { "serverDescription": "...", "tools": [{ "name": "...", "enric
         <McpPreviewModal
           server={previewServer}
           family={previewServer.familyId ? mcpFamilies.find((f) => f.id === previewServer.familyId) || null : null}
-          isAdmin={isAdmin}
+          canEdit={canEditServer(previewServer)}
           llmConfig={state.llmConfig}
           onClose={() => setPreviewServer(null)}
           onEdit={() => {
@@ -1189,12 +1205,12 @@ const McpServerCard: React.FC<{
 const McpPreviewModal: React.FC<{
   server: McpServer;
   family: McpFamily | null;
-  isAdmin: boolean;
+  canEdit: boolean;
   llmConfig: LlmConfig;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
-}> = ({ server, family, isAdmin, llmConfig, onClose, onEdit, onDelete }) => {
+}> = ({ server, family, canEdit, llmConfig, onClose, onEdit, onDelete }) => {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
@@ -1357,7 +1373,7 @@ const McpPreviewModal: React.FC<{
             )}
           </Button>
           <div className="flex gap-2">
-            {isAdmin && (
+            {canEdit && (
               <>
                 <Button variant="outline" size="sm" onClick={onEdit}>
                   <Edit2 className="w-3 h-3 mr-1" /> Edit

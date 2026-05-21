@@ -527,28 +527,44 @@ export const importBackup = (
   reader.readAsText(file);
 };
 
-/* ===== Permission helper ===== */
-
+/* ===== Permission helper =====
+ *
+ * Filters the global state according to the role × group matrix defined in
+ * src/services/permissions.ts. See that module for the full matrix.
+ *
+ *  - G1 (projects, communications): manager+admin see all; contributor+viewer
+ *    see only entities they own (manager-of OR member-of for projects,
+ *    author for communications).
+ *  - G2 (repos, hackathons, MCP, agents): everyone sees all. Edit gating
+ *    happens at the UI level via canEdit() in permissions.ts.
+ *  - G3 (users, settings): admin only via sidebar/route guards. We do NOT
+ *    filter state.users here — many views need to look up names (project
+ *    manager, agent owner, etc.).
+ *  - G4 (check-ins, working groups): everyone non-admin sees only own.
+ */
 export const getFilteredState = (state: AppState): AppState => {
   const me = state.users.find((u) => u.id === state.currentUserId);
   if (!me || me.role === 'admin') return state;
 
-  if (me.role === 'manager') {
-    // Manager sees: projects they manage + projects they are a member of + their team
-    const projects = state.projects.filter(
-      (p) =>
-        p.managerId === me.id ||
-        p.members.some((m) => m.userId === me.id) ||
-        state.users.some((u) => u.team === me.team && u.id !== me.id && p.members.some((m) => m.userId === u.id))
+  const role = me.role;
+  const uid = me.id;
+  const result: AppState = { ...state };
+
+  // ── G1: Projects + Communications ────────────────────────────────────
+  if (role === 'contributor' || role === 'viewer') {
+    result.projects = state.projects.filter(
+      (p) => p.managerId === uid || p.members.some((m) => m.userId === uid)
     );
-    return { ...state, projects };
+    result.communications = state.communications.filter((c) => c.authorId === uid);
   }
+  // manager: sees all G1 — no filtering
 
-  if (me.role === 'contributor') {
-    const projects = state.projects.filter((p) => p.members.some((m) => m.userId === me.id));
-    return { ...state, projects };
-  }
+  // ── G4: Check-ins + Working Groups — everyone non-admin sees only own ─
+  result.weeklyCheckIns = state.weeklyCheckIns.filter((c) => c.userId === uid);
+  result.workingGroups = state.workingGroups.filter(
+    (wg) => wg.ownerId === uid || wg.members.some((m) => m.userId === uid)
+  );
 
-  // viewer
-  return { ...state, projects: state.projects.filter((p) => !p.isArchived) };
+  // G2 (repos, hackathons, MCP, agents): unchanged — full visibility.
+  return result;
 };

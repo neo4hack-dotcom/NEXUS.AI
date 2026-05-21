@@ -14,6 +14,7 @@ import {
   startSSE,
   stopSSE,
 } from './services/storage';
+import { canAccessGroup, TAB_GROUP } from './services/permissions';
 import { Sidebar, TabId } from './components/Sidebar';
 import { Login } from './components/Login';
 import { NotificationCenter } from './components/NotificationCenter';
@@ -299,6 +300,18 @@ const App: React.FC = () => {
     () => appState?.users.find((u) => u.id === appState.currentUserId) ?? null,
     [appState]
   );
+
+  // Route guard: if the active tab belongs to a group the current role cannot
+  // access (e.g. a former admin logs in as contributor and `settings` is still
+  // stored as the active tab), redirect to dashboard. Centralises enforcement
+  // — the sidebar already hides the items, but a stale state would still render.
+  useEffect(() => {
+    if (!currentUser) return;
+    const group = TAB_GROUP[activeTab] || 'public';
+    if (!canAccessGroup(currentUser.role, group)) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, currentUser]);
 
   // Show onboarding popup on first login per user
   useEffect(() => {

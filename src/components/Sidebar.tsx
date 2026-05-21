@@ -23,6 +23,7 @@ import {
   Bot,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
+import { canAccessGroup, TAB_GROUP } from '../services/permissions';
 
 export type TabId =
   | 'dashboard'
@@ -56,13 +57,10 @@ interface Props {
   syncFlash: boolean;
 }
 
-type MinRole = Role;
-
 interface NavItem {
   id: TabId;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  minRole?: MinRole;
 }
 
 interface NavGroup {
@@ -70,8 +68,15 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const ROLE_LEVEL: Record<Role, number> = { viewer: 0, contributor: 1, manager: 2, admin: 3 };
-
+/* Nav groups are organised to mirror the functional groups used by the
+ * permission matrix (see src/services/permissions.ts).
+ *
+ *  G1 — Project Management : projects, timeline, risk, communications
+ *  G2 — Catalogs           : tech (public), repos, hackathons, MCP, agents
+ *  G4 — Collaboration      : working groups, weekly check-in
+ *  Admin (G3)              : contributors, settings (admin-only)
+ *  Public                  : dashboard, todos, guide
+ */
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Dashboard',
@@ -82,35 +87,46 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Project Management',
     items: [
-      { id: 'projects', label: 'Projects', icon: Target },
-      { id: 'timeline', label: 'Timeline', icon: Calendar },
-      { id: 'risk', label: 'Risk Heatmap', icon: AlertTriangle, minRole: 'admin' },
-      { id: 'tech', label: 'Technologies', icon: Cpu },
-      { id: 'repos', label: 'Code Repositories', icon: GitBranch },
-      { id: 'hackathons', label: 'Hackathons', icon: Zap },
-      { id: 'mcp', label: 'MCP Hub', icon: Plug },
-      { id: 'agents', label: 'AI Agents', icon: Bot },
+      { id: 'projects',       label: 'Projects',       icon: Target },
+      { id: 'timeline',       label: 'Timeline',       icon: Calendar },
+      { id: 'risk',           label: 'Risk Heatmap',   icon: AlertTriangle },
+      { id: 'communications', label: 'Communications', icon: Mail },
+    ],
+  },
+  {
+    label: 'Catalogs',
+    items: [
+      { id: 'tech',       label: 'Technologies',     icon: Cpu },
+      { id: 'repos',      label: 'Code Repositories', icon: GitBranch },
+      { id: 'hackathons', label: 'Hackathons',       icon: Zap },
+      { id: 'mcp',        label: 'MCP Hub',          icon: Plug },
+      { id: 'agents',     label: 'AI Agents',        icon: Bot },
     ],
   },
   {
     label: 'Collaboration',
     items: [
-      { id: 'contributors', label: 'Contributors', icon: Users },
-      { id: 'communications', label: 'Communications', icon: Mail, minRole: 'manager' },
-      { id: 'workinggroups', label: 'Working Groups', icon: Network },
-      { id: 'checkin', label: 'Weekly Check-in', icon: ClipboardList, minRole: 'contributor' },
+      { id: 'workinggroups', label: 'Working Groups',   icon: Network },
+      { id: 'checkin',       label: 'Weekly Check-in',  icon: ClipboardList },
     ],
   },
   {
     label: 'Tools',
     items: [
-      { id: 'todos', label: 'Smart ToDo', icon: CheckSquare, minRole: 'contributor' },
+      { id: 'todos', label: 'Smart ToDo', icon: CheckSquare },
     ],
   },
   {
     label: 'Knowledge',
     items: [
       { id: 'guide', label: 'User Guide', icon: BookOpen },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
+      { id: 'contributors', label: 'Contributors',    icon: Users },
+      { id: 'settings',     label: 'Admin Settings',  icon: SettingsIcon },
     ],
   },
 ];
@@ -128,8 +144,7 @@ export const Sidebar: React.FC<Props> = ({
   isOnline,
   syncFlash,
 }) => {
-  const isAdmin = currentUser?.role === 'admin';
-  const userLevel = ROLE_LEVEL[currentUser?.role ?? 'viewer'];
+  const role: Role = currentUser?.role ?? 'viewer';
 
   return (
     <aside className="w-64 shrink-0 h-screen sticky top-0 flex flex-col border-r border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
@@ -159,8 +174,9 @@ export const Sidebar: React.FC<Props> = ({
 
       <nav className="flex-1 overflow-y-auto px-3 py-2">
         {NAV_GROUPS.map((group) => {
-          const visibleItems = group.items.filter(
-            (item) => !item.minRole || userLevel >= ROLE_LEVEL[item.minRole]
+          // Hide an item if the role cannot access its functional group.
+          const visibleItems = group.items.filter((item) =>
+            canAccessGroup(role, TAB_GROUP[item.id] || 'public')
           );
           if (visibleItems.length === 0) return null;
           return (
@@ -192,26 +208,6 @@ export const Sidebar: React.FC<Props> = ({
           );
         })}
 
-        {isAdmin && (
-          <div className="mb-2">
-            <div className="px-3 pt-3 pb-1">
-              <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-neutral-400 dark:text-ink-500">
-                Admin
-              </span>
-            </div>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`group w-full flex items-center gap-3 px-3 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ${
-                activeTab === 'settings'
-                  ? 'bg-brand text-white'
-                  : 'text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 dark:hover:text-white dark:hover:bg-ink-700'
-              }`}
-            >
-              <SettingsIcon className="w-4 h-4" />
-              <span>Admin Settings</span>
-            </button>
-          </div>
-        )}
       </nav>
 
       <div className="border-t border-neutral-200 dark:border-ink-700 px-3 py-3 space-y-1">
