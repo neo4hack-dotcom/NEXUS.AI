@@ -38,6 +38,7 @@ import { OnboardingModal } from './components/OnboardingModal';
 import { SmartTodoView } from './components/views/SmartTodo';
 import { McpHubView } from './components/views/McpHub';
 import { Agents } from './components/views/Agents';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -138,6 +139,7 @@ const App: React.FC = () => {
   const [seenNotifIds, setSeenNotifIds] = useState<Set<string>>(new Set());
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [changePwdOpen, setChangePwdOpen] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -424,6 +426,7 @@ const App: React.FC = () => {
         onLogout={onLogout}
         onOpenAiInsight={() => setAiInsightOpen(true)}
         onOpenNotifications={() => setNotifOpen(true)}
+        onChangePassword={() => setChangePwdOpen(true)}
         notificationCount={unreadCount}
         isOnline={isOnline}
         syncFlash={syncFlash}
@@ -494,6 +497,33 @@ const App: React.FC = () => {
             localStorage.setItem(`doing_ai_onboarded_${currentUser.id}`, '1');
             setOnboardingOpen(false);
           }}
+        />
+      )}
+
+      {/* Self-service password change — available to every role */}
+      {currentUser && (
+        <ChangePasswordModal
+          open={changePwdOpen}
+          currentUser={currentUser}
+          onChanged={(newHash, newSalt) => {
+            update((s) => ({
+              ...s,
+              users: s.users.map((u) =>
+                u.id === currentUser.id
+                  ? {
+                      ...u,
+                      passwordHash: newHash,
+                      passwordSalt: newSalt,
+                      // Wipe legacy plaintext — hash is now the single source of truth
+                      password: undefined,
+                      // Clear any pending forced-change flag set by an admin
+                      mustChangePassword: false,
+                    }
+                  : u
+              ),
+            }));
+          }}
+          onClose={() => setChangePwdOpen(false)}
         />
       )}
     </div>

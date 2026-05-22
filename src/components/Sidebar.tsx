@@ -21,6 +21,7 @@ import {
   CheckSquare,
   Plug,
   Bot,
+  KeyRound,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -52,6 +53,7 @@ interface Props {
   onLogout: () => void;
   onOpenAiInsight: () => void;
   onOpenNotifications: () => void;
+  onChangePassword: () => void;
   notificationCount: number;
   isOnline: boolean;
   syncFlash: boolean;
@@ -140,6 +142,7 @@ export const Sidebar: React.FC<Props> = ({
   onLogout,
   onOpenAiInsight,
   onOpenNotifications,
+  onChangePassword,
   notificationCount,
   isOnline,
   syncFlash,
@@ -246,7 +249,7 @@ export const Sidebar: React.FC<Props> = ({
       <div className="p-3 border-t border-neutral-200 dark:border-ink-700 bg-neutral-50 dark:bg-ink-800">
         {currentUser ? (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-brand text-white flex items-center justify-center text-[10px] font-bold uppercase">
+            <div className="w-8 h-8 bg-brand text-white flex items-center justify-center text-[10px] font-bold uppercase shrink-0">
               {currentUser.firstName.charAt(0)}
               {currentUser.lastName.charAt(0)}
             </div>
@@ -258,6 +261,14 @@ export const Sidebar: React.FC<Props> = ({
                 {currentUser.role} • {currentUser.team}
               </p>
             </div>
+            {/* Change password — available to every role */}
+            <button
+              onClick={onChangePassword}
+              title="Change password"
+              className="w-8 h-8 flex items-center justify-center text-muted hover:text-brand transition-colors"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
             <button
               onClick={onLogout}
               title="Logout"
