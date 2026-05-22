@@ -26,6 +26,7 @@ import {
   Agent,
   AgentFamily,
   DataFeed,
+  WishItem,
 } from '../types';
 
 const STORAGE_KEY = 'nexus_ai_data_v1';
@@ -159,6 +160,7 @@ export const getDefaultState = (): AppState => {
     agents: [],
     agentFamilies: [],
     dataFeeds: [],
+    wishes: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -219,6 +221,12 @@ export const sanitizeAppState = (data: any): AppState => {
     })),
     agentFamilies: arr<AgentFamily>(data.agentFamilies),
     dataFeeds: arr<DataFeed>(data.dataFeeds),
+    wishes: arr<WishItem>(data.wishes).map((w) => ({
+      ...w,
+      comments: arr(w.comments),
+      tags: arr(w.tags),
+      externalLinks: arr(w.externalLinks),
+    })),
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,
