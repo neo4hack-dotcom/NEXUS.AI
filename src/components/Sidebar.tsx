@@ -22,6 +22,7 @@ import {
   Plug,
   Bot,
   KeyRound,
+  DatabaseZap,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -42,7 +43,8 @@ export type TabId =
   | 'guide'
   | 'todos'
   | 'mcp'
-  | 'agents';
+  | 'agents'
+  | 'datafeeds';
 
 interface Props {
   activeTab: TabId;
@@ -125,6 +127,12 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Data Platform',
+    items: [
+      { id: 'datafeeds', label: 'Data Feeds', icon: DatabaseZap },
+    ],
+  },
+  {
     label: 'Admin',
     items: [
       { id: 'contributors', label: 'Contributors',    icon: Users },
@@ -179,7 +187,7 @@ export const Sidebar: React.FC<Props> = ({
         {NAV_GROUPS.map((group) => {
           // Hide an item if the role cannot access its functional group.
           const visibleItems = group.items.filter((item) =>
-            canAccessGroup(role, TAB_GROUP[item.id] || 'public')
+            canAccessGroup(role, TAB_GROUP[item.id] || 'public', currentUser?.isIT)
           );
           if (visibleItems.length === 0) return null;
           return (

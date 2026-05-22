@@ -22,6 +22,7 @@ import {
   Copy,
   Check,
   ShieldCheck,
+  MonitorDot,
 } from 'lucide-react';
 import { AppState, LlmConfig, ProjectFamily, User } from '../../types';
 import { generateId } from '../../services/storage';
@@ -370,6 +371,11 @@ const SecuritySection: React.FC<Props> = ({ state, update }) => {
                         Reset pending
                       </span>
                     )}
+                    {u.isIT && (
+                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                        IT
+                      </span>
+                    )}
                     {!hashed && !forced && (
                       <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-neutral-100 text-neutral-600 dark:bg-ink-700 dark:text-neutral-300" title="Still using legacy plaintext password — will be migrated on next sign-in">
                         Legacy
@@ -378,6 +384,25 @@ const SecuritySection: React.FC<Props> = ({ state, update }) => {
                   </div>
                   <p className="text-[10px] text-muted truncate font-mono">{u.uid} · {u.email}</p>
                 </div>
+                <button
+                  onClick={() =>
+                    update((s) => ({
+                      ...s,
+                      users: s.users.map((usr) =>
+                        usr.id === u.id ? { ...usr, isIT: !usr.isIT } : usr
+                      ),
+                    }))
+                  }
+                  title={u.isIT ? 'Revoke IT access' : 'Grant IT access (Data Feeds)'}
+                  className={`flex items-center gap-1.5 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] border transition-colors ${
+                    u.isIT
+                      ? 'border-sky-400 bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 hover:bg-sky-100'
+                      : 'border-neutral-300 dark:border-ink-500 text-neutral-500 hover:border-sky-400 hover:text-sky-600'
+                  }`}
+                >
+                  <MonitorDot className="w-3 h-3" />
+                  IT
+                </button>
                 <Button
                   variant="outline"
                   size="sm"

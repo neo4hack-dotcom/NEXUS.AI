@@ -33,10 +33,13 @@ import {
    Groups
    ──────────────────────────────────────────────────────────────────── */
 
-export type Group = 'g1' | 'g2' | 'g3' | 'g4' | 'public';
+export type Group = 'g1' | 'g2' | 'g3' | 'g4' | 'g5' | 'public';
 
 /** Maps a sidebar tab id to the functional group it belongs to.
- *  'public' = always visible to any signed-in user. */
+ *  'public' = always visible to any signed-in user.
+ *
+ *  G5 — Data Platform: visible to admin OR users with the \`isIT\` flag.
+ */
 export const TAB_GROUP: Record<string, Group> = {
   dashboard:      'public',
   projects:       'g1',
@@ -54,13 +57,21 @@ export const TAB_GROUP: Record<string, Group> = {
   workinggroups:  'g4',
   todos:          'public',   // personal task manager
   guide:          'public',
+  datafeeds:      'g5',       // Data Feeds — admin + IT flag
 };
 
-/** Whether a role can even SEE the group at all (sidebar visibility + route guard). */
-export const canAccessGroup = (role: Role, group: Group): boolean => {
+/**
+ * Whether a role can even SEE the group at all (sidebar visibility + route guard).
+ *
+ * @param role      - The user's app role.
+ * @param group     - The functional group to check.
+ * @param isIT      - Optional IT flag from the User record. Required to access G5.
+ */
+export const canAccessGroup = (role: Role, group: Group, isIT?: boolean): boolean => {
   if (group === 'public') return true;
   if (role === 'admin') return true;
-  if (group === 'g3') return false; // admin only
+  if (group === 'g3') return false;          // admin only
+  if (group === 'g5') return isIT === true;  // admin (caught above) + IT flag
   // manager, contributor, viewer all see G1, G2, G4 (with filtering applied separately)
   return true;
 };
