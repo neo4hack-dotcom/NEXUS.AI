@@ -23,6 +23,7 @@ import {
   Bot,
   KeyRound,
   DatabaseZap,
+  Lightbulb,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -44,7 +45,8 @@ export type TabId =
   | 'todos'
   | 'mcp'
   | 'agents'
-  | 'datafeeds';
+  | 'datafeeds'
+  | 'wishes';
 
 interface Props {
   activeTab: TabId;
@@ -117,7 +119,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Tools',
     items: [
-      { id: 'todos', label: 'Smart ToDo', icon: CheckSquare },
+      { id: 'todos',  label: 'Smart ToDo', icon: CheckSquare },
+      { id: 'wishes', label: 'Wish List',  icon: Lightbulb },
     ],
   },
   {

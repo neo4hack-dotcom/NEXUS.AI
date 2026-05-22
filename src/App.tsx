@@ -40,6 +40,7 @@ import { McpHubView } from './components/views/McpHub';
 import { Agents } from './components/views/Agents';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { DataFeedsView } from './components/views/DataFeeds';
+import { WishList } from './components/views/WishList';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -379,6 +380,8 @@ const App: React.FC = () => {
         return <Agents state={appState} currentUser={currentUser} update={update} />;
       case 'datafeeds':
         return <DataFeedsView state={appState} currentUser={currentUser} update={update} />;
+      case 'wishes':
+        return <WishList state={appState} currentUser={currentUser} update={update} />;
       default:
         return null;
     }

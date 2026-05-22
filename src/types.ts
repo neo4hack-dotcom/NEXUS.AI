@@ -612,6 +612,81 @@ export interface DataFeed {
   updatedAt: string;
 }
 
+/* ============================================================
+   Wish List — collective backlog of needs / ideas
+   ============================================================
+   Open to every signed-in user. Each wish documents a request
+   tied to a project, MCP, agent, data feed, or generic feature,
+   with sponsor + dates + lifecycle status.
+*/
+
+export type WishCategory =
+  | 'project'
+  | 'mcp'
+  | 'agent'
+  | 'datafeed'
+  | 'feature'
+  | 'integration'
+  | 'other';
+
+export type WishStatus =
+  | 'submitted'      // freshly created
+  | 'under_review'   // being triaged
+  | 'accepted'       // approved, to be scheduled
+  | 'in_progress'    // work started
+  | 'done'           // delivered
+  | 'rejected'       // declined
+  | 'on_hold';       // parked
+
+export type WishPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface WishComment {
+  id: string;
+  authorUserId: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface WishItem {
+  id: string;
+  title: string;
+  description: string;             // free-text explanation of the need
+  category: WishCategory;
+
+  // Justification & impact
+  businessJustification?: string;  // why this matters
+  expectedImpact?: string;         // benefits, gains, FTE saved…
+
+  // People
+  requesterId: string;             // auto = submitter
+  sponsorId?: string;              // internal sponsor (user id)
+  sponsorName?: string;            // free-text sponsor (external or unmapped)
+
+  // Cross-links to existing entities
+  relatedProjectId?: string;
+  relatedMcpServerId?: string;
+  relatedAgentId?: string;
+  relatedDataFeedId?: string;
+  externalLinks?: string[];        // arbitrary URLs (Confluence, JIRA…)
+
+  // Lifecycle
+  status: WishStatus;
+  priority: WishPriority;
+  wishedDate?: string;             // ETA wished for (ISO date)
+
+  // Triage feedback (set by admin/sponsor)
+  reviewNotes?: string;
+  decidedAt?: string;
+  decidedByUserId?: string;
+
+  comments: WishComment[];
+  tags: string[];
+
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -633,6 +708,7 @@ export interface AppState {
   agents: Agent[];
   agentFamilies: AgentFamily[];
   dataFeeds: DataFeed[];
+  wishes: WishItem[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;
