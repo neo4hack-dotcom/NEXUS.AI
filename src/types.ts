@@ -43,6 +43,10 @@ export interface User {
   /** When true, the next successful sign-in forces a password change before
    *  the app is reachable. Cleared automatically after the change. */
   mustChangePassword?: boolean;
+  /** When true, the user has access to the Data Feeds / IT section in addition
+   *  to whatever their standard role grants. Can be toggled by an admin in
+   *  Settings → Security. */
+  isIT?: boolean;
   firstName: string;
   lastName: string;
   email: string;
@@ -564,6 +568,50 @@ export interface Agent {
   updatedAt: string;
 }
 
+/* ============================================================
+   Data Feeds — silver-copy / data-warehouse pipeline tracking
+   ============================================================
+   Visible to: admin + users with the `isIT` flag (group G5).
+   Each feed represents one data pipeline: source → silver copy
+   in a data warehouse, with project metadata and cost tracking.
+*/
+
+export type DataFeedFrequency =
+  | 'realtime'
+  | 'hourly'
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'on_demand'
+  | 'other';
+
+export type DataFeedStatus =
+  | 'planned'
+  | 'in_dev'
+  | 'uat'
+  | 'production'
+  | 'deprecated';
+
+export interface DataFeed {
+  id: string;
+  platformName: string;          // nom de la plateforme source
+  dataType: string;              // type de données (ex: "CRM events", "Finance ledger")
+  frequency: DataFeedFrequency;  // fréquence de rafraîchissement
+  source: string;                // point de départ (system / API / DB)
+  destination: string;           // point d'arrivée — silver copy / DWH table
+  status: DataFeedStatus;
+  prodDate?: string;             // date de mise en production (ISO)
+  jiraRef?: string;              // ticket JIRA de référence
+  costManDays?: number;          // coût estimé en Man-Days
+  eta?: string;                  // ETA si pas encore en production (ISO)
+  comments?: string;             // zone commentaire libre
+  projectManager?: string;       // nom du PM
+  developer?: string;            // nom du développeur
+  presentationUrl?: string;      // lien vers la présentation du feed
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -584,6 +632,7 @@ export interface AppState {
   mcpBestPractices: McpBestPractice[];
   agents: Agent[];
   agentFamilies: AgentFamily[];
+  dataFeeds: DataFeed[];
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

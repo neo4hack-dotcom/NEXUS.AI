@@ -39,6 +39,7 @@ import { SmartTodoView } from './components/views/SmartTodo';
 import { McpHubView } from './components/views/McpHub';
 import { Agents } from './components/views/Agents';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { DataFeedsView } from './components/views/DataFeeds';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -310,7 +311,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
     const group = TAB_GROUP[activeTab] || 'public';
-    if (!canAccessGroup(currentUser.role, group)) {
+    if (!canAccessGroup(currentUser.role, group, currentUser.isIT)) {
       setActiveTab('dashboard');
     }
   }, [activeTab, currentUser]);
@@ -376,6 +377,8 @@ const App: React.FC = () => {
         return <McpHubView state={appState} currentUser={currentUser} update={update} />;
       case 'agents':
         return <Agents state={appState} currentUser={currentUser} update={update} />;
+      case 'datafeeds':
+        return <DataFeedsView state={appState} currentUser={currentUser} update={update} />;
       default:
         return null;
     }

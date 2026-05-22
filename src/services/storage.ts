@@ -25,6 +25,7 @@ import {
   McpBestPractice,
   Agent,
   AgentFamily,
+  DataFeed,
 } from '../types';
 
 const STORAGE_KEY = 'nexus_ai_data_v1';
@@ -157,6 +158,7 @@ export const getDefaultState = (): AppState => {
     mcpBestPractices: [],
     agents: [],
     agentFamilies: [],
+    dataFeeds: [],
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -216,6 +218,7 @@ export const sanitizeAppState = (data: any): AppState => {
       evaluations: arr(a.evaluations),
     })),
     agentFamilies: arr<AgentFamily>(data.agentFamilies),
+    dataFeeds: arr<DataFeed>(data.dataFeeds),
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,
@@ -541,6 +544,9 @@ export const importBackup = (
  *    filter state.users here — many views need to look up names (project
  *    manager, agent owner, etc.).
  *  - G4 (check-ins, working groups): everyone non-admin sees only own.
+ *  - G5 (dataFeeds): admin + isIT users see all; others see an empty list.
+ *    Access is gated at the sidebar/route level before this function runs,
+ *    so in practice this guard is a safety net rather than the primary control.
  */
 export const getFilteredState = (state: AppState): AppState => {
   const me = state.users.find((u) => u.id === state.currentUserId);
@@ -566,5 +572,11 @@ export const getFilteredState = (state: AppState): AppState => {
   );
 
   // G2 (repos, hackathons, MCP, agents): unchanged — full visibility.
+
+  // ── G5: Data Feeds — admin (early return above) + isIT ───────────────
+  if (!me.isIT) {
+    result.dataFeeds = [];
+  }
+
   return result;
 };
