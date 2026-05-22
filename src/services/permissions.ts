@@ -26,7 +26,7 @@
 
 import {
   Role, User, Project, Repository, Hackathon, Communication,
-  WeeklyCheckIn, WorkingGroup, McpServer, Agent,
+  WeeklyCheckIn, WorkingGroup, McpServer, Agent, WishItem,
 } from '../types';
 
 /* ────────────────────────────────────────────────────────────────────
@@ -54,6 +54,7 @@ export const TAB_GROUP: Record<string, Group> = {
   workinggroups:  'g4',
   todos:          'public',   // personal task manager
   guide:          'public',
+  wishes:         'public',   // collective wishlist — open to all signed-in users
 };
 
 /** Whether a role can even SEE the group at all (sidebar visibility + route guard). */
@@ -92,6 +93,9 @@ export const ownsCheckIn = (c: WeeklyCheckIn, userId: string): boolean =>
 
 export const ownsWorkingGroup = (wg: WorkingGroup, userId: string): boolean =>
   wg.ownerId === userId || wg.members.some((m) => m.userId === userId);
+
+export const ownsWish = (w: WishItem, userId: string): boolean =>
+  w.requesterId === userId;
 
 /* ────────────────────────────────────────────────────────────────────
    Entity-typed canEdit / canUseAI / canCreate helpers

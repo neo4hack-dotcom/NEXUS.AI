@@ -39,6 +39,7 @@ import { SmartTodoView } from './components/views/SmartTodo';
 import { McpHubView } from './components/views/McpHub';
 import { Agents } from './components/views/Agents';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { WishList } from './components/views/WishList';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -376,6 +377,8 @@ const App: React.FC = () => {
         return <McpHubView state={appState} currentUser={currentUser} update={update} />;
       case 'agents':
         return <Agents state={appState} currentUser={currentUser} update={update} />;
+      case 'wishes':
+        return <WishList state={appState} currentUser={currentUser} update={update} />;
       default:
         return null;
     }
