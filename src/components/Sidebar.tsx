@@ -24,6 +24,7 @@ import {
   KeyRound,
   DatabaseZap,
   Lightbulb,
+  Inbox,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -46,7 +47,8 @@ export type TabId =
   | 'mcp'
   | 'agents'
   | 'datafeeds'
-  | 'wishes';
+  | 'wishes'
+  | 'pending';
 
 interface Props {
   activeTab: TabId;
@@ -138,8 +140,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Admin',
     items: [
-      { id: 'contributors', label: 'Contributors',    icon: Users },
-      { id: 'settings',     label: 'Admin Settings',  icon: SettingsIcon },
+      { id: 'contributors', label: 'Contributors',     icon: Users },
+      { id: 'pending',      label: 'Pending Imports',  icon: Inbox },
+      { id: 'settings',     label: 'Admin Settings',   icon: SettingsIcon },
     ],
   },
 ];

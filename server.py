@@ -509,6 +509,122 @@ async def list_repos(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Repo inventory failed: {e.__class__.__name__}: {e}") from e
 
 
+@app.post("/api/sharepoint/fetch")
+async def sharepoint_fetch(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Proxy endpoint that fetches list items from an on-premise SharePoint via
+    its REST API. Doing it server-side avoids browser CORS / mixed-content
+    issues and lets us use NTLM authentication that the browser cannot.
+
+    Expected payload:
+      {
+        "siteUrl":   "https://sharepoint.acme.local/sites/projects",
+        "listName":  "Projects",
+        "authMethod": "basic" | "bearer" | "ntlm",
+        "username":  "user",                  (basic + ntlm)
+        "password":  "pwd",                   (basic + ntlm)
+        "domain":    "ACME",                  (ntlm only — optional)
+        "bearerToken": "...",                 (bearer only)
+        "scopeFilter": "Status eq 'Active'",  (OData $filter, optional)
+        "maxItems": 200,                      (optional, default 200)
+        "disableSslVerification": false
+      }
+
+    Returns: { "items": [ {Id, Title, ...}, ... ], "count": N }
+    """
+    try:
+        import httpx
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail="httpx not installed on the server. Run: pip install httpx",
+        ) from e
+
+    site_url   = str(payload.get("siteUrl") or "").strip().rstrip("/")
+    list_name  = str(payload.get("listName") or "").strip()
+    auth_method = str(payload.get("authMethod") or "basic").strip().lower()
+    username   = str(payload.get("username") or "").strip()
+    password   = str(payload.get("password") or "")
+    domain     = str(payload.get("domain") or "").strip()
+    bearer     = str(payload.get("bearerToken") or "").strip()
+    scope_flt  = str(payload.get("scopeFilter") or "").strip()
+    max_items  = int(payload.get("maxItems") or 200)
+    disable_ssl = bool(payload.get("disableSslVerification", False))
+
+    if not site_url or not list_name:
+        raise HTTPException(status_code=400, detail="siteUrl and listName are required")
+    if max_items < 1 or max_items > 5000:
+        max_items = 200
+
+    # Build the SharePoint REST URL.
+    # GET /_api/web/lists/getbytitle('Name')/items?$top=N&$filter=...
+    from urllib.parse import quote
+    url = f"{site_url}/_api/web/lists/getbytitle('{quote(list_name)}')/items?$top={max_items}"
+    if scope_flt:
+        url += f"&$filter={quote(scope_flt)}"
+
+    headers: Dict[str, str] = {
+        "Accept": "application/json;odata=verbose",
+    }
+    auth = None
+
+    if auth_method == "bearer":
+        if not bearer:
+            raise HTTPException(status_code=400, detail="bearerToken required for bearer auth")
+        headers["Authorization"] = f"Bearer {bearer}"
+    elif auth_method == "ntlm":
+        try:
+            from httpx_ntlm import HttpNtlmAuth  # type: ignore
+        except ImportError as e:
+            raise HTTPException(
+                status_code=500,
+                detail="httpx-ntlm not installed. Run: pip install httpx-ntlm",
+            ) from e
+        ntlm_user = f"{domain}\\{username}" if domain else username
+        auth = HttpNtlmAuth(ntlm_user, password)
+    else:  # basic
+        if not username:
+            raise HTTPException(status_code=400, detail="username required for basic auth")
+        auth = (username, password)
+
+    timeout = httpx.Timeout(20.0, read=120.0)
+
+    try:
+        async with httpx.AsyncClient(
+            headers=headers,
+            auth=auth,
+            verify=not disable_ssl,
+            timeout=timeout,
+            follow_redirects=True,
+        ) as client:
+            res = await client.get(url)
+            if res.status_code >= 400:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"SharePoint returned HTTP {res.status_code}: {res.text[:200]}",
+                )
+            data = res.json()
+            # OData "verbose" wraps results in { d: { results: [...] } }
+            if isinstance(data, dict):
+                if "d" in data and isinstance(data["d"], dict) and "results" in data["d"]:
+                    items = data["d"]["results"]
+                elif "value" in data and isinstance(data["value"], list):
+                    items = data["value"]   # nodata or odata=nometadata
+                else:
+                    items = []
+            else:
+                items = []
+            return {"items": items, "count": len(items)}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"SharePoint fetch failed: {e.__class__.__name__}: {e}",
+        ) from e
+
+
+
 # --- Optional: serve built frontend from /dist ---
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")

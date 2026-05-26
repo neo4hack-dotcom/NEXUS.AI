@@ -27,6 +27,8 @@ import {
   AgentFamily,
   DataFeed,
   WishItem,
+  PendingProject,
+  SharePointConfig,
 } from '../types';
 
 const STORAGE_KEY = 'nexus_ai_data_v1';
@@ -112,6 +114,28 @@ const DEFAULT_LLM_CONFIG: LlmConfig = {
     'You produce concise, professional, executive-grade summaries in English.',
 };
 
+const DEFAULT_SHAREPOINT_CONFIG: SharePointConfig = {
+  enabled: false,
+  siteUrl: '',
+  listName: '',
+  authMethod: 'basic',
+  scopeFilter: '',
+  maxItemsPerFetch: 200,
+  disableSslVerification: false,
+  fieldMapping: {
+    name: 'Title',
+    description: 'Description',
+    startDate: 'StartDate',
+    deadline: 'DueDate',
+    manager: 'Owner',
+    status: 'Status',
+  },
+  scheduleRecurrence: 'off',
+  scheduleHour: 6,
+  scheduleMinute: 0,
+  scheduleDayOfWeek: 1,
+};
+
 export const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -161,6 +185,8 @@ export const getDefaultState = (): AppState => {
     agentFamilies: [],
     dataFeeds: [],
     wishes: [],
+    pendingProjects: [],
+    sharePointConfig: DEFAULT_SHAREPOINT_CONFIG,
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -227,6 +253,14 @@ export const sanitizeAppState = (data: any): AppState => {
       tags: arr(w.tags),
       externalLinks: arr(w.externalLinks),
     })),
+    pendingProjects: arr<PendingProject>(data.pendingProjects).map((p) => ({
+      ...p,
+      spRawItem: (p && typeof p.spRawItem === 'object') ? p.spRawItem : {},
+      draft: (p && typeof p.draft === 'object') ? p.draft : {},
+    })),
+    sharePointConfig: { ...DEFAULT_SHAREPOINT_CONFIG, ...(data.sharePointConfig || {}),
+      fieldMapping: { ...DEFAULT_SHAREPOINT_CONFIG.fieldMapping, ...((data.sharePointConfig || {}).fieldMapping || {}) },
+    },
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({
       ...wg,

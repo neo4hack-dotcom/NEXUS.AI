@@ -23,8 +23,16 @@ import {
   Check,
   ShieldCheck,
   MonitorDot,
+  CloudDownload,
+  Calendar as CalendarIcon,
+  PlayCircle,
+  Loader2,
+  AlertCircle,
+  Link as LinkIcon,
+  FileText,
 } from 'lucide-react';
-import { AppState, LlmConfig, ProjectFamily, User } from '../../types';
+import { AppState, LlmConfig, ProjectFamily, User, SharePointConfig, SharePointFieldMapping, SharePointAuthMethod, SharePointScheduleRecurrence } from '../../types';
+import { runSync, computeNextSyncAt, DEFAULT_SP_IMPORT_PROMPT } from '../../services/sharepointService';
 import { generateId } from '../../services/storage';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
@@ -44,7 +52,7 @@ interface DataProps {
   replaceState: (s: AppState) => void;
 }
 
-type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families';
+type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families' | 'sharepoint';
 
 export const Settings: React.FC<Props> = ({ state, update }) => {
   const [tab, setTab] = useState<Tab>('llm');
@@ -76,6 +84,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
             { id: 'prompts', label: 'AI Prompts', icon: Sparkles },
             { id: 'families', label: 'Project Families', icon: Folders },
             { id: 'security', label: 'Security', icon: Key },
+            { id: 'sharepoint', label: 'SharePoint Import', icon: CloudDownload },
             { id: 'data', label: 'Data', icon: Database },
           ] as { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[]
         ).map(({ id, label, icon: Icon }) => (
@@ -98,6 +107,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
       {tab === 'prompts' && <PromptsSection state={state} update={update} />}
       {tab === 'families' && <FamiliesSection state={state} update={update} />}
       {tab === 'security' && <SecuritySection state={state} update={update} />}
+      {tab === 'sharepoint' && <SharePointSection state={state} update={update} />}
       {tab === 'data' && (
         <DataSection
           state={state}
@@ -877,6 +887,437 @@ const FamiliesSection: React.FC<{ state: AppState; update: (m: (s: AppState) => 
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+/* ────────────────────────────────────────────────────────────────────────
+   SharePoint Import
+   ────────────────────────────────────────────────────────────────────────
+   Admin-only section. Three sub-cards:
+     1. Connection — URL / list / auth / scope / TLS
+     2. Field mapping — SharePoint column → Project field
+     3. Scheduling + LLM prompt + last-sync telemetry + manual "Run now" button
+*/
+const SharePointSection: React.FC<Props> = ({ state, update }) => {
+  const cfg = state.sharePointConfig;
+  const [draft, setDraft] = useState<SharePointConfig>(cfg);
+  const [saved, setSaved] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{
+    state: 'idle' | 'running' | 'success' | 'error';
+    message: string;
+    fetched?: number;
+    added?: number;
+  }>({ state: 'idle', message: '' });
+  const [showAdvancedPrompt, setShowAdvancedPrompt] = useState(false);
+
+  // Keep draft in sync if the underlying state changes (e.g. another tab pushed an update)
+  React.useEffect(() => { setDraft(cfg); }, [cfg]);
+
+  const persistCfg = (next: SharePointConfig) => {
+    update((s) => ({ ...s, sharePointConfig: next }));
+  };
+
+  const save = () => {
+    const withNext = { ...draft, nextSyncAt: computeNextSyncAt(draft) };
+    persistCfg(withNext);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const setField = <K extends keyof SharePointConfig>(k: K, v: SharePointConfig[K]) =>
+    setDraft((d) => ({ ...d, [k]: v }));
+
+  const setMapping = <K extends keyof SharePointFieldMapping>(k: K, v: SharePointFieldMapping[K]) =>
+    setDraft((d) => ({ ...d, fieldMapping: { ...d.fieldMapping, [k]: v } }));
+
+  const runManualSync = async () => {
+    setSyncStatus({ state: 'running', message: 'Starting sync…' });
+    try {
+      // Persist any in-memory edits first so the sync uses the latest config.
+      const cfgToUse = { ...draft };
+      persistCfg(cfgToUse);
+      // Slight pause so update() flushes
+      await new Promise((r) => setTimeout(r, 50));
+
+      const result = await runSync(
+        { ...state, sharePointConfig: cfgToUse },
+        state.llmConfig,
+        (m) => setSyncStatus((s) => ({ ...s, message: m })),
+      );
+
+      const newCfg: SharePointConfig = {
+        ...cfgToUse,
+        lastSyncAt: new Date().toISOString(),
+        lastSyncStatus: result.errors.length > 0 ? 'partial' : 'success',
+        lastSyncFetchedCount: result.fetched,
+        lastSyncNewCount: result.added,
+        lastSyncMessage: result.errors.length > 0
+          ? `${result.added}/${result.fetched} added with ${result.errors.length} error(s)`
+          : `${result.added} new project(s) added to pending bucket`,
+        nextSyncAt: computeNextSyncAt(cfgToUse),
+      };
+      update((s) => ({
+        ...s,
+        sharePointConfig: newCfg,
+        pendingProjects: [...(s.pendingProjects ?? []), ...result.newPending],
+      }));
+      setDraft(newCfg);
+      setSyncStatus({
+        state: 'success',
+        message: newCfg.lastSyncMessage!,
+        fetched: result.fetched,
+        added: result.added,
+      });
+    } catch (e: any) {
+      const newCfg: SharePointConfig = {
+        ...draft,
+        lastSyncAt: new Date().toISOString(),
+        lastSyncStatus: 'error',
+        lastSyncMessage: e.message,
+      };
+      persistCfg(newCfg);
+      setSyncStatus({ state: 'error', message: e.message });
+    }
+  };
+
+  const inputCls =
+    'w-full h-9 px-3 text-[11px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand transition-colors disabled:opacity-60';
+
+  return (
+    <div className="space-y-4">
+
+      {/* Connection */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <CloudDownload className="w-5 h-5 text-brand" />
+          <div className="flex-1">
+            <h3 className="text-lg font-black uppercase tracking-tight">SharePoint Connection</h3>
+            <p className="text-xs text-muted mt-1">
+              On-premise SharePoint REST API endpoint. The backend (<span className="font-mono">/api/sharepoint/fetch</span>) handles the call so NTLM auth and self-signed certs work properly.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={draft.enabled}
+              onChange={(e) => setField('enabled', e.target.checked)}
+              className="w-4 h-4 accent-brand"
+            />
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em]">
+              {draft.enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </label>
+        </div>
+
+        <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="label-xs">Site URL *</label>
+            <Input
+              value={draft.siteUrl}
+              onChange={(e) => setField('siteUrl', e.target.value)}
+              placeholder="https://sharepoint.acme.local/sites/projects"
+              disabled={!draft.enabled}
+            />
+            <p className="text-[9px] font-mono text-muted">
+              Don't include /_api — we append it automatically.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="label-xs">List / library name *</label>
+            <Input
+              value={draft.listName}
+              onChange={(e) => setField('listName', e.target.value)}
+              placeholder="Projects"
+              disabled={!draft.enabled}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="label-xs">Auth method</label>
+            <Select
+              value={draft.authMethod}
+              onChange={(e) => setField('authMethod', e.target.value as SharePointAuthMethod)}
+              disabled={!draft.enabled}
+            >
+              <option value="basic">Basic (username + password)</option>
+              <option value="ntlm">NTLM (domain\\user + password)</option>
+              <option value="bearer">Bearer token</option>
+            </Select>
+          </div>
+
+          {draft.authMethod === 'ntlm' && (
+            <div className="space-y-1.5">
+              <label className="label-xs">Windows domain</label>
+              <Input
+                value={draft.domain ?? ''}
+                onChange={(e) => setField('domain', e.target.value)}
+                placeholder="ACME"
+                disabled={!draft.enabled}
+              />
+            </div>
+          )}
+
+          {(draft.authMethod === 'basic' || draft.authMethod === 'ntlm') && (
+            <>
+              <div className="space-y-1.5">
+                <label className="label-xs">Username</label>
+                <Input
+                  value={draft.username ?? ''}
+                  onChange={(e) => setField('username', e.target.value)}
+                  disabled={!draft.enabled}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="label-xs">Password</label>
+                <Input
+                  type="password"
+                  value={draft.password ?? ''}
+                  onChange={(e) => setField('password', e.target.value)}
+                  disabled={!draft.enabled}
+                  autoComplete="new-password"
+                />
+              </div>
+            </>
+          )}
+
+          {draft.authMethod === 'bearer' && (
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="label-xs">Bearer token</label>
+              <Input
+                type="password"
+                value={draft.bearerToken ?? ''}
+                onChange={(e) => setField('bearerToken', e.target.value)}
+                disabled={!draft.enabled}
+                autoComplete="new-password"
+              />
+            </div>
+          )}
+
+          <div className="md:col-span-2 space-y-1.5">
+            <label className="label-xs">Scope filter (OData $filter, optional)</label>
+            <Input
+              value={draft.scopeFilter ?? ''}
+              onChange={(e) => setField('scopeFilter', e.target.value)}
+              placeholder="Status eq 'Active'"
+              disabled={!draft.enabled}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="label-xs">Max items per fetch</label>
+            <Input
+              type="number"
+              min={1}
+              max={5000}
+              value={draft.maxItemsPerFetch ?? 200}
+              onChange={(e) => setField('maxItemsPerFetch', Number(e.target.value) || 200)}
+              disabled={!draft.enabled}
+            />
+          </div>
+
+          <div className="space-y-1.5 flex items-end">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={draft.disableSslVerification ?? false}
+                onChange={(e) => setField('disableSslVerification', e.target.checked)}
+                disabled={!draft.enabled}
+                className="w-4 h-4 accent-brand"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em]">
+                Skip TLS verification (self-signed certs)
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Field mapping */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <LinkIcon className="w-5 h-5 text-brand" />
+          <div>
+            <h3 className="text-lg font-black uppercase tracking-tight">Field Mapping</h3>
+            <p className="text-xs text-muted mt-1">
+              Hint the LLM about which SharePoint columns feed which Project fields. The LLM still uses its own judgement, but mappings improve accuracy.
+            </p>
+          </div>
+        </div>
+        <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {([
+            ['name',        'Project name (required)', 'Title'],
+            ['description', 'Description',              'Description'],
+            ['context',     'Context / notes',          'Notes'],
+            ['startDate',   'Start date',               'StartDate'],
+            ['deadline',    'Deadline',                 'DueDate'],
+            ['manager',     'Project manager (email/uid)', 'Owner'],
+            ['status',      'Status',                   'Status'],
+            ['tags',        'Tags (comma/semicolon separated)', 'Tags'],
+            ['family',      'Project family',           'Category'],
+          ] as [keyof SharePointFieldMapping, string, string][]).map(([key, label, placeholder]) => (
+            <div key={key} className="space-y-1.5">
+              <label className="label-xs">{label}</label>
+              <Input
+                value={draft.fieldMapping[key] ?? ''}
+                onChange={(e) => setMapping(key, e.target.value)}
+                placeholder={placeholder}
+                disabled={!draft.enabled}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Scheduling + LLM prompt */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <CalendarIcon className="w-5 h-5 text-brand" />
+          <div>
+            <h3 className="text-lg font-black uppercase tracking-tight">Scheduling & LLM prompt</h3>
+            <p className="text-xs text-muted mt-1">
+              When set to a recurrence, the sync runs automatically on an admin's open browser session. Each run only pulls items that aren't already pending or imported (delta).
+            </p>
+          </div>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="label-xs">Recurrence</label>
+              <Select
+                value={draft.scheduleRecurrence}
+                onChange={(e) => setField('scheduleRecurrence', e.target.value as SharePointScheduleRecurrence)}
+                disabled={!draft.enabled}
+              >
+                <option value="off">Off</option>
+                <option value="manual">Manual only</option>
+                <option value="hourly">Every hour</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </Select>
+            </div>
+            {(draft.scheduleRecurrence === 'daily' || draft.scheduleRecurrence === 'weekly') && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <label className="label-xs">Hour</label>
+                  <Input type="number" min={0} max={23} value={draft.scheduleHour ?? 6} onChange={(e) => setField('scheduleHour', Number(e.target.value))} disabled={!draft.enabled} />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="label-xs">Minute</label>
+                  <Input type="number" min={0} max={59} value={draft.scheduleMinute ?? 0} onChange={(e) => setField('scheduleMinute', Number(e.target.value))} disabled={!draft.enabled} />
+                </div>
+              </div>
+            )}
+            {draft.scheduleRecurrence === 'hourly' && (
+              <div className="space-y-1.5">
+                <label className="label-xs">Minute of the hour</label>
+                <Input type="number" min={0} max={59} value={draft.scheduleMinute ?? 0} onChange={(e) => setField('scheduleMinute', Number(e.target.value))} disabled={!draft.enabled} />
+              </div>
+            )}
+            {draft.scheduleRecurrence === 'weekly' && (
+              <div className="space-y-1.5">
+                <label className="label-xs">Day of week</label>
+                <Select
+                  value={String(draft.scheduleDayOfWeek ?? 1)}
+                  onChange={(e) => setField('scheduleDayOfWeek', Number(e.target.value))}
+                  disabled={!draft.enabled}
+                >
+                  {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d, i) => (
+                    <option key={d} value={i}>{d}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <button
+              onClick={() => setShowAdvancedPrompt((v) => !v)}
+              className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand hover:underline flex items-center gap-1"
+            >
+              <FileText className="w-3 h-3" />
+              {showAdvancedPrompt ? 'Hide' : 'Customise'} LLM prompt
+            </button>
+            {showAdvancedPrompt && (
+              <>
+                <Textarea
+                  value={draft.llmPromptOverride ?? DEFAULT_SP_IMPORT_PROMPT}
+                  onChange={(e) => setField('llmPromptOverride', e.target.value)}
+                  className="min-h-[260px] font-mono text-[10px]"
+                  disabled={!draft.enabled}
+                />
+                <div className="flex justify-between text-[9px] font-mono text-muted">
+                  <span>Variables: <span className="text-brand">{`{{MAPPING}} {{ITEM}} {{TODAY}}`}</span></span>
+                  <button
+                    type="button"
+                    onClick={() => setField('llmPromptOverride', undefined)}
+                    className="text-brand hover:underline"
+                  >
+                    Reset to default
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Telemetry & actions */}
+        <div className="p-5 border-t border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[10px]">
+            <div>
+              <p className="font-bold uppercase tracking-[0.14em] text-muted mb-0.5">Last sync</p>
+              <p className="font-mono">{draft.lastSyncAt ? new Date(draft.lastSyncAt).toLocaleString() : '—'}</p>
+            </div>
+            <div>
+              <p className="font-bold uppercase tracking-[0.14em] text-muted mb-0.5">Status</p>
+              <p className={`font-bold ${
+                draft.lastSyncStatus === 'success' ? 'text-emerald-600' :
+                draft.lastSyncStatus === 'partial' ? 'text-amber-600' :
+                draft.lastSyncStatus === 'error'   ? 'text-red-600' :
+                'text-muted'
+              }`}>{draft.lastSyncStatus ?? '—'}</p>
+            </div>
+            <div>
+              <p className="font-bold uppercase tracking-[0.14em] text-muted mb-0.5">Last result</p>
+              <p className="font-mono">{draft.lastSyncNewCount ?? 0} new / {draft.lastSyncFetchedCount ?? 0} fetched</p>
+            </div>
+            <div>
+              <p className="font-bold uppercase tracking-[0.14em] text-muted mb-0.5">Next scheduled</p>
+              <p className="font-mono">{draft.nextSyncAt ? new Date(draft.nextSyncAt).toLocaleString() : '—'}</p>
+            </div>
+          </div>
+          {draft.lastSyncMessage && (
+            <p className="text-[10px] text-muted italic">{draft.lastSyncMessage}</p>
+          )}
+          {syncStatus.state !== 'idle' && (
+            <div className={`flex items-center gap-2 p-3 border ${
+              syncStatus.state === 'running' ? 'border-sky-300 bg-sky-50 dark:bg-sky-900/20 dark:border-sky-800' :
+              syncStatus.state === 'success' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800' :
+              'border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-800'
+            }`}>
+              {syncStatus.state === 'running' && <Loader2 className="w-4 h-4 animate-spin text-sky-500" />}
+              {syncStatus.state === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+              {syncStatus.state === 'error'   && <AlertCircle className="w-4 h-4 text-red-500" />}
+              <span className="text-[11px]">{syncStatus.message}</span>
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={save}>
+              <Save className="w-4 h-4 mr-2" />
+              {saved ? 'Saved!' : 'Save configuration'}
+            </Button>
+            <Button
+              onClick={runManualSync}
+              disabled={!draft.enabled || syncStatus.state === 'running' || !draft.siteUrl || !draft.listName}
+            >
+              <PlayCircle className="w-4 h-4 mr-2" />
+              {syncStatus.state === 'running' ? 'Running…' : 'Sync now'}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
