@@ -687,6 +687,105 @@ export interface WishItem {
   updatedAt: string;
 }
 
+
+/* ============================================================
+   SharePoint Import — on-prem SharePoint → DOInG projects
+   ============================================================
+   The backend (/api/sharepoint/fetch) proxies the call to the
+   on-prem SharePoint REST API and returns the raw list items.
+   The frontend then enriches each item through the local LLM
+   to produce a structured PROJECT DRAFT, which lands in the
+   `pendingProjects` bucket. An admin or manager must explicitly
+   CONFIRM each draft before it is promoted to a real Project.
+*/
+
+export type SharePointAuthMethod = 'basic' | 'bearer' | 'ntlm';
+
+export type SharePointScheduleRecurrence = 'off' | 'manual' | 'hourly' | 'daily' | 'weekly';
+
+/** Maps a DOInG.Project field to the SharePoint column that feeds it. */
+export interface SharePointFieldMapping {
+  name?: string;          // SP column → Project.name        (required at use time)
+  description?: string;   // SP column → Project.description
+  context?: string;       // SP column → Project.context
+  startDate?: string;     // SP column → Project.startDate   (ISO/date)
+  deadline?: string;      // SP column → Project.deadline
+  manager?: string;       // SP column → manager email/uid (resolved to user id)
+  status?: string;        // SP column → Project.status (free-text mapped to enum)
+  tags?: string;          // SP column → comma- or semi-colon-separated tags
+  family?: string;        // SP column → mapped to project family by name
+}
+
+export interface SharePointConfig {
+  enabled: boolean;
+  /** Full site URL — ex: https://sharepoint.acme.local/sites/projects */
+  siteUrl: string;
+  /** Name of the SharePoint list / library that contains the projects. */
+  listName: string;
+
+  /** Auth method. Credentials are stored as-is in db.json (local-first). */
+  authMethod: SharePointAuthMethod;
+  username?: string;
+  password?: string;
+  domain?: string;        // NTLM only
+  bearerToken?: string;   // bearer only
+
+  /** Optional OData / CAML filter applied at fetch time. */
+  scopeFilter?: string;
+  /** Hard limit on items returned per fetch (prevents runaway syncs). */
+  maxItemsPerFetch?: number;
+  /** Skip TLS verification — useful for self-signed on-prem certs. */
+  disableSslVerification?: boolean;
+
+  /** Field mapping (SP column name → Project field). */
+  fieldMapping: SharePointFieldMapping;
+
+  /** Recurrence model. nextSyncAt is computed from these. */
+  scheduleRecurrence: SharePointScheduleRecurrence;
+  scheduleHour?: number;        // 0-23 (for daily / weekly)
+  scheduleMinute?: number;      // 0-59
+  scheduleDayOfWeek?: number;   // 0=Sunday … 6=Saturday (for weekly)
+
+  /** Telemetry / last-sync state (updated automatically). */
+  lastSyncAt?: string;
+  lastSyncStatus?: 'success' | 'error' | 'partial';
+  lastSyncMessage?: string;
+  lastSyncFetchedCount?: number;
+  lastSyncNewCount?: number;
+  nextSyncAt?: string;          // ISO — computed after each sync run
+
+  /** Per-import LLM prompt override (falls back to DEFAULT_PROMPTS). */
+  llmPromptOverride?: string;
+}
+
+export type PendingProjectStatus = 'pending' | 'confirmed' | 'rejected';
+
+export interface PendingProject {
+  id: string;
+  /** Unique SharePoint item id — used to de-duplicate across sync runs. */
+  spItemId: string;
+  /** Site/list the item came from — lets us support multiple sources later. */
+  spSource?: { siteUrl: string; listName: string };
+  /** Raw fields the SharePoint API returned, kept for the review UI. */
+  spRawItem: Record<string, unknown>;
+  /** When the item was first ingested. */
+  spFetchedAt: string;
+
+  /** LLM-generated project draft — same shape as a real Project (partial). */
+  draft: Partial<Project>;
+  /** Why the LLM mapped fields the way it did (shown to the reviewer). */
+  aiRationale?: string;
+  /** Free-text confidence note, ex: "high — clear name + dates". */
+  aiConfidence?: 'high' | 'medium' | 'low';
+
+  status: PendingProjectStatus;
+  reviewedByUserId?: string;
+  reviewedAt?: string;
+  reviewNotes?: string;
+
+  createdAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -709,6 +808,8 @@ export interface AppState {
   agentFamilies: AgentFamily[];
   dataFeeds: DataFeed[];
   wishes: WishItem[];
+  pendingProjects: PendingProject[];
+  sharePointConfig: SharePointConfig;
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

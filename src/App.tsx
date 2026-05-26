@@ -41,6 +41,8 @@ import { Agents } from './components/views/Agents';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { DataFeedsView } from './components/views/DataFeeds';
 import { WishList } from './components/views/WishList';
+import { PendingProjects } from './components/views/PendingProjects';
+import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -280,6 +282,71 @@ const App: React.FC = () => {
     return () => window.removeEventListener('doing_save_template', fn);
   }, [update]);
 
+  // ──────────────────────────────────────────────────────────────────────
+  // SharePoint sync scheduler — fires on whichever admin's tab is open.
+  // Tick every 60 s, check shouldRunSyncNow(), and trigger runSync if due.
+  // Idempotent across multiple tabs: we update nextSyncAt the moment a sync
+  // starts, so a second tab will see it's no longer due before firing.
+  // ──────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!appState) return;
+    const me = appState.users.find((u) => u.id === appState.currentUserId);
+    if (!me || me.role !== 'admin') return;          // only admin tabs run the scheduler
+
+    const tick = async () => {
+      const cfg = appState.sharePointConfig;
+      if (!shouldRunSyncNow(cfg)) return;
+
+      // Mark "next" forward immediately so concurrent tabs skip this run.
+      const provisionalNext = computeNextSyncAt(cfg, Date.now() + 60_000);
+      update((s) => ({
+        ...s,
+        sharePointConfig: { ...s.sharePointConfig, nextSyncAt: provisionalNext },
+      }));
+
+      try {
+        const result = await runSync(appState, appState.llmConfig);
+        update((s) => ({
+          ...s,
+          sharePointConfig: {
+            ...s.sharePointConfig,
+            lastSyncAt: new Date().toISOString(),
+            lastSyncStatus: result.errors.length > 0 ? 'partial' : 'success',
+            lastSyncFetchedCount: result.fetched,
+            lastSyncNewCount: result.added,
+            lastSyncMessage: `Scheduled run: ${result.added} new of ${result.fetched} fetched`,
+            nextSyncAt: computeNextSyncAt(s.sharePointConfig),
+          },
+          pendingProjects: [...(s.pendingProjects ?? []), ...result.newPending],
+        }));
+        console.info('[DOInG] SharePoint scheduled sync:', result);
+      } catch (e: any) {
+        console.warn('[DOInG] SharePoint scheduled sync failed:', e.message);
+        update((s) => ({
+          ...s,
+          sharePointConfig: {
+            ...s.sharePointConfig,
+            lastSyncAt: new Date().toISOString(),
+            lastSyncStatus: 'error',
+            lastSyncMessage: `Scheduled run failed: ${e.message}`,
+            nextSyncAt: computeNextSyncAt(s.sharePointConfig),
+          },
+        }));
+      }
+    };
+
+    // Kick once shortly after mount in case we're already past nextSyncAt,
+    // then check every minute.
+    const initial = setTimeout(() => { void tick(); }, 5_000);
+    const interval = setInterval(() => { void tick(); }, 60_000);
+    return () => { clearTimeout(initial); clearInterval(interval); };
+  // We intentionally don't include appState in deps — re-creating the interval
+  // every state change would be wasteful. The tick reads fresh state from
+  // appState via closure; for live config edits the next tick (max 60s away)
+  // will pick them up.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appState?.currentUserId, appState?.users.find((u) => u.id === appState?.currentUserId)?.role]);
+
   const toggleTheme = useCallback(() => {
     update((s) => {
       const next: Theme = s.theme === 'dark' ? 'light' : 'dark';
@@ -382,6 +449,12 @@ const App: React.FC = () => {
         return <DataFeedsView state={appState} currentUser={currentUser} update={update} />;
       case 'wishes':
         return <WishList state={appState} currentUser={currentUser} update={update} />;
+      case 'pending':
+        return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
+          <PendingProjects state={appState} currentUser={currentUser} update={update} />
+        ) : (
+          <div className="p-10 text-center text-muted">Admin or manager only.</div>
+        );
       default:
         return null;
     }

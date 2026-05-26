@@ -33,7 +33,7 @@ import {
    Groups
    ──────────────────────────────────────────────────────────────────── */
 
-export type Group = 'g1' | 'g2' | 'g3' | 'g4' | 'g5' | 'public';
+export type Group = 'g1' | 'g2' | 'g3' | 'g4' | 'g5' | 'g6' | 'public';
 
 /** Maps a sidebar tab id to the functional group it belongs to.
  *  'public' = always visible to any signed-in user.
@@ -59,6 +59,7 @@ export const TAB_GROUP: Record<string, Group> = {
   guide:          'public',
   datafeeds:      'g5',       // Data Feeds — admin + IT flag
   wishes:         'public',   // collective wishlist — open to all signed-in users
+  pending:        'g6',       // Pending project imports — admin + manager
 };
 
 /**
@@ -73,6 +74,7 @@ export const canAccessGroup = (role: Role, group: Group, isIT?: boolean): boolea
   if (role === 'admin') return true;
   if (group === 'g3') return false;          // admin only
   if (group === 'g5') return isIT === true;  // admin (caught above) + IT flag
+  if (group === 'g6') return role === 'manager';  // admin (caught above) + manager
   // manager, contributor, viewer all see G1, G2, G4 (with filtering applied separately)
   return true;
 };
