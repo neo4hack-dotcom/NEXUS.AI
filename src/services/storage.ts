@@ -130,7 +130,10 @@ const DEFAULT_SHAREPOINT_CONFIG: SharePointConfig = {
     manager: 'Owner',
     status: 'Status',
   },
-  scheduleRecurrence: 'off',
+  // Default cadence: once a day at 06:00 — covers the typical
+  // "I just need to capture the daily delta" use case out of the box.
+  // (The whole config still has to be `enabled: true` before anything fires.)
+  scheduleRecurrence: 'daily',
   scheduleHour: 6,
   scheduleMinute: 0,
   scheduleDayOfWeek: 1,

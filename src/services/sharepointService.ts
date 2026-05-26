@@ -111,6 +111,28 @@ const futureIso = (daysFromNow: number) => new Date(Date.now() + daysFromNow * 8
    Server fetch — calls the FastAPI proxy
    ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Build the effective OData $filter for a fetch.
+ *
+ * "Smart delta": when we already have a `lastSyncAt` on the config, we ask
+ * SharePoint to return only items modified since then — `Modified gt '...'`.
+ * This shrinks the payload massively for daily syncs against large lists,
+ * and is combined (AND) with the user-supplied scope filter.
+ *
+ * Disable by clearing `lastSyncAt` (use the "Reset delta" button in Settings)
+ * or by leaving the config's scopeFilter blank when smart-delta is not desired.
+ */
+export const buildEffectiveFilter = (cfg: SharePointConfig): string => {
+  const parts: string[] = [];
+  if (cfg.scopeFilter && cfg.scopeFilter.trim()) parts.push(cfg.scopeFilter.trim());
+  if (cfg.lastSyncAt) {
+    // SharePoint OData datetime literal: datetime'YYYY-MM-DDTHH:MM:SSZ'
+    const iso = new Date(cfg.lastSyncAt).toISOString().replace(/\.\d+Z$/, 'Z');
+    parts.push(`Modified gt datetime'${iso}'`);
+  }
+  return parts.join(' and ');
+};
+
 export const fetchSharePointItems = async (
   cfg: SharePointConfig
 ): Promise<{ items: Record<string, unknown>[]; count: number }> => {
@@ -125,7 +147,7 @@ export const fetchSharePointItems = async (
       password: cfg.password,
       domain: cfg.domain,
       bearerToken: cfg.bearerToken,
-      scopeFilter: cfg.scopeFilter,
+      scopeFilter: buildEffectiveFilter(cfg),   // includes smart-delta Modified clause
       maxItems: cfg.maxItemsPerFetch ?? 200,
       disableSslVerification: cfg.disableSslVerification ?? false,
     }),

@@ -1303,18 +1303,49 @@ const SharePointSection: React.FC<Props> = ({ state, update }) => {
               <span className="text-[11px]">{syncStatus.message}</span>
             </div>
           )}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={save}>
-              <Save className="w-4 h-4 mr-2" />
-              {saved ? 'Saved!' : 'Save configuration'}
-            </Button>
+          {/* Smart-delta info — explains how the daily check shrinks payload */}
+          <div className="flex items-start gap-2 p-3 border border-brand/30 bg-brand/5 text-[10px]">
+            <Sparkles className="w-3.5 h-3.5 text-brand shrink-0 mt-0.5" />
+            <div>
+              <strong className="font-bold uppercase tracking-[0.14em] text-brand">Smart delta</strong>
+              <span className="ml-2 text-muted">
+                When the scheduler runs, the fetch is automatically filtered to
+                <span className="font-mono"> Modified gt {`{lastSyncAt}`}</span> so only items
+                changed since the last sync hit the wire. Combined with the dedup layer
+                you typically end up importing only the genuinely new items per day.
+                Need a full re-scan? Use <em>Reset delta</em>.
+              </span>
+            </div>
+          </div>
+          <div className="flex justify-between items-center gap-2 flex-wrap">
             <Button
-              onClick={runManualSync}
-              disabled={!draft.enabled || syncStatus.state === 'running' || !draft.siteUrl || !draft.listName}
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!window.confirm('Reset the smart-delta marker? The next sync will pull every item again (then dedup against pending/confirmed by SP id).')) return;
+                const next = { ...draft, lastSyncAt: undefined, lastSyncStatus: undefined, lastSyncMessage: undefined, lastSyncFetchedCount: undefined, lastSyncNewCount: undefined };
+                setDraft(next);
+                persistCfg(next);
+              }}
+              disabled={!draft.lastSyncAt}
+              title={draft.lastSyncAt ? 'Force a full re-scan on the next sync' : 'No delta marker to reset yet'}
             >
-              <PlayCircle className="w-4 h-4 mr-2" />
-              {syncStatus.state === 'running' ? 'Running…' : 'Sync now'}
+              <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+              Reset delta
             </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={save}>
+                <Save className="w-4 h-4 mr-2" />
+                {saved ? 'Saved!' : 'Save configuration'}
+              </Button>
+              <Button
+                onClick={runManualSync}
+                disabled={!draft.enabled || syncStatus.state === 'running' || !draft.siteUrl || !draft.listName}
+              >
+                <PlayCircle className="w-4 h-4 mr-2" />
+                {syncStatus.state === 'running' ? 'Running…' : 'Sync now'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
