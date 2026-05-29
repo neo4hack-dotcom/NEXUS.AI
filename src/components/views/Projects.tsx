@@ -29,6 +29,7 @@ import {
   Upload,
   AlertCircle,
 } from 'lucide-react';
+import { useEditingLock } from '../../hooks/useEditingLock';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
   AppState,
@@ -51,7 +52,6 @@ import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 import { Input, Textarea, Select } from '../ui/Input';
 import { generateId } from '../../services/storage';
-import { useEditingLock } from '../../hooks/useEditingLock';
 import { buildProjectHTML, buildBookletHTML } from '../../services/exports';
 import {
   buildProjectBriefData,

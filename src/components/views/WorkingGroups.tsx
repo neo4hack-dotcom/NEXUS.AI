@@ -12,6 +12,7 @@ import {
   WGActionItem, WGActionStatus, ChecklistItem,
 } from '../../types';
 import { generateId } from '../../services/storage';
+import { useEditingLock } from '../../hooks/useEditingLock';
 
 /* ─────────────────────────────────────── helpers ── */
 
