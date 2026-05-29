@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AppState, User, AppNotification, Theme } from './types';
 import {
   loadState,
@@ -20,29 +20,29 @@ import { Sidebar, TabId } from './components/Sidebar';
 import { Login } from './components/Login';
 import { NotificationCenter } from './components/NotificationCenter';
 import { AiInsightModal } from './components/AiInsightModal';
-import { Dashboard } from './components/views/Dashboard';
-import { Projects } from './components/views/Projects';
-import { Timeline } from './components/views/Timeline';
-import { RiskHeatmap } from './components/views/RiskHeatmap';
-import { Contributors } from './components/views/Contributors';
-import { WeeklyCheckIn } from './components/views/WeeklyCheckIn';
-import { Communications } from './components/views/Communications';
-import { Technologies } from './components/views/Technologies';
-import { Repositories } from './components/views/Repositories';
-import { Settings } from './components/views/Settings';
-import { HackathonsView } from './components/views/Hackathon';
-import { WorkingGroupsView } from './components/views/WorkingGroups';
+const Dashboard = lazy(() => import('./components/views/Dashboard').then(m => ({ default: m.Dashboard })));
+const Projects = lazy(() => import('./components/views/Projects').then(m => ({ default: m.Projects })));
+const Timeline = lazy(() => import('./components/views/Timeline').then(m => ({ default: m.Timeline })));
+const RiskHeatmap = lazy(() => import('./components/views/RiskHeatmap').then(m => ({ default: m.RiskHeatmap })));
+const Contributors = lazy(() => import('./components/views/Contributors').then(m => ({ default: m.Contributors })));
+const WeeklyCheckIn = lazy(() => import('./components/views/WeeklyCheckIn').then(m => ({ default: m.WeeklyCheckIn })));
+const Communications = lazy(() => import('./components/views/Communications').then(m => ({ default: m.Communications })));
+const Technologies = lazy(() => import('./components/views/Technologies').then(m => ({ default: m.Technologies })));
+const Repositories = lazy(() => import('./components/views/Repositories').then(m => ({ default: m.Repositories })));
+const Settings = lazy(() => import('./components/views/Settings').then(m => ({ default: m.Settings })));
+const HackathonsView = lazy(() => import('./components/views/Hackathon').then(m => ({ default: m.HackathonsView })));
+const WorkingGroupsView = lazy(() => import('./components/views/WorkingGroups').then(m => ({ default: m.WorkingGroupsView })));
 import { NexusAssistant } from './components/NexusAssistant';
 import { CommandPalette } from './components/CommandPalette';
-import { UserGuide } from './components/views/UserGuide';
+const UserGuide = lazy(() => import('./components/views/UserGuide').then(m => ({ default: m.UserGuide })));
 import { OnboardingModal } from './components/OnboardingModal';
-import { SmartTodoView } from './components/views/SmartTodo';
-import { McpHubView } from './components/views/McpHub';
-import { Agents } from './components/views/Agents';
+const SmartTodoView = lazy(() => import('./components/views/SmartTodo').then(m => ({ default: m.SmartTodoView })));
+const McpHubView = lazy(() => import('./components/views/McpHub').then(m => ({ default: m.McpHubView })));
+const Agents = lazy(() => import('./components/views/Agents').then(m => ({ default: m.Agents })));
 import { ChangePasswordModal } from './components/ChangePasswordModal';
-import { DataFeedsView } from './components/views/DataFeeds';
-import { WishList } from './components/views/WishList';
-import { PendingProjects } from './components/views/PendingProjects';
+const DataFeedsView = lazy(() => import('./components/views/DataFeeds').then(m => ({ default: m.DataFeedsView })));
+const WishList = lazy(() => import('./components/views/WishList').then(m => ({ default: m.WishList })));
+const PendingProjects = lazy(() => import('./components/views/PendingProjects').then(m => ({ default: m.PendingProjects })));
 import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
 
 const applyThemeDom = (theme: Theme) => {
@@ -559,7 +559,9 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8">{activeView}</div>
+        <div className="flex-1 overflow-y-auto p-8">
+          <Suspense fallback={<ViewLoader />}>{activeView}</Suspense>
+        </div>
       </main>
 
       <NotificationCenter
