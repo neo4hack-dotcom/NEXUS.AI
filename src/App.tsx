@@ -13,6 +13,7 @@ import {
   flushPendingSave,
   startSSE,
   stopSSE,
+  isEditingLocked,
 } from './services/storage';
 import { canAccessGroup, TAB_GROUP } from './services/permissions';
 import { Sidebar, TabId } from './components/Sidebar';
@@ -232,6 +233,7 @@ const App: React.FC = () => {
       stopPolling();
       stopSSE();
       window.removeEventListener('nexus_conflict', onConflict);
+      window.removeEventListener('nexus_merged', onMerged);
     };
   }, []);
 
