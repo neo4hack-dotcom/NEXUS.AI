@@ -99,6 +99,9 @@ const TaskModal: React.FC<{
   onDelete?: () => void;
 }> = ({ task, wgId: _wgId, users, wgMembers, onClose, onSave, onDelete }) => {
   const isNew = !task;
+  // Modal mounts only while open → hold the editing lock so a teammate's
+  // concurrent save can't refresh the tree and reset this form mid-edit.
+  useEditingLock(true);
   const [title, setTitle] = useState(task?.title ?? '');
   const [desc, setDesc] = useState(task?.description ?? '');
   const [status, setStatus] = useState<WGTaskStatus>(task?.status ?? 'todo');
@@ -322,6 +325,9 @@ const SessionEditor: React.FC<{
   onDelete?: () => void;
 }> = ({ session, carriedItems, users, wgMembers, onClose, onSave, onDelete }) => {
   const isNew = !session;
+  // Hold the editing lock for the whole session-editor lifetime so a
+  // concurrent save can't wipe what's being typed (the 'session disappears' bug).
+  useEditingLock(true);
   const [date, setDate] = useState(session?.date ?? new Date().toISOString().slice(0, 10));
   const [title, setTitle] = useState(session?.title ?? '');
   const [attendeeIds, setAttendeeIds] = useState<string[]>(session?.attendeeIds ?? []);

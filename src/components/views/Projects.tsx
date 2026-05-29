@@ -538,6 +538,9 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
     setSelectedId(p.id);
   };
 
+  // Hold the editing lock while any project editor/builder is open so a
+  // concurrent teammate's save can't refresh the tree out from under the form.
+  useEditingLock(showAiBot || showBulkImport || selectedId !== null);
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-end gap-4 justify-between">
