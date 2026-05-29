@@ -112,6 +112,132 @@ def _write_db(payload: Dict[str, Any]) -> None:
     tmp.replace(DB_FILE)
 
 
+# Serialises the read-modify-write cycle so two concurrent POSTs can't interleave
+# their read and write phases (which would silently drop one writer's changes).
+_db_write_lock = asyncio.Lock()
+
+# Every top-level collection that is an array of {id, ...} entities. On a
+# concurrent-write conflict we merge these by id instead of rejecting, so two
+# users editing DIFFERENT entities never lose each other's work.
+_MERGEABLE_COLLECTIONS = (
+    "users", "projects", "projectTemplates", "projectFamilies",
+    "technologies", "repositories", "communications", "emailTemplates",
+    "mailingLists", "weeklyCheckIns", "notifications", "hackathons",
+    "workingGroups", "smartTodos", "mcpServers", "mcpFamilies",
+    "mcpBestPractices", "agents", "agentFamilies", "dataFeeds",
+    "wishes", "pendingProjects",
+)
+
+
+def _entity_recency(entity: Dict[str, Any]) -> float:
+    """Best-effort 'how fresh is this entity' for conflict resolution."""
+    for key in ("updatedAt", "createdAt"):
+        v = entity.get(key)
+        if isinstance(v, str):
+            # ISO strings compare lexicographically in chronological order.
+            # Convert to a sortable number via length-safe fallback.
+            return _iso_to_epoch(v)
+        if isinstance(v, (int, float)):
+            return float(v)
+    return 0.0
+
+
+def _iso_to_epoch(s: str) -> float:
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _merge_entity(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Field-level merge of two versions of the SAME entity (same id).
+      - Nested arrays of {id, ...} are themselves merged by id (recursively),
+        so two users editing the same Working Group but DIFFERENT sessions /
+        tasks both keep their additions.
+      - Scalar / object fields take the value from the newer version (by
+        updatedAt/createdAt), so the latest edit to a field wins.
+    """
+    newer, older = (a, b) if _entity_recency(a) >= _entity_recency(b) else (b, a)
+    out = dict(newer)  # newer scalars win
+
+    for key, older_val in older.items():
+        newer_val = newer.get(key)
+        # Recursively union nested entity arrays present on either side.
+        if (isinstance(newer_val, list) and isinstance(older_val, list)
+                and (_looks_like_entity_list(newer_val) or _looks_like_entity_list(older_val))):
+            out[key] = _merge_collection(older_val, newer_val)
+        elif key not in newer:
+            out[key] = older_val  # field only the older side had
+    return out
+
+
+def _looks_like_entity_list(v: Any) -> bool:
+    return isinstance(v, list) and any(isinstance(x, dict) and "id" in x for x in v)
+
+
+def _merge_collection(current: list, incoming: list) -> list:
+    """
+    Union two entity arrays by `id`.
+      - present in both  → field-level merge (see _merge_entity), so nested
+                           additions from both writers survive.
+      - present in one   → keep it (covers concurrent creations on either side).
+    Order: incoming order first (writer's view), then any extras only on server.
+    NOTE: a just-deleted entity that the OTHER client still holds may be
+    resurrected. We accept this rare, low-damage trade-off — it is vastly
+    preferable to losing a freshly-created project or a whole meeting session.
+    """
+    if not isinstance(current, list):
+        return incoming
+    if not isinstance(incoming, list):
+        return current
+
+    cur_by_id = {e.get("id"): e for e in current if isinstance(e, dict) and e.get("id") is not None}
+
+    merged: list = []
+    seen = set()
+
+    for e in incoming:
+        if not isinstance(e, dict) or e.get("id") is None:
+            merged.append(e)
+            continue
+        eid = e["id"]
+        seen.add(eid)
+        other = cur_by_id.get(eid)
+        if other is not None:
+            merged.append(_merge_entity(other, e))   # field-level union
+        else:
+            merged.append(e)
+
+    # Append entities that exist only on the server (created by another client).
+    for e in current:
+        if not isinstance(e, dict):
+            continue
+        eid = e.get("id")
+        if eid is not None and eid not in seen:
+            merged.append(e)
+
+    return merged
+
+
+def _merge_states(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Three-way-ish merge used on the concurrent-write path. Starts from the
+    incoming document (the writer's full intent), then for every mergeable
+    collection unions in any entities the other writer added/updated on the
+    server. Scalar/object config fields keep the incoming value.
+    """
+    merged = dict(incoming)
+    for key in _MERGEABLE_COLLECTIONS:
+        if key in current or key in incoming:
+            merged[key] = _merge_collection(
+                current.get(key, []) or [],
+                incoming.get(key, []) or [],
+            )
+    return merged
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # SSE — Server-Sent Events for real-time push to connected clients.
 # Replaces the previous polling-based sync. Each connected client gets its own
@@ -154,28 +280,39 @@ async def save_data(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
-    current = _read_db()
+    # Serialise the whole read-modify-write so two concurrent POSTs can't
+    # interleave (read-old / read-old / write-A / write-B → A lost).
+    async with _db_write_lock:
+        current = _read_db()
+        merged_flag = False
 
-    # Optimistic concurrency control
-    if x_base_version and x_base_version != "force":
-        server_version = str(current.get("lastUpdated", 0))
-        if server_version != str(x_base_version):
-            print(f"[NEXUS] Conflict: client={x_base_version} server={server_version}")
-            return JSONResponse(
-                status_code=409,
-                content={"error": "Conflict detected", "serverData": current},
-            )
+        # Optimistic concurrency control with AUTO-MERGE on conflict.
+        # Instead of rejecting a stale write (which used to strand the client's
+        # changes), we merge by-id so concurrent edits to DIFFERENT entities both
+        # survive. Same-entity edits resolve by recency (updatedAt/createdAt).
+        if x_base_version and x_base_version != "force":
+            server_version = str(current.get("lastUpdated", 0))
+            if server_version != str(x_base_version):
+                print(f"[NEXUS] Concurrent write (client={x_base_version} "
+                      f"server={server_version}) → merging by id")
+                new_data = _merge_states(current, new_data)
+                merged_flag = True
 
-    new_data["lastUpdated"] = int(time.time() * 1000)
-    _write_db(new_data)
-    print(f"[NEXUS] Saved at {time.strftime('%H:%M:%S')} ({len(json.dumps(new_data))} bytes)")
+        new_data["lastUpdated"] = int(time.time() * 1000)
+        _write_db(new_data)
+        print(f"[NEXUS] Saved at {time.strftime('%H:%M:%S')} "
+              f"({len(json.dumps(new_data))} bytes{', merged' if merged_flag else ''})")
 
     # Notify every SSE-connected client that fresh data is available.
-    # We send only the new timestamp — clients then call GET /api/data to fetch
-    # the full payload (keeps the SSE channel lightweight).
     await _broadcast_update("data_updated", {"lastUpdated": new_data["lastUpdated"]})
 
-    return JSONResponse({"ok": True, "timestamp": new_data["lastUpdated"]})
+    # On a merge we return the full merged document so the writer adopts the
+    # union (their change + whatever the other writer did) without another fetch.
+    body: Dict[str, Any] = {"ok": True, "timestamp": new_data["lastUpdated"]}
+    if merged_flag:
+        body["merged"] = True
+        body["serverData"] = new_data
+    return JSONResponse(body)
 
 
 @app.get("/api/version")

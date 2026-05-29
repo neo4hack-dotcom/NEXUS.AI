@@ -13,6 +13,7 @@ import {
   flushPendingSave,
   startSSE,
   stopSSE,
+  isEditingLocked,
 } from './services/storage';
 import { canAccessGroup, TAB_GROUP } from './services/permissions';
 import { Sidebar, TabId } from './components/Sidebar';
@@ -183,9 +184,10 @@ const App: React.FC = () => {
     const onConflict = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (!detail?.serverData) return;
-      if (hasPendingSave()) {
+      // Server now auto-merges, so this legacy path is rare. Never overwrite
+      // while we still have unflushed local changes or an editor is open.
+      if (hasPendingSave() || isEditingLocked()) {
         console.warn('[DOInG] Sync conflict — local changes preserved; will retry on next save.');
-        // Optional: surface a soft toast — we just log for now.
         return;
       }
       setAppState((curr): AppState => ({
@@ -196,6 +198,20 @@ const App: React.FC = () => {
     };
     window.addEventListener('nexus_conflict', onConflict);
 
+    // The server merged our write with a concurrent one. The payload it returns
+    // already contains OUR change plus the other writer's — adopt it so both
+    // survive. Safe even mid-edit: it is a superset of what we just sent.
+    const onMerged = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail?.serverData) return;
+      setAppState((curr): AppState => ({
+        ...detail.serverData,
+        currentUserId: curr?.currentUserId ?? null,
+        theme: curr?.theme ?? 'dark',
+      }));
+    };
+    window.addEventListener('nexus_merged', onMerged);
+
     // Real-time collaboration.
     // Primary channel: SSE (Server-Sent Events) — the backend pushes a
     // 'data_updated' event the instant any client writes. Latency <100ms.
@@ -205,9 +221,10 @@ const App: React.FC = () => {
     // otherwise we'd overwrite local state with a stale server snapshot, silently
     // losing whatever the user just created (the classic family-disappears bug).
     const refreshFromServer = async (origin: string) => {
-      if (hasPendingSave()) {
-        // Local changes haven't reached the server yet. Skip this refresh —
-        // the saveState debounce will flush and the next event/poll will see them.
+      // Never clobber unflushed local work or an actively-open editor.
+      if (hasPendingSave() || isEditingLocked()) {
+        // Local changes haven't reached the server yet, or an editor is open.
+        // The saveState debounce will flush; the next event/poll will reconcile.
         return;
       }
       const serverState = await fetchFromServer();
@@ -232,6 +249,7 @@ const App: React.FC = () => {
       stopPolling();
       stopSSE();
       window.removeEventListener('nexus_conflict', onConflict);
+      window.removeEventListener('nexus_merged', onMerged);
     };
   }, []);
 

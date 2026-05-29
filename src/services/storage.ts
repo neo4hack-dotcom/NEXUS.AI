@@ -48,6 +48,20 @@ let _pendingPayload: Record<string, unknown> | null = null;
 // Used by callers to know if local state has unflushed changes.
 let _postInFlight = 0;
 
+// Editing lock: when > 0, a destructive full-tree refresh (SSE/poll) must be
+// suppressed so it can't reset an actively-open editor (e.g. a Working Group
+// meeting session being typed). Incremented when an editor mounts, decremented
+// when it closes. Background refreshes resume the moment it returns to 0.
+let _editingLocks = 0;
+
+/** Engage/release the editing lock. Pass true on editor open, false on close. */
+export const setEditingLock = (on: boolean): void => {
+  _editingLocks = Math.max(0, _editingLocks + (on ? 1 : -1));
+};
+
+/** True while any editor has the lock engaged. */
+export const isEditingLocked = (): boolean => _editingLocks > 0;
+
 /**
  * Returns true if there are unflushed local changes:
  * - A debounced POST is still waiting, OR
@@ -86,11 +100,29 @@ export const flushPendingSave = async (): Promise<void> => {
           if (response.ok) {
             const result = await response.json();
             _serverVersion = result.timestamp ?? _serverVersion;
+            if (result.merged && result.serverData) {
+              window.dispatchEvent(
+                new CustomEvent('nexus_merged', { detail: { serverData: result.serverData } })
+              );
+            }
           } else if (response.status === 409) {
             const conflictData = await response.json();
-            window.dispatchEvent(
-              new CustomEvent('nexus_conflict', { detail: { serverData: conflictData.serverData } })
-            );
+            if (conflictData?.serverData?.lastUpdated) {
+              _serverVersion = conflictData.serverData.lastUpdated;
+            }
+            try {
+              const retry = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Base-Version': 'force' },
+                body: JSON.stringify(payload),
+              });
+              if (retry.ok) {
+                const r = await retry.json();
+                _serverVersion = r.timestamp ?? _serverVersion;
+              }
+            } catch (e) {
+              console.warn('[DOINg] Flush 409 retry failed', e);
+            }
           }
         } catch (err) {
           console.warn('[DOINg] Flush failed', err);
@@ -393,11 +425,35 @@ export const saveState = (state: AppState): void => {
           if (response.ok) {
             const result = await response.json();
             _serverVersion = result.timestamp ?? timestamp;
+            // The server auto-merged our write with a concurrent one. Adopt the
+            // union so this client sees the other writer's changes too — and so
+            // it never strands our own change (the old 409 data-loss bug).
+            if (result.merged && result.serverData) {
+              window.dispatchEvent(
+                new CustomEvent('nexus_merged', { detail: { serverData: result.serverData } })
+              );
+            }
           } else if (response.status === 409) {
+            // Legacy/edge path — the server now merges, so this is rare. Rebase
+            // to the server version and retry ONCE with force so our change still
+            // lands instead of being stranded.
             const conflictData = await response.json();
-            window.dispatchEvent(
-              new CustomEvent('nexus_conflict', { detail: { serverData: conflictData.serverData } })
-            );
+            if (conflictData?.serverData?.lastUpdated) {
+              _serverVersion = conflictData.serverData.lastUpdated;
+            }
+            try {
+              const retry = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Base-Version': 'force' },
+                body: JSON.stringify(payload),
+              });
+              if (retry.ok) {
+                const r = await retry.json();
+                _serverVersion = r.timestamp ?? _serverVersion;
+              }
+            } catch (e) {
+              console.warn('[DOINg] 409 retry failed', e);
+            }
           }
         } catch (err) {
           console.warn('[DOINg] Server save failed', err);
