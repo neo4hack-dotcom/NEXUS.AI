@@ -5,14 +5,16 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5173,
+    port: 3000,
+    host: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
-        proxy: true,
+        changeOrigin: true,
       },
     },
   },
+  base: './',
   build: {
     // Route views are already code-split via React.lazy in App.tsx. Here we
     // additionally peel the heavy third-party libraries into their own stable,
@@ -37,7 +39,8 @@ export default defineConfig({
         },
       },
     },
-    // The vendor-exceljs chunk is intrinsically large but loads on demand only.
-    chunkSizeWarningLimit: 700,
+    // The vendor-exceljs chunk (~940 kB) is intrinsically large but loads on
+    // demand only (spreadsheet export path), never on first paint.
+    chunkSizeWarningLimit: 1000,
   },
 });
