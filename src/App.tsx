@@ -132,6 +132,13 @@ const computeNotifications = (state: AppState): AppNotification[] => {
   return out;
 };
 
+/** Lightweight fallback shown while a lazily-loaded view chunk is fetched. */
+const ViewLoader: React.FC = () => (
+  <div className="flex items-center justify-center h-full min-h-[40vh]">
+    <p className="text-xs uppercase tracking-[0.18em] text-muted animate-pulse">Loading…</p>
+  </div>
+);
+
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
