@@ -48,7 +48,13 @@ export type TabId =
   | 'agents'
   | 'datafeeds'
   | 'wishes'
-  | 'pending';
+  | 'pending'
+  | 'board'
+  | 'capacity'
+  | 'qbr'
+  | 'activity'
+  | 'okrs'
+  | 'graph';
 
 interface Props {
   activeTab: TabId;
@@ -96,8 +102,10 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Project Management',
     items: [
       { id: 'projects',       label: 'Projects',       icon: Target },
+      { id: 'board',          label: 'Task Board',     icon: KanbanSquare },
       { id: 'timeline',       label: 'Timeline',       icon: Calendar },
       { id: 'risk',           label: 'Risk Heatmap',   icon: AlertTriangle },
+      { id: 'qbr',            label: 'Portfolio Review', icon: ClipboardCheck },
       { id: 'communications', label: 'Communications', icon: Mail },
     ],
   },
@@ -123,6 +131,13 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'todos',  label: 'Smart ToDo', icon: CheckSquare },
       { id: 'wishes', label: 'Wish List',  icon: Lightbulb },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { id: 'activity', label: 'Activity Feed',  icon: Activity },
+      { id: 'capacity', label: 'Team Capacity',  icon: Gauge },
     ],
   },
   {

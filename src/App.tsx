@@ -43,6 +43,10 @@ import { ChangePasswordModal } from './components/ChangePasswordModal';
 const DataFeedsView = lazy(() => import('./components/views/DataFeeds').then(m => ({ default: m.DataFeedsView })));
 const WishList = lazy(() => import('./components/views/WishList').then(m => ({ default: m.WishList })));
 const PendingProjects = lazy(() => import('./components/views/PendingProjects').then(m => ({ default: m.PendingProjects })));
+const ActivityFeed = lazy(() => import('./components/views/ActivityFeed').then(m => ({ default: m.ActivityFeed })));
+const Capacity = lazy(() => import('./components/views/Capacity').then(m => ({ default: m.Capacity })));
+const TaskBoard = lazy(() => import('./components/views/TaskBoard').then(m => ({ default: m.TaskBoard })));
+const PortfolioReview = lazy(() => import('./components/views/PortfolioReview').then(m => ({ default: m.PortfolioReview })));
 import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
 
 const applyThemeDom = (theme: Theme) => {
@@ -477,6 +481,18 @@ const App: React.FC = () => {
       case 'pending':
         return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
           <PendingProjects state={appState} currentUser={currentUser} update={update} />
+        ) : (
+          <div className="p-10 text-center text-muted">Admin or manager only.</div>
+        );
+      case 'board':
+        return <TaskBoard state={filteredState} currentUser={currentUser} update={update} />;
+      case 'qbr':
+        return <PortfolioReview state={filteredState} currentUser={currentUser} update={update} />;
+      case 'activity':
+        return <ActivityFeed state={filteredState} currentUser={currentUser} update={update} />;
+      case 'capacity':
+        return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
+          <Capacity state={appState} currentUser={currentUser} update={update} />
         ) : (
           <div className="p-10 text-center text-muted">Admin or manager only.</div>
         );
