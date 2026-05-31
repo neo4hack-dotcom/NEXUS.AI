@@ -67,6 +67,7 @@ export const TAB_GROUP: Record<string, Group> = {
   capacity:       'g6',       // team capacity — admin + manager
   graph:          'public',   // knowledge graph of entity relations
   deps:           'g1',       // inter-project dependencies
+  reports:        'g6',       // AI portfolio digests — admin + manager
 };
 
 /**

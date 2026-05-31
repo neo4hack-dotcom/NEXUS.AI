@@ -64,7 +64,8 @@ export type TabId =
   | 'activity'
   | 'okrs'
   | 'graph'
-  | 'deps';
+  | 'deps'
+  | 'reports';
 
 interface Props {
   activeTab: TabId;
@@ -150,6 +151,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'activity', label: 'Activity Feed',  icon: Activity },
       { id: 'capacity', label: 'Team Capacity',  icon: Gauge },
+      { id: 'reports',  label: 'Reports',         icon: FileBarChart },
       { id: 'graph',    label: 'Knowledge Graph', icon: Share2 },
     ],
   },
