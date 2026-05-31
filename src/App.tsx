@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState, Suspense, lazy } from 'react';
-import { AppState, User, AppNotification, Theme } from './types';
+import React, { useCallback, useEffect, useMemo, useState, useRef, Suspense, lazy } from 'react';
+import { AppState, User, AppNotification, Theme, ProjectStatus } from './types';
 import {
   loadState,
   saveState,
@@ -43,7 +43,16 @@ import { ChangePasswordModal } from './components/ChangePasswordModal';
 const DataFeedsView = lazy(() => import('./components/views/DataFeeds').then(m => ({ default: m.DataFeedsView })));
 const WishList = lazy(() => import('./components/views/WishList').then(m => ({ default: m.WishList })));
 const PendingProjects = lazy(() => import('./components/views/PendingProjects').then(m => ({ default: m.PendingProjects })));
+const ActivityFeed = lazy(() => import('./components/views/ActivityFeed').then(m => ({ default: m.ActivityFeed })));
+const Capacity = lazy(() => import('./components/views/Capacity').then(m => ({ default: m.Capacity })));
+const TaskBoard = lazy(() => import('./components/views/TaskBoard').then(m => ({ default: m.TaskBoard })));
+const PortfolioReview = lazy(() => import('./components/views/PortfolioReview').then(m => ({ default: m.PortfolioReview })));
+const Okrs = lazy(() => import('./components/views/Okrs').then(m => ({ default: m.Okrs })));
+const KnowledgeGraph = lazy(() => import('./components/views/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
+const Dependencies = lazy(() => import('./components/views/Dependencies').then(m => ({ default: m.Dependencies })));
+const Reports = lazy(() => import('./components/views/Reports').then(m => ({ default: m.Reports })));
 import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
+import { sendWebhook } from './services/webhookService';
 
 const applyThemeDom = (theme: Theme) => {
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -279,6 +288,68 @@ const App: React.FC = () => {
     setAppState((curr) => (curr ? mutator(curr) : curr));
   }, []);
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Webhook dispatcher (#5) — watch state transitions and fire outbound
+  // Slack/Teams notifications. Diffs the previous snapshot against the current
+  // one so each transition fires exactly once. Runs only on an admin tab to
+  // avoid every client double-sending; best-effort and never blocks the UI.
+  // ──────────────────────────────────────────────────────────────────────
+  const prevWatchRef = useRef<AppState | null>(null);
+  useEffect(() => {
+    if (!appState) return;
+    const prev = prevWatchRef.current;
+    prevWatchRef.current = appState;
+    if (!prev) return; // first run — establish baseline only
+
+    const me = appState.users.find((u) => u.id === appState.currentUserId);
+    if (!me || me.role !== 'admin') return;
+    const cfg = appState.webhookConfig;
+    if (!cfg?.enabled) return;
+
+    const fire = async (event: Parameters<typeof sendWebhook>[1], title: string, body: string) => {
+      const tele = await sendWebhook(cfg, event, title, body);
+      if (tele) update((s) => ({ ...s, webhookConfig: { ...s.webhookConfig, ...tele } }));
+    };
+
+    // project_red — a project transitioned into the Paused (at-risk) status.
+    const prevStatus = new Map(prev.projects.map((p) => [p.id, p.status]));
+    appState.projects.forEach((p) => {
+      const was = prevStatus.get(p.id);
+      if (was && was !== p.status && p.status === ProjectStatus.PAUSED) {
+        void fire('project_red', `⚠️ Project at risk: ${p.name}`, `"${p.name}" was flagged at-risk.`);
+      }
+    });
+
+    // wish_accepted — a wish moved into the accepted state.
+    const prevWish = new Map((prev.wishes ?? []).map((w) => [w.id, w.status]));
+    (appState.wishes ?? []).forEach((w) => {
+      const was = prevWish.get(w.id);
+      if (was && was !== w.status && w.status === 'accepted') {
+        void fire('wish_accepted', `✅ Wish accepted: ${w.title}`, w.description?.slice(0, 200) || '');
+      }
+    });
+
+    // agent_production — an agent reached the production stage.
+    const prevAgent = new Map((prev.agents ?? []).map((a) => [a.id, a.status]));
+    (appState.agents ?? []).forEach((a) => {
+      const was = prevAgent.get(a.id);
+      if (was && was !== a.status && a.status === 'production') {
+        void fire('agent_production', `🚀 Agent in production: ${a.name}`, a.description?.slice(0, 200) || '');
+      }
+    });
+
+    // wg_session — a new working-group meeting/session was recorded.
+    const prevSessions = new Map((prev.workingGroups ?? []).map((wg) => [wg.id, (wg.meetings ?? []).length]));
+    (appState.workingGroups ?? []).forEach((wg) => {
+      const before = prevSessions.get(wg.id) ?? 0;
+      if ((wg.meetings ?? []).length > before) {
+        const latest = wg.meetings[wg.meetings.length - 1];
+        void fire('wg_session', `📝 New session: ${wg.name}`, latest?.title || 'A session was recorded.');
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appState]);
+
   // Save project template (must be after update declaration)
   useEffect(() => {
     const fn = (e: Event) => {
@@ -477,6 +548,30 @@ const App: React.FC = () => {
       case 'pending':
         return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
           <PendingProjects state={appState} currentUser={currentUser} update={update} />
+        ) : (
+          <div className="p-10 text-center text-muted">Admin or manager only.</div>
+        );
+      case 'board':
+        return <TaskBoard state={filteredState} currentUser={currentUser} update={update} />;
+      case 'qbr':
+        return <PortfolioReview state={filteredState} currentUser={currentUser} update={update} />;
+      case 'activity':
+        return <ActivityFeed state={filteredState} currentUser={currentUser} update={update} />;
+      case 'okrs':
+        return <Okrs state={filteredState} currentUser={currentUser} update={update} />;
+      case 'graph':
+        return <KnowledgeGraph state={filteredState} currentUser={currentUser} update={update} />;
+      case 'deps':
+        return <Dependencies state={filteredState} currentUser={currentUser} update={update} />;
+      case 'reports':
+        return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
+          <Reports state={appState} currentUser={currentUser} update={update} />
+        ) : (
+          <div className="p-10 text-center text-muted">Admin or manager only.</div>
+        );
+      case 'capacity':
+        return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
+          <Capacity state={appState} currentUser={currentUser} update={update} />
         ) : (
           <div className="p-10 text-center text-muted">Admin or manager only.</div>
         );

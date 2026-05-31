@@ -60,6 +60,14 @@ export const TAB_GROUP: Record<string, Group> = {
   datafeeds:      'g5',       // Data Feeds — admin + IT flag
   wishes:         'public',   // collective wishlist — open to all signed-in users
   pending:        'g6',       // Pending project imports — admin + manager
+  board:          'g1',       // multi-project task board
+  qbr:            'g1',       // guided portfolio review
+  okrs:           'g1',       // objectives & key results
+  activity:       'public',   // cross-entity activity feed
+  capacity:       'g6',       // team capacity — admin + manager
+  graph:          'public',   // knowledge graph of entity relations
+  deps:           'g1',       // inter-project dependencies
+  reports:        'g6',       // AI portfolio digests — admin + manager
 };
 
 /**
