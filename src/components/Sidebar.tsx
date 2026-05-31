@@ -25,6 +25,12 @@ import {
   DatabaseZap,
   Lightbulb,
   Inbox,
+  Activity,
+  Gauge,
+  KanbanSquare,
+  ClipboardCheck,
+  Goal,
+  Share2,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -105,6 +111,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'board',          label: 'Task Board',     icon: KanbanSquare },
       { id: 'timeline',       label: 'Timeline',       icon: Calendar },
       { id: 'risk',           label: 'Risk Heatmap',   icon: AlertTriangle },
+      { id: 'okrs',           label: 'OKRs',             icon: Goal },
       { id: 'qbr',            label: 'Portfolio Review', icon: ClipboardCheck },
       { id: 'communications', label: 'Communications', icon: Mail },
     ],
@@ -138,6 +145,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'activity', label: 'Activity Feed',  icon: Activity },
       { id: 'capacity', label: 'Team Capacity',  icon: Gauge },
+      { id: 'graph',    label: 'Knowledge Graph', icon: Share2 },
     ],
   },
   {

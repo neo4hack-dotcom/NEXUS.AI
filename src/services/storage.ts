@@ -28,6 +28,8 @@ import {
   DataFeed,
   WishItem,
   PendingProject,
+  Objective,
+  WebhookConfig,
   SharePointConfig,
 } from '../types';
 
@@ -171,6 +173,13 @@ const DEFAULT_SHAREPOINT_CONFIG: SharePointConfig = {
   scheduleDayOfWeek: 1,
 };
 
+const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = {
+  enabled: false,
+  provider: 'slack',
+  url: '',
+  events: ['project_red', 'wish_accepted', 'agent_production'],
+};
+
 export const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -221,7 +230,9 @@ export const getDefaultState = (): AppState => {
     dataFeeds: [],
     wishes: [],
     pendingProjects: [],
+    okrs: [],
     sharePointConfig: DEFAULT_SHAREPOINT_CONFIG,
+    webhookConfig: DEFAULT_WEBHOOK_CONFIG,
     llmConfig: DEFAULT_LLM_CONFIG,
     prompts: {},
     theme: 'dark',
@@ -295,6 +306,14 @@ export const sanitizeAppState = (data: any): AppState => {
     })),
     sharePointConfig: { ...DEFAULT_SHAREPOINT_CONFIG, ...(data.sharePointConfig || {}),
       fieldMapping: { ...DEFAULT_SHAREPOINT_CONFIG.fieldMapping, ...((data.sharePointConfig || {}).fieldMapping || {}) },
+    },
+    okrs: arr<Objective>(data.okrs).map((o) => ({
+      ...o,
+      keyResults: arr(o.keyResults).map((kr: any) => ({ ...kr, linkedProjectIds: arr(kr.linkedProjectIds) })),
+      tags: arr(o.tags),
+    })),
+    webhookConfig: { ...DEFAULT_WEBHOOK_CONFIG, ...(data.webhookConfig || {}),
+      events: Array.isArray((data.webhookConfig || {}).events) ? (data.webhookConfig as any).events : DEFAULT_WEBHOOK_CONFIG.events,
     },
     smartTodos: arr<SmartTodo>(data.smartTodos),
     workingGroups: arr<WorkingGroup>(data.workingGroups).map((wg) => ({

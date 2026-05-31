@@ -786,6 +786,56 @@ export interface PendingProject {
   createdAt: string;
 }
 
+/* ============================================================
+   OKRs (#4) — objectives & key results
+   ============================================================ */
+export type OkrStatus = 'on_track' | 'at_risk' | 'off_track' | 'done';
+export type KeyResultKind = 'percent' | 'number' | 'linked_projects';
+
+export interface KeyResult {
+  id: string;
+  title: string;
+  kind: KeyResultKind;
+  /** For 'number' / 'percent': current + target. For 'linked_projects':
+   *  progress is derived from the % of linked projects marked Done. */
+  current?: number;
+  target?: number;
+  unit?: string;                 // e.g. "%", "users", "k€"
+  linkedProjectIds?: string[];   // for kind === 'linked_projects'
+}
+
+export interface Objective {
+  id: string;
+  title: string;
+  description?: string;
+  ownerUserId?: string;
+  period: string;                // e.g. "Q1 2026"
+  status: OkrStatus;             // manual override; auto-progress shown alongside
+  keyResults: KeyResult[];
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/* ============================================================
+   Webhook notifications (#5) — Slack / Teams outbound
+   ============================================================ */
+export type WebhookEvent =
+  | 'project_red'        // a project went off-track
+  | 'wg_session'         // a working-group session was recorded
+  | 'wish_accepted'      // a wish was accepted by an admin
+  | 'agent_production';  // an agent reached production
+
+export interface WebhookConfig {
+  enabled: boolean;
+  provider: 'slack' | 'teams' | 'generic';
+  url: string;                       // incoming webhook URL
+  events: WebhookEvent[];            // which events to broadcast
+  lastSentAt?: string;
+  lastStatus?: 'success' | 'error';
+  lastMessage?: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -809,7 +859,9 @@ export interface AppState {
   dataFeeds: DataFeed[];
   wishes: WishItem[];
   pendingProjects: PendingProject[];
+  okrs: Objective[];
   sharePointConfig: SharePointConfig;
+  webhookConfig: WebhookConfig;
   llmConfig: LlmConfig;
   prompts: Record<string, string>;
   theme: Theme;

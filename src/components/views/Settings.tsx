@@ -52,7 +52,7 @@ interface DataProps {
   replaceState: (s: AppState) => void;
 }
 
-type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families' | 'sharepoint';
+type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families' | 'sharepoint' | 'webhooks';
 
 export const Settings: React.FC<Props> = ({ state, update }) => {
   const [tab, setTab] = useState<Tab>('llm');
@@ -85,6 +85,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
             { id: 'families', label: 'Project Families', icon: Folders },
             { id: 'security', label: 'Security', icon: Key },
             { id: 'sharepoint', label: 'SharePoint Import', icon: CloudDownload },
+            { id: 'webhooks', label: 'Notifications', icon: Bell },
             { id: 'data', label: 'Data', icon: Database },
           ] as { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[]
         ).map(({ id, label, icon: Icon }) => (
@@ -108,6 +109,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
       {tab === 'families' && <FamiliesSection state={state} update={update} />}
       {tab === 'security' && <SecuritySection state={state} update={update} />}
       {tab === 'sharepoint' && <SharePointSection state={state} update={update} />}
+      {tab === 'webhooks' && <WebhooksSection state={state} update={update} />}
       {tab === 'data' && (
         <DataSection
           state={state}
@@ -1348,6 +1350,128 @@ const SharePointSection: React.FC<Props> = ({ state, update }) => {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+/* ────────────────────────────────────────────────────────────────────────
+   Notifications (#5) — Slack / Teams / generic outbound webhooks
+   ──────────────────────────────────────────────────────────────────────── */
+const WebhooksSection: React.FC<Props> = ({ state, update }) => {
+  const cfg = state.webhookConfig;
+  const [draft, setDraft] = useState<WebhookConfig>(cfg);
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
+  React.useEffect(() => { setDraft(cfg); }, [cfg]);
+
+  const setField = <K extends keyof WebhookConfig>(k: K, v: WebhookConfig[K]) =>
+    setDraft((d) => ({ ...d, [k]: v }));
+
+  const toggleEvent = (e: WebhookEvent) =>
+    setDraft((d) => ({
+      ...d,
+      events: d.events.includes(e) ? d.events.filter((x) => x !== e) : [...d.events, e],
+    }));
+
+  const save = () => {
+    update((s) => ({ ...s, webhookConfig: draft }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const sendTest = async () => {
+    setTesting(true); setTestMsg(null);
+    update((s) => ({ ...s, webhookConfig: draft }));
+    const res = await sendWebhook(
+      { ...draft, events: [...draft.events, 'project_red'] },
+      'project_red',
+      'DOINg.AI test notification',
+      'If you can read this in your channel, your webhook is wired correctly. 🎉',
+    );
+    setTesting(false);
+    setTestMsg(res?.lastStatus === 'success'
+      ? 'Test dispatched. Check your channel (no-cors hides the response, so this only confirms the request left the browser).'
+      : res?.lastMessage || 'Could not send — check the URL.');
+  };
+
+  const inputCls = 'w-full h-9 px-3 text-[11px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand';
+
+  return (
+    <div className="space-y-4">
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <Bell className="w-5 h-5 text-brand" />
+          <div className="flex-1">
+            <h3 className="text-lg font-black uppercase tracking-tight">Outbound Notifications</h3>
+            <p className="text-xs text-muted mt-1">
+              Push key events to a Slack or Microsoft Teams channel via an incoming webhook.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={draft.enabled} onChange={(e) => setField('enabled', e.target.checked)} className="w-4 h-4 accent-brand" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em]">{draft.enabled ? 'Enabled' : 'Disabled'}</span>
+          </label>
+        </div>
+
+        <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="label-xs">Provider</label>
+            <Select value={draft.provider} onChange={(e) => setField('provider', e.target.value as WebhookConfig['provider'])} disabled={!draft.enabled}>
+              <option value="slack">Slack</option>
+              <option value="teams">Microsoft Teams</option>
+              <option value="generic">Generic JSON</option>
+            </Select>
+          </div>
+          <div className="space-y-1.5 md:col-span-1">
+            <label className="label-xs">Webhook URL</label>
+            <Input type="password" value={draft.url} onChange={(e) => setField('url', e.target.value)} placeholder="https://hooks.slack.com/services/…" disabled={!draft.enabled} />
+          </div>
+        </div>
+
+        <div className="px-5 pb-5">
+          <p className="label-xs mb-2">Events to broadcast</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {(Object.keys(EVENT_LABELS) as WebhookEvent[]).map((e) => (
+              <label key={e} className={`flex items-center gap-2 p-2.5 border cursor-pointer transition-colors ${
+                draft.events.includes(e) ? 'border-brand bg-brand/5' : 'border-neutral-200 dark:border-ink-600'}`}>
+                <input type="checkbox" checked={draft.events.includes(e)} onChange={() => toggleEvent(e)} disabled={!draft.enabled} className="w-4 h-4 accent-brand" />
+                <span className="text-[11px]">{EVENT_LABELS[e]}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 space-y-3">
+          {draft.lastSentAt && (
+            <p className="text-[10px] text-muted">
+              Last send: <span className="font-mono">{new Date(draft.lastSentAt).toLocaleString()}</span>
+              {' · '}<span className={draft.lastStatus === 'success' ? 'text-emerald-600' : 'text-red-600'}>{draft.lastStatus}</span>
+              {draft.lastMessage ? ` — ${draft.lastMessage}` : ''}
+            </p>
+          )}
+          {testMsg && <p className="text-[10px] text-muted italic">{testMsg}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={sendTest} disabled={!draft.enabled || !draft.url || testing}>
+              <Send className="w-4 h-4 mr-2" />{testing ? 'Sending…' : 'Send test'}
+            </Button>
+            <Button onClick={save}>
+              <Save className="w-4 h-4 mr-2" />{saved ? 'Saved!' : 'Save configuration'}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="surface border p-4 flex items-start gap-3">
+        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+        <p className="text-[11px] text-muted">
+          Browser-sent webhooks use <span className="font-mono">no-cors</span>, so DOINg.AI can't read the
+          response — a successful "send" only means the request left the browser. Some corporate Slack/Teams
+          tenants block cross-origin posts entirely; if your test never lands, route the webhook through the
+          backend instead.
+        </p>
       </div>
     </div>
   );
