@@ -31,6 +31,9 @@ import {
   ClipboardCheck,
   Goal,
   Share2,
+  Workflow,
+  Goal,
+  Share2,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -60,7 +63,8 @@ export type TabId =
   | 'qbr'
   | 'activity'
   | 'okrs'
-  | 'graph';
+  | 'graph'
+  | 'deps';
 
 interface Props {
   activeTab: TabId;
@@ -110,6 +114,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'projects',       label: 'Projects',       icon: Target },
       { id: 'board',          label: 'Task Board',     icon: KanbanSquare },
       { id: 'timeline',       label: 'Timeline',       icon: Calendar },
+      { id: 'deps',           label: 'Dependencies',   icon: Workflow },
       { id: 'risk',           label: 'Risk Heatmap',   icon: AlertTriangle },
       { id: 'okrs',           label: 'OKRs',             icon: Goal },
       { id: 'qbr',            label: 'Portfolio Review', icon: ClipboardCheck },

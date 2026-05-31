@@ -66,6 +66,7 @@ export const TAB_GROUP: Record<string, Group> = {
   activity:       'public',   // cross-entity activity feed
   capacity:       'g6',       // team capacity — admin + manager
   graph:          'public',   // knowledge graph of entity relations
+  deps:           'g1',       // inter-project dependencies
 };
 
 /**

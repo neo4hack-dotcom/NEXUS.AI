@@ -49,6 +49,7 @@ const TaskBoard = lazy(() => import('./components/views/TaskBoard').then(m => ({
 const PortfolioReview = lazy(() => import('./components/views/PortfolioReview').then(m => ({ default: m.PortfolioReview })));
 const Okrs = lazy(() => import('./components/views/Okrs').then(m => ({ default: m.Okrs })));
 const KnowledgeGraph = lazy(() => import('./components/views/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
+const Dependencies = lazy(() => import('./components/views/Dependencies').then(m => ({ default: m.Dependencies })));
 import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
 import { sendWebhook } from './services/webhookService';
 
@@ -559,6 +560,8 @@ const App: React.FC = () => {
         return <Okrs state={filteredState} currentUser={currentUser} update={update} />;
       case 'graph':
         return <KnowledgeGraph state={filteredState} currentUser={currentUser} update={update} />;
+      case 'deps':
+        return <Dependencies state={filteredState} currentUser={currentUser} update={update} />;
       case 'capacity':
         return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
           <Capacity state={appState} currentUser={currentUser} update={update} />

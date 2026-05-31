@@ -153,6 +153,9 @@ export interface Project {
   auditLog: AuditEntry[];
   presentations?: ProjectPresentation[];
   linkedApps?: ProjectLinkedApp[];
+  /** Inter-project dependencies (#2): ids of projects this one depends on
+   *  (i.e. is blocked by). Surfaced on the Timeline and Knowledge Graph. */
+  dependsOnProjectIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
