@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Zap, Plus, ArrowLeft, Users, FileText, MessageSquare, Trophy, Eye,
   Trash2, X, Save, Sparkles, Loader2, Send, BookOpen, Presentation,
-  Award, File, Tag, MapPin, Calendar, Edit3, Check, FileDown,
+  Award, File, Tag, MapPin, Calendar, Edit3, Check, FileDown, Target,
 } from 'lucide-react';
 import { MarkdownView } from '../ui/MarkdownView';
 import {
   AppState, Hackathon, HackathonDocument, HackathonDocType,
   HackathonMessage, HackathonParticipant, HackathonRole, HackathonStatus, User,
+  Project, ProjectStatus, ProjectRole,
 } from '../../types';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -119,6 +120,47 @@ export const HackathonsView: React.FC<Props> = ({ state, currentUser, update }) 
   const remove = (id: string) =>
     update((s) => ({ ...s, hackathons: s.hackathons.filter((x) => x.id !== id) }));
 
+  // #7 — Promote a hackathon into a real project in one click.
+  const promoteToProject = (h: Hackathon) => {
+    if (!window.confirm(`Create a project from "${h.title}"? Participants become members and results seed the context.`)) return;
+    const now = new Date().toISOString();
+    const members = (h.participants || [])
+      .map((p) => {
+        const u = state.users.find((x) => x.email && p.email && x.email.toLowerCase() === p.email.toLowerCase());
+        return u ? { userId: u.id, role: ProjectRole.CONTRIBUTOR } : null;
+      })
+      .filter(Boolean) as { userId: string; role: ProjectRole }[];
+    if (!members.some((m) => m.userId === currentUser.id)) {
+      members.unshift({ userId: currentUser.id, role: ProjectRole.OWNER });
+    }
+    const context = [h.objective, h.challenge, h.results, h.aiSynthesis].filter(Boolean).join('\n\n');
+    const newProject: Project = {
+      id: generateId(),
+      name: h.title,
+      description: h.theme || h.objective || '',
+      context,
+      status: ProjectStatus.PLANNING,
+      managerId: currentUser.id,
+      startDate: now.slice(0, 10),
+      deadline: new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10),
+      members,
+      tasks: [],
+      milestones: [],
+      technologyIds: [],
+      repoIds: [],
+      tags: Array.from(new Set([...(h.tags || []), 'from-hackathon', `hack:${h.id}`])),
+      auditLog: [{
+        id: generateId(), date: now,
+        userId: currentUser.id, userName: `${currentUser.firstName} ${currentUser.lastName}`,
+        action: 'Promoted from hackathon', details: `Created from hackathon "${h.title}"`,
+      }],
+      createdAt: now,
+      updatedAt: now,
+    };
+    update((s) => ({ ...s, projects: [newProject, ...s.projects] }));
+    window.alert(`Project "${h.title}" created. Find it in Projects.`);
+  };
+
   if (hackathon) {
     return (
       <HackathonDetail
@@ -129,6 +171,7 @@ export const HackathonsView: React.FC<Props> = ({ state, currentUser, update }) 
         onBack={() => setSelected(null)}
         onUpdate={upsert}
         onDelete={() => { remove(hackathon.id); setSelected(null); }}
+        onPromote={promoteToProject}
       />
     );
   }
@@ -314,7 +357,8 @@ const HackathonDetail: React.FC<{
   onBack: () => void;
   onUpdate: (h: Hackathon) => void;
   onDelete: () => void;
-}> = ({ hackathon, currentUser, canManage, state, onBack, onUpdate, onDelete }) => {
+  onPromote: (h: Hackathon) => void;
+}> = ({ hackathon, currentUser, canManage, state, onBack, onUpdate, onDelete, onPromote }) => {
   const [tab, setTab] = useState<DetailTab>('overview');
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -353,6 +397,10 @@ const HackathonDetail: React.FC<{
           </Button>
           {canManage && (
             <>
+              <Button size="sm" variant="outline" onClick={() => onPromote(hackathon)} title="Create a project from this hackathon">
+                <Target className="w-3 h-3 mr-1" />
+                Promote to project
+              </Button>
               <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
                 <Edit3 className="w-3 h-3 mr-1" />
                 Edit

@@ -28,7 +28,7 @@ type NodeType = 'project' | 'technology' | 'repository' | 'agent' | 'mcp' | 'fam
 interface GNode { id: string; type: NodeType; label: string; }
 interface GEdge { a: string; b: string; }
 
-const TYPE_META: Record<NodeType, { color: string; icon: React.ComponentType<{ className?: string }>; label: string }> = {
+const TYPE_META: Record<NodeType, { color: string; icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>; label: string }> = {
   project:    { color: '#FF3E00', icon: Target,    label: 'Project' },
   technology: { color: '#3B82F6', icon: Cpu,       label: 'Technology' },
   repository: { color: '#10B981', icon: GitBranch, label: 'Repository' },

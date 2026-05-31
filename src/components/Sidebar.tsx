@@ -32,8 +32,7 @@ import {
   Goal,
   Share2,
   Workflow,
-  Goal,
-  Share2,
+  FileBarChart,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';

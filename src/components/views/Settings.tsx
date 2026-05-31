@@ -30,9 +30,12 @@ import {
   AlertCircle,
   Link as LinkIcon,
   FileText,
+  Bell,
+  Send,
 } from 'lucide-react';
-import { AppState, LlmConfig, ProjectFamily, User, SharePointConfig, SharePointFieldMapping, SharePointAuthMethod, SharePointScheduleRecurrence } from '../../types';
+import { AppState, LlmConfig, ProjectFamily, User, SharePointConfig, SharePointFieldMapping, SharePointAuthMethod, SharePointScheduleRecurrence, WebhookConfig, WebhookEvent } from '../../types';
 import { runSync, computeNextSyncAt, DEFAULT_SP_IMPORT_PROMPT } from '../../services/sharepointService';
+import { sendWebhook, EVENT_LABELS } from '../../services/webhookService';
 import { generateId } from '../../services/storage';
 import { Button } from '../ui/Button';
 import { Input, Textarea, Select } from '../ui/Input';
