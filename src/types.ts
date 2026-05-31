@@ -839,6 +839,42 @@ export interface WebhookConfig {
   lastMessage?: string;
 }
 
+/* ============================================================
+   AI Contacts (#8) — internal AI contributor directory
+   ============================================================ */
+export type AIContactRole = 'leader' | 'expert' | 'developer' | 'data_scientist' | 'pm' | 'business' | 'researcher' | 'other';
+
+export interface AIContactFamily {
+  id: string;
+  name: string;
+  description?: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface AIContact {
+  id: string;
+  uid?: string;                 // internal UID / login handle
+  firstName: string;
+  lastName: string;
+  email?: string;
+  phone?: string;
+  location?: string;            // city / site / country
+  functionTitle: string;        // job title
+  role: AIContactRole;          // AI role classification
+  team?: string;                // business team
+  pole?: string;                // organisational pole / BU
+  familyId?: string;            // AI Contact Family for grouping
+  managerId?: string;           // direct manager (another AIContact id)
+  bio?: string;                 // short bio / expertise summary
+  skills: string[];             // free-text skill tags
+  linkedinUrl?: string;
+  avatarColor?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -863,6 +899,8 @@ export interface AppState {
   wishes: WishItem[];
   pendingProjects: PendingProject[];
   okrs: Objective[];
+  aiContacts: AIContact[];
+  aiContactFamilies: AIContactFamily[];
   sharePointConfig: SharePointConfig;
   webhookConfig: WebhookConfig;
   llmConfig: LlmConfig;

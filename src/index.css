@@ -68,13 +68,13 @@ body {
     @apply bg-neutral-100 border-neutral-200 dark:bg-ink-700 dark:border-ink-500;
   }
   .text-muted {
-    @apply text-neutral-500 dark:text-neutral-400;
+    @apply text-neutral-500 dark:text-neutral-300;
   }
   .text-faint {
-    @apply text-neutral-400 dark:text-neutral-500;
+    @apply text-neutral-400 dark:text-neutral-400;
   }
   .label-xs {
-    @apply text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500 dark:text-neutral-400;
+    @apply text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500 dark:text-neutral-300;
   }
   .display-xl {
     @apply text-5xl font-black tracking-tighter uppercase leading-none;

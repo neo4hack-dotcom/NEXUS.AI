@@ -31,6 +31,9 @@ import {
   MessageSquare,
   Presentation,
   CheckCircle2,
+  Eye,
+  Sparkles,
+  BookOpen,
 } from 'lucide-react';
 import { AppState, DataFeed, DataFeedFrequency, DataFeedStatus, User } from '../../types';
 import { generateId } from '../../services/storage';
@@ -81,11 +84,124 @@ const EMPTY_FEED = (): Omit<DataFeed, 'id' | 'createdAt' | 'updatedAt'> => ({
 });
 
 const fmt = (iso?: string) =>
-  iso ? new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Main view
    ────────────────────────────────────────────────────────────────────────── */
+
+const openDataFeedBooklet = (feeds: DataFeed[]): void => {
+  const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const BRAND = '#FF3E00';
+
+  // KPIs
+  const total = feeds.length;
+  const prod  = feeds.filter((f) => f.status === 'production').length;
+  const inDev = feeds.filter((f) => f.status === 'in_dev' || f.status === 'uat').length;
+  const planned = feeds.filter((f) => f.status === 'planned').length;
+
+  // Freq breakdown
+  const freqMap: Record<string, number> = {};
+  feeds.forEach((f) => { freqMap[FREQUENCY_LABELS[f.frequency]] = (freqMap[FREQUENCY_LABELS[f.frequency]] || 0) + 1; });
+  const freqEntries = Object.entries(freqMap).sort((a, b) => b[1] - a[1]);
+  const freqMax = Math.max(...freqEntries.map((e) => e[1]), 1);
+
+  const freqBars = freqEntries.map(([label, n]) => {
+    const pct = Math.round((n / freqMax) * 100);
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+      <div style="width:70px;font-size:8pt;font-weight:700;color:#444;font-family:system-ui;text-transform:uppercase;letter-spacing:0.05em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</div>
+      <div style="flex:1;background:#f1f5f9;height:12px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${BRAND}"></div></div>
+      <div style="width:18px;font-size:9pt;font-weight:900;color:${BRAND};font-family:system-ui;text-align:right">${n}</div>
+    </div>`;
+  }).join('');
+
+  const kpi = (label: string, value: number | string, color = BRAND) =>
+    `<div style="border:1px solid #e5e7eb;border-top:3px solid ${color};padding:16px;background:#fff;min-width:120px">
+      <div style="font-size:7pt;text-transform:uppercase;letter-spacing:0.12em;color:#888;font-weight:700;font-family:system-ui;margin-bottom:6px">${esc(label)}</div>
+      <div style="font-size:28pt;font-weight:900;color:${color};font-family:system-ui;line-height:1">${esc(value)}</div>
+    </div>`;
+
+  const statusColor: Record<DataFeedStatus, string> = {
+    planned: '#6b7280', in_dev: '#3b82f6', uat: '#f59e0b', production: '#10b981', deprecated: '#ef4444',
+  };
+
+  const feedCards = feeds.map((f) => {
+    const sColor = statusColor[f.status] || '#6b7280';
+    const sLabel = STATUS_META[f.status]?.label ?? f.status;
+    return `<div style="break-inside:avoid;border:1px solid #e5e7eb;border-left:4px solid ${BRAND};padding:18px;margin-bottom:16px;background:#fff;font-family:system-ui">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px">
+        <div>
+          <div style="font-size:14pt;font-weight:900;color:#111;text-transform:uppercase;letter-spacing:-0.02em">${esc(f.platformName)}</div>
+          <div style="font-size:9pt;color:#666;margin-top:2px">${esc(f.dataType)}</div>
+        </div>
+        <span style="padding:3px 10px;font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;background:${sColor}20;color:${sColor};border:1px solid ${sColor}40;white-space:nowrap">${esc(sLabel)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px;background:#f9fafb;margin-bottom:10px">
+        <div style="flex:1"><span style="font-size:7pt;font-weight:700;text-transform:uppercase;color:#888;display:block">Source</span><span style="font-size:9pt;font-family:monospace;color:#333">${esc(f.source) || '—'}</span></div>
+        <span style="font-size:14pt;color:${BRAND}">→</span>
+        <div style="flex:1;text-align:right"><span style="font-size:7pt;font-weight:700;text-transform:uppercase;color:#888;display:block">Destination</span><span style="font-size:9pt;font-family:monospace;color:#333">${esc(f.destination) || '—'}</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:8pt">
+        <div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">Frequency</span><br><strong>${esc(FREQUENCY_LABELS[f.frequency])}</strong></div>
+        ${f.projectManager ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">PM</span><br><strong>${esc(f.projectManager)}</strong></div>` : ''}
+        ${f.developer ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">Developer</span><br><strong>${esc(f.developer)}</strong></div>` : ''}
+        ${f.jiraRef ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">JIRA</span><br><strong style="font-family:monospace">${esc(f.jiraRef)}</strong></div>` : ''}
+        ${f.costManDays ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">Cost</span><br><strong>${esc(f.costManDays)} MD</strong></div>` : ''}
+        ${f.prodDate ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">Production date</span><br><strong style="color:#10b981">${esc(new Date(f.prodDate).toLocaleDateString('en-GB'))}</strong></div>` : ''}
+        ${!f.prodDate && f.eta ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">ETA</span><br><strong style="color:#f59e0b">${esc(new Date(f.eta).toLocaleDateString('en-GB'))}</strong></div>` : ''}
+      </div>
+      ${f.comments ? `<div style="margin-top:8px;padding:8px;background:#f9fafb;border-left:2px solid #e5e7eb;font-size:8pt;color:#555;font-style:italic">${esc(f.comments)}</div>` : ''}
+      ${f.presentationUrl ? `<div style="margin-top:6px"><a href="${esc(f.presentationUrl)}" style="font-size:8pt;color:${BRAND};text-decoration:none">📎 View presentation →</a></div>` : ''}
+    </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DOINg.AI — Data Feeds Booklet</title>
+<style>
+  @media print{@page{size:A4;margin:18mm}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#f8f8f6;color:#111;margin:0;padding:20px}
+  h1,h2{margin:0}
+</style>
+</head><body>
+<div style="max-width:800px;margin:0 auto">
+
+  <!-- Cover -->
+  <div style="background:#050505;color:#fff;padding:40px;margin-bottom:20px">
+    <div style="font-size:8pt;letter-spacing:0.25em;text-transform:uppercase;color:${BRAND};margin-bottom:12px">DATA PLATFORM · BOOKLET · ${esc(today.toUpperCase())}</div>
+    <div style="font-size:38pt;font-weight:900;letter-spacing:-0.03em;line-height:1">DOINg<span style="color:${BRAND}">.AI</span></div>
+    <div style="font-size:18pt;font-weight:300;color:#aaa;margin-top:4px">Data Feeds Registry</div>
+  </div>
+
+  <!-- KPIs -->
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+    ${kpi('Total feeds', total)}
+    ${kpi('In production', prod, '#10b981')}
+    ${kpi('In dev / UAT', inDev, '#3b82f6')}
+    ${kpi('Planned', planned, '#f59e0b')}
+  </div>
+
+  <!-- Frequency chart -->
+  <div style="background:#fff;border:1px solid #e5e7eb;padding:20px;margin-bottom:20px">
+    <div style="font-size:8pt;text-transform:uppercase;letter-spacing:0.12em;font-weight:700;color:#888;margin-bottom:12px">Refresh frequency breakdown</div>
+    ${freqBars}
+  </div>
+
+  <!-- Feed cards -->
+  <div style="font-size:8pt;text-transform:uppercase;letter-spacing:0.12em;font-weight:700;color:#888;margin-bottom:12px">${total} data feed${total !== 1 ? 's' : ''}</div>
+  ${feedCards}
+
+  <!-- Footer -->
+  <div style="margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:7pt;color:#888;text-align:right">
+    DOINg.AI · Generated ${esc(today)} · Confidential
+  </div>
+</div>
+<script>window.onload=()=>{window.print()}</script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (w) { w.document.write(html); w.document.close(); }
+};
 
 export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) => {
   const [search, setSearch] = useState('');
@@ -93,6 +209,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
   const [modalFeed, setModalFeed] = useState<DataFeed | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [previewFeed, setPreviewFeed] = useState<DataFeed | null>(null);
 
   const feeds = state.dataFeeds ?? [];
 
@@ -166,10 +283,19 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
             Data Feeds
           </h1>
           <p className="text-sm text-muted mt-1">
-            Registre des pipelines de données vers les entrepôts (silver copies).
-            Visible aux admins et utilisateurs avec le flag IT.
+            Data pipeline registry — from source systems to silver copies &amp; data warehouses.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openDataFeedBooklet(feeds)}
+            disabled={feeds.length === 0}
+            className="flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] border border-brand text-brand hover:bg-brand hover:text-white transition-colors disabled:opacity-40"
+            title="Generate a styled AI Booklet for board sharing"
+          >
+            <Sparkles className="w-4 h-4" />
+            AI Booklet
+          </button>
         {canEdit && (
           <button
             onClick={openNew}
@@ -179,6 +305,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
             Add Feed
           </button>
         )}
+        </div>
       </div>
 
       {/* KPI strip */}
@@ -252,8 +379,8 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
               const expanded = expandedId === f.id;
               const meta = STATUS_META[f.status];
               return (
-                <div key={f.id}>
-                  {/* Main row */}
+                <div key={f.id} onDoubleClick={() => setPreviewFeed(f)} className="cursor-default">
+                  {/* Main row — double-click opens read-only preview */}
                   <div
                     className="grid grid-cols-1 lg:grid-cols-[2fr_1.5fr_1fr_2fr_1fr_1fr_auto] gap-0 hover:bg-neutral-50 dark:hover:bg-ink-800/50 transition-colors cursor-pointer"
                     onClick={() => setExpandedId(expanded ? null : f.id)}
@@ -377,7 +504,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
                           <div className="flex items-start gap-2">
                             <CalendarDays className="w-3.5 h-3.5 text-muted mt-0.5 shrink-0" />
                             <div>
-                              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">Mise en production</p>
+                              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">Production date</p>
                               <p className="text-[11px] font-mono">{fmt(f.prodDate)}</p>
                             </div>
                           </div>
@@ -399,7 +526,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
                           <div className="flex items-start gap-2">
                             <Presentation className="w-3.5 h-3.5 text-muted mt-0.5 shrink-0" />
                             <div>
-                              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">Présentation</p>
+                              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">Presentation</p>
                               <a
                                 href={f.presentationUrl}
                                 target="_blank"
@@ -407,7 +534,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
                                 className="text-[11px] text-brand hover:underline flex items-center gap-1"
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                Ouvrir <ExternalLink className="w-3 h-3" />
+                                Open <ExternalLink className="w-3 h-3" />
                               </a>
                             </div>
                           </div>
@@ -416,7 +543,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
                           <div className="flex items-start gap-2">
                             <MessageSquare className="w-3.5 h-3.5 text-muted mt-0.5 shrink-0" />
                             <div>
-                              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">Commentaires</p>
+                              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">Comments</p>
                               <p className="text-[11px] text-muted whitespace-pre-wrap">{f.comments}</p>
                             </div>
                           </div>
@@ -432,6 +559,14 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
       )}
 
       {/* Modal */}
+      {previewFeed && (
+        <FeedPreviewModal
+          feed={previewFeed}
+          onClose={() => setPreviewFeed(null)}
+          onEdit={canEdit ? () => { setPreviewFeed(null); openEdit(previewFeed); } : undefined}
+        />
+      )}
+
       {modalFeed && (
         <FeedModal
           feed={modalFeed}
@@ -540,18 +675,18 @@ const FeedModal: React.FC<{
           </Section>
 
           {/* ── Project ── */}
-          <Section title="Projet">
+          <Section title="Project">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Project Manager">
-                <input className={inputCls} value={form.projectManager ?? ''} onChange={(e) => set('projectManager', e.target.value)} placeholder="Nom du PM" />
+                <input className={inputCls} value={form.projectManager ?? ''} onChange={(e) => set('projectManager', e.target.value)} placeholder="PM name" />
               </Field>
-              <Field label="Développeur">
-                <input className={inputCls} value={form.developer ?? ''} onChange={(e) => set('developer', e.target.value)} placeholder="Nom du dev" />
+              <Field label="Developer">
+                <input className={inputCls} value={form.developer ?? ''} onChange={(e) => set('developer', e.target.value)} placeholder="Dev name" />
               </Field>
               <Field label="JIRA Ref">
                 <input className={inputCls} value={form.jiraRef ?? ''} onChange={(e) => set('jiraRef', e.target.value)} placeholder="ex: DAT-1234" />
               </Field>
-              <Field label="Coût (Man-Days)">
+              <Field label="Cost (Man-Days)">
                 <input
                   type="number"
                   min={0}
@@ -568,13 +703,13 @@ const FeedModal: React.FC<{
           {/* ── Dates ── */}
           <Section title="Dates">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Field label="Date de mise en production">
+              <Field label="Production date">
                 <input type="date" className={inputCls} value={form.prodDate ?? ''} onChange={(e) => set('prodDate', e.target.value)} />
               </Field>
-              <Field label="ETA (si pas encore en prod)">
+              <Field label="ETA (if not yet in production)">
                 <input type="date" className={inputCls} value={form.eta ?? ''} onChange={(e) => set('eta', e.target.value)} disabled={!!form.prodDate} />
                 {form.prodDate && (
-                  <p className="text-[9px] text-muted mt-0.5">ETA non applicable — déjà en production.</p>
+                  <p className="text-[9px] text-muted mt-0.5">ETA not applicable — already in production.</p>
                 )}
               </Field>
             </div>
@@ -583,7 +718,7 @@ const FeedModal: React.FC<{
           {/* ── Documentation ── */}
           <Section title="Documentation">
             <div className="space-y-4">
-              <Field label="Lien présentation">
+              <Field label="Presentation link">
                 <div className="relative">
                   <input className={inputCls + ' pr-8'} value={form.presentationUrl ?? ''} onChange={(e) => set('presentationUrl', e.target.value)} placeholder="https://…" />
                   {form.presentationUrl && (
@@ -598,13 +733,13 @@ const FeedModal: React.FC<{
                   )}
                 </div>
               </Field>
-              <Field label="Commentaires">
+              <Field label="Comments">
                 <textarea
                   rows={3}
                   className={textareaCls}
                   value={form.comments ?? ''}
                   onChange={(e) => set('comments', e.target.value)}
-                  placeholder="Notes, contexte, points de vigilance…"
+                  placeholder="Notes, context, watch points…"
                 />
               </Field>
             </div>
@@ -651,3 +786,124 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
     {children}
   </div>
 );
+
+/* ──────────────────────────────────────────────────────────────────────────
+   FeedPreviewModal — read-only detail card (task #6)
+   ────────────────────────────────────────────────────────────────────────── */
+const FeedPreviewModal: React.FC<{
+  feed: DataFeed;
+  onClose: () => void;
+  onEdit?: () => void;
+}> = ({ feed, onClose, onEdit }) => {
+  const meta = STATUS_META[feed.status];
+  React.useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', fn);
+    return () => document.removeEventListener('keydown', fn);
+  }, [onClose]);
+
+  const Row: React.FC<{ icon: React.ReactNode; label: string; value?: string | number; mono?: boolean }> = ({ icon, label, value, mono }) => {
+    if (!value && value !== 0) return null;
+    return (
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0 text-muted">{icon}</span>
+        <div>
+          <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">{label}</p>
+          <p className={`text-[12px] ${mono ? 'font-mono' : 'font-medium'}`}>{String(value)}</p>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-2xl bg-white dark:bg-ink-900 border border-neutral-200 dark:border-ink-700 shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-ink-700 bg-neutral-50 dark:bg-ink-800 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <Eye className="w-4 h-4 text-brand shrink-0" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] truncate">Feed details</span>
+            <span className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] ${meta.color}`}>{meta.label}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {onEdit && (
+              <button onClick={onEdit} className="flex items-center gap-1.5 px-2.5 h-7 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand">
+                <Pencil className="w-3 h-3" /> Edit
+              </button>
+            )}
+            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-neutral-900 dark:hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto p-6 space-y-5">
+          {/* Title + pipeline */}
+          <div>
+            <h2 className="text-2xl font-black tracking-tight mb-1">{feed.platformName}</h2>
+            <p className="text-[11px] text-muted">{feed.dataType}</p>
+          </div>
+
+          {/* Pipeline diagram */}
+          <div className="flex items-center gap-3 p-4 bg-neutral-50 dark:bg-ink-800 border border-neutral-200 dark:border-ink-700">
+            <div className="flex-1 min-w-0">
+              <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-muted mb-0.5">Source</p>
+              <p className="text-[12px] font-mono font-medium truncate">{feed.source || '—'}</p>
+            </div>
+            <ArrowRight className="w-5 h-5 text-brand shrink-0" />
+            <div className="flex-1 min-w-0 text-right">
+              <p className="text-[8px] font-bold uppercase tracking-[0.16em] text-muted mb-0.5">Destination</p>
+              <p className="text-[12px] font-mono font-medium truncate">{feed.destination || '—'}</p>
+            </div>
+          </div>
+
+          {/* Frequency badge */}
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] border border-brand text-brand">
+              {FREQUENCY_LABELS[feed.frequency]}
+            </span>
+          </div>
+
+          {/* Detail grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <Row icon={<UserIcon className="w-3.5 h-3.5" />} label="Project Manager" value={feed.projectManager} />
+            <Row icon={<Code2 className="w-3.5 h-3.5" />} label="Developer" value={feed.developer} />
+            <Row icon={<Ticket className="w-3.5 h-3.5" />} label="JIRA ref" value={feed.jiraRef} mono />
+            <Row icon={<Banknote className="w-3.5 h-3.5" />} label="Cost" value={feed.costManDays !== undefined ? `${feed.costManDays} Man-Days` : undefined} mono />
+            <Row icon={<CalendarDays className="w-3.5 h-3.5" />} label="Production date" value={fmt(feed.prodDate)} mono />
+            <Row icon={<Clock4 className="w-3.5 h-3.5" />} label="ETA" value={!feed.prodDate ? fmt(feed.eta) : undefined} mono />
+          </div>
+
+          {/* Presentation link */}
+          {feed.presentationUrl && (
+            <div className="flex items-center gap-2">
+              <Presentation className="w-3.5 h-3.5 text-muted shrink-0" />
+              <a href={feed.presentationUrl} target="_blank" rel="noopener noreferrer"
+                className="text-[11px] text-brand hover:underline flex items-center gap-1">
+                View presentation <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
+
+          {/* Comments */}
+          {feed.comments && (
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1">Comments</p>
+              <p className="text-[12px] text-muted whitespace-pre-wrap leading-relaxed">{feed.comments}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ──────────────────────────────────────────────────────────────────────────
+   AI Booklet generator — styled HTML report for board sharing (task #7)
+   ────────────────────────────────────────────────────────────────────────── */
+
+const esc = (s?: string | number | null) =>
+  String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+

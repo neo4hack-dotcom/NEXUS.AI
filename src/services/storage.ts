@@ -30,6 +30,8 @@ import {
   PendingProject,
   Objective,
   WebhookConfig,
+  AIContact,
+  AIContactFamily,
   SharePointConfig,
 } from '../types';
 
@@ -231,6 +233,8 @@ export const getDefaultState = (): AppState => {
     wishes: [],
     pendingProjects: [],
     okrs: [],
+    aiContacts: [],
+    aiContactFamilies: [],
     sharePointConfig: DEFAULT_SHAREPOINT_CONFIG,
     webhookConfig: DEFAULT_WEBHOOK_CONFIG,
     llmConfig: DEFAULT_LLM_CONFIG,
@@ -307,6 +311,8 @@ export const sanitizeAppState = (data: any): AppState => {
     sharePointConfig: { ...DEFAULT_SHAREPOINT_CONFIG, ...(data.sharePointConfig || {}),
       fieldMapping: { ...DEFAULT_SHAREPOINT_CONFIG.fieldMapping, ...((data.sharePointConfig || {}).fieldMapping || {}) },
     },
+    aiContacts: arr<AIContact>(data.aiContacts).map((a) => ({ ...a, skills: arr(a.skills) })),
+    aiContactFamilies: arr<AIContactFamily>(data.aiContactFamilies),
     okrs: arr<Objective>(data.okrs).map((o) => ({
       ...o,
       keyResults: arr(o.keyResults).map((kr: any) => ({ ...kr, linkedProjectIds: arr(kr.linkedProjectIds) })),
