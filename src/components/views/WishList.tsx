@@ -99,7 +99,7 @@ const PRIORITY_META: Record<WishPriority, { label: string; color: string }> = {
 };
 
 const fmtDate = (iso?: string) =>
-  iso ? new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  iso ? new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
 const fmtRelative = (iso?: string) => {
   if (!iso) return '';
@@ -257,8 +257,7 @@ export const WishList: React.FC<Props> = ({ state, currentUser, update }) => {
             Wish List
           </h1>
           <p className="text-sm text-muted mt-1">
-            Soumettez et documentez vos besoins — un nouveau projet, un MCP, un agent IA,
-            un data feed, une intégration… Chaque souhait est suivi avec un sponsor et des dates.
+            Submit and document your needs — a new project, an MCP server, an AI agent, a data feed, an integration… Each wish is tracked with a sponsor and target dates.
           </p>
         </div>
         <button
@@ -606,9 +605,9 @@ const WishModal: React.FC<{
         <div className="p-6 space-y-5">
 
           {/* The wish */}
-          <Section title="Le besoin">
+          <Section title="The need">
             <Field label="Title *">
-              <input className={inputCls} value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="ex: MCP pour Salesforce" disabled={readOnly} autoFocus />
+              <input className={inputCls} value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. MCP for Salesforce" disabled={readOnly} autoFocus />
             </Field>
             <Field label="Description *">
               <textarea rows={4} className={textareaCls} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Explain the need — what's the situation, what's missing, what should be possible?" disabled={readOnly} />
@@ -687,23 +686,31 @@ const WishModal: React.FC<{
             </div>
           </Section>
 
-          {/* Triage (admin/owner) */}
+          {/* Triage / Status — admin only (managers/contributors submit, admin validates) */}
           {!isNew && (
             <Section title="Triage / Status">
+              {currentUser.role !== 'admin' && !readOnly && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 mb-3">
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                    Status changes are reviewed by an admin. Submit your wish and an admin will triage it.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Status">
-                  <select className={inputCls} value={form.status} onChange={(e) => set('status', e.target.value as WishStatus)} disabled={readOnly}>
+                  <select className={inputCls} value={form.status} onChange={(e) => set('status', e.target.value as WishStatus)} disabled={readOnly || currentUser.role !== 'admin'}>
                     {(Object.entries(STATUS_META) as [WishStatus, { label: string }][]).map(([k, v]) => (
                       <option key={k} value={k}>{v.label}</option>
                     ))}
                   </select>
                 </Field>
                 <Field label="Decided on">
-                  <input type="date" className={inputCls} value={form.decidedAt ?? ''} onChange={(e) => set('decidedAt', e.target.value)} disabled={readOnly} />
+                  <input type="date" className={inputCls} value={form.decidedAt ?? ''} onChange={(e) => set('decidedAt', e.target.value)} disabled={readOnly || currentUser.role !== 'admin'} />
                 </Field>
               </div>
               <Field label="Review notes">
-                <textarea rows={2} className={textareaCls} value={form.reviewNotes ?? ''} onChange={(e) => set('reviewNotes', e.target.value)} placeholder="Decision rationale, scoping notes, next steps…" disabled={readOnly} />
+                <textarea rows={2} className={textareaCls} value={form.reviewNotes ?? ''} onChange={(e) => set('reviewNotes', e.target.value)} placeholder="Decision rationale, scoping notes, next steps…" disabled={readOnly || currentUser.role !== 'admin'} />
               </Field>
             </Section>
           )}

@@ -33,6 +33,7 @@ import {
   Share2,
   Workflow,
   FileBarChart,
+  ContactRound,
 } from 'lucide-react';
 import { User, Theme, Role } from '../types';
 import { canAccessGroup, TAB_GROUP } from '../services/permissions';
@@ -64,7 +65,8 @@ export type TabId =
   | 'okrs'
   | 'graph'
   | 'deps'
-  | 'reports';
+  | 'reports'
+  | 'aicontacts';
 
 interface Props {
   activeTab: TabId;
@@ -111,38 +113,45 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Project Management',
     items: [
-      { id: 'projects',       label: 'Projects',       icon: Target },
-      { id: 'board',          label: 'Task Board',     icon: KanbanSquare },
-      { id: 'timeline',       label: 'Timeline',       icon: Calendar },
-      { id: 'deps',           label: 'Dependencies',   icon: Workflow },
-      { id: 'risk',           label: 'Risk Heatmap',   icon: AlertTriangle },
-      { id: 'okrs',           label: 'OKRs',             icon: Goal },
+      { id: 'projects',       label: 'Projects',        icon: Target },
+      { id: 'board',          label: 'Task Board',      icon: KanbanSquare },
+      { id: 'timeline',       label: 'Timeline',        icon: Calendar },
+      { id: 'deps',           label: 'Dependencies',    icon: Workflow },
+      { id: 'risk',           label: 'Risk Heatmap',    icon: AlertTriangle },
+      { id: 'okrs',           label: 'OKRs',            icon: Goal },
       { id: 'qbr',            label: 'Portfolio Review', icon: ClipboardCheck },
-      { id: 'communications', label: 'Communications', icon: Mail },
+      { id: 'communications', label: 'Communications',  icon: Mail },
+      { id: 'wishes',         label: 'Wish List',       icon: Lightbulb },
+    ],
+  },
+  {
+    label: 'Data Platform',
+    items: [
+      { id: 'datafeeds', label: 'Data Feeds', icon: DatabaseZap },
     ],
   },
   {
     label: 'Catalogs',
     items: [
-      { id: 'tech',       label: 'Technologies',     icon: Cpu },
+      { id: 'tech',       label: 'Technologies',      icon: Cpu },
       { id: 'repos',      label: 'Code Repositories', icon: GitBranch },
-      { id: 'hackathons', label: 'Hackathons',       icon: Zap },
-      { id: 'mcp',        label: 'MCP Hub',          icon: Plug },
-      { id: 'agents',     label: 'AI Agents',        icon: Bot },
+      { id: 'hackathons', label: 'Hackathons',        icon: Zap },
+      { id: 'mcp',        label: 'MCP Hub',           icon: Plug },
+      { id: 'agents',     label: 'AI Agents',         icon: Bot },
     ],
   },
   {
     label: 'Collaboration',
     items: [
-      { id: 'workinggroups', label: 'Working Groups',   icon: Network },
-      { id: 'checkin',       label: 'Weekly Check-in',  icon: ClipboardList },
+      { id: 'workinggroups', label: 'Working Groups',  icon: Network },
+      { id: 'checkin',       label: 'Weekly Check-in', icon: ClipboardList },
     ],
   },
   {
     label: 'Tools',
     items: [
-      { id: 'todos',  label: 'Smart ToDo', icon: CheckSquare },
-      { id: 'wishes', label: 'Wish List',  icon: Lightbulb },
+      { id: 'todos',      label: 'Smart ToDo',  icon: CheckSquare },
+      { id: 'aicontacts', label: 'AI Contacts', icon: ContactRound },
     ],
   },
   {
@@ -158,12 +167,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Knowledge',
     items: [
       { id: 'guide', label: 'User Guide', icon: BookOpen },
-    ],
-  },
-  {
-    label: 'Data Platform',
-    items: [
-      { id: 'datafeeds', label: 'Data Feeds', icon: DatabaseZap },
     ],
   },
   {

@@ -51,6 +51,7 @@ const Okrs = lazy(() => import('./components/views/Okrs').then(m => ({ default: 
 const KnowledgeGraph = lazy(() => import('./components/views/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
 const Dependencies = lazy(() => import('./components/views/Dependencies').then(m => ({ default: m.Dependencies })));
 const Reports = lazy(() => import('./components/views/Reports').then(m => ({ default: m.Reports })));
+const AIContacts = lazy(() => import('./components/views/AIContacts').then(m => ({ default: m.AIContacts })));
 import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
 import { sendWebhook } from './services/webhookService';
 
@@ -569,6 +570,8 @@ const App: React.FC = () => {
         ) : (
           <div className="p-10 text-center text-muted">Admin or manager only.</div>
         );
+      case 'aicontacts':
+        return <AIContacts state={appState} currentUser={currentUser} update={update} />;
       case 'capacity':
         return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
           <Capacity state={appState} currentUser={currentUser} update={update} />
