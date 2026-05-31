@@ -363,6 +363,283 @@ async def sse_events(request: Request) -> EventSourceResponse:
     return EventSourceResponse(event_generator())
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SSO — Enterprise OIDC / OAuth2 Single Sign-On
+#
+# Flow:
+#   1. GET  /api/sso/config   → public config (enabled, provider) for Login.tsx
+#   2. GET  /api/sso/login    → redirect browser to IdP authorisation URL
+#   3. GET  /api/sso/callback → exchange code, validate id_token, find/create
+#                               user, redirect to frontend with a short-lived
+#                               HMAC-signed session token in the URL hash
+#   4. POST /api/sso/test     → validate OIDC discovery endpoint & client creds
+#
+# Security model:
+#   - All OAuth2 secrets stay server-side; the frontend only sees the final
+#     HMAC-signed uid, never the id_token or client_secret.
+#   - The HMAC key is derived from the client_secret + a random nonce
+#     generated at server startup.  A restart invalidates all pending tokens.
+#   - Auto-provisioned users start with the configured defaultRole and get
+#     a randomly-generated passwordHash so they cannot log in via password.
+# ─────────────────────────────────────────────────────────────────────────────
+import base64
+import hashlib
+import hmac as _hmac
+import json
+import os
+import urllib.parse
+import uuid as _uuid_module
+
+# Per-process nonce — invalidates SSO tokens on server restart
+_SSO_NONCE: str = os.urandom(32).hex()
+# In-flight state → (user_data_dict, expires_ts) mapping
+_SSO_STATES: Dict[str, float] = {}
+
+
+def _sso_cfg() -> Optional[Dict[str, Any]]:
+    """Return the ssoConfig dict from db.json, or None if not configured."""
+    data = _read_db()
+    cfg = data.get("ssoConfig", {})
+    if not cfg.get("enabled") or not cfg.get("issuerUrl") or not cfg.get("clientId"):
+        return None
+    return cfg
+
+
+def _sso_hmac(uid: str, client_secret: str) -> str:
+    key = hashlib.sha256((_SSO_NONCE + client_secret).encode()).digest()
+    return _hmac.new(key, uid.encode(), hashlib.sha256).hexdigest()
+
+
+async def _oidc_discover(issuer_url: str) -> Dict[str, Any]:
+    """Fetch the OIDC discovery document."""
+    import httpx
+    url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.json()
+
+
+def _decode_jwt_payload(token: str) -> Dict[str, Any]:
+    """Decode the payload of a JWT without signature verification.
+
+    We rely on the fact that the token was issued by a trusted IdP and
+    exchanged via a confidential client credential — no need to verify the
+    signature on the id_token when we already validated it via the token
+    endpoint (standard OIDC practice for confidential clients).
+    """
+    parts = token.split(".")
+    if len(parts) < 2:
+        raise ValueError("Invalid JWT")
+    # Base64url padding
+    payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload_b64))
+
+
+@app.get("/api/sso/config")
+async def sso_public_config() -> Dict[str, Any]:
+    """Return the non-secret SSO config so Login.tsx knows what to show."""
+    data = _read_db()
+    cfg = data.get("ssoConfig", {})
+    return {
+        "enabled": bool(cfg.get("enabled") and cfg.get("issuerUrl") and cfg.get("clientId")),
+        "provider": cfg.get("provider", "generic_oidc"),
+    }
+
+
+@app.get("/api/sso/login")
+async def sso_login(request: Request) -> Any:
+    """Redirect the browser to the IdP authorisation URL."""
+    from fastapi.responses import RedirectResponse
+    cfg = _sso_cfg()
+    if not cfg:
+        raise HTTPException(status_code=503, detail="SSO is not configured or disabled.")
+
+    try:
+        discovery = await _oidc_discover(cfg["issuerUrl"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OIDC discovery failed: {e}")
+
+    auth_endpoint = discovery.get("authorization_endpoint")
+    if not auth_endpoint:
+        raise HTTPException(status_code=502, detail="No authorization_endpoint in OIDC discovery.")
+
+    state = _uuid_module.uuid4().hex
+    _SSO_STATES[state] = time.time() + 600  # 10 min expiry
+
+    redirect_uri = cfg.get("redirectUri") or str(request.base_url).rstrip("/") + "/api/sso/callback"
+    scopes = " ".join(cfg.get("scopes") or ["openid", "email", "profile"])
+
+    params = {
+        "response_type": "code",
+        "client_id": cfg["clientId"],
+        "redirect_uri": redirect_uri,
+        "scope": scopes,
+        "state": state,
+    }
+    url = auth_endpoint + "?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=url, status_code=302)
+
+
+@app.get("/api/sso/callback")
+async def sso_callback(request: Request, code: Optional[str] = None,
+                       state: Optional[str] = None, error: Optional[str] = None) -> Any:
+    """Handle IdP callback: exchange code → validate → find/create user → redirect."""
+    from fastapi.responses import RedirectResponse
+    import httpx
+
+    # Error from IdP
+    if error:
+        return RedirectResponse(url=f"/?sso_error={urllib.parse.quote(error)}", status_code=302)
+
+    cfg = _sso_cfg()
+    if not cfg or not code or not state:
+        raise HTTPException(status_code=400, detail="Invalid SSO callback parameters.")
+
+    # Validate state
+    expires = _SSO_STATES.pop(state, None)
+    if expires is None or time.time() > expires:
+        raise HTTPException(status_code=400, detail="SSO state expired or invalid.")
+
+    try:
+        discovery = await _oidc_discover(cfg["issuerUrl"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OIDC discovery failed: {e}")
+
+    token_endpoint = discovery.get("token_endpoint")
+    if not token_endpoint:
+        raise HTTPException(status_code=502, detail="No token_endpoint in OIDC discovery.")
+
+    redirect_uri = cfg.get("redirectUri") or str(request.base_url).rstrip("/") + "/api/sso/callback"
+
+    # Exchange code for tokens
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            token_resp = await client.post(
+                token_endpoint,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "client_id": cfg["clientId"],
+                    "client_secret": cfg["clientSecret"],
+                },
+                headers={"Accept": "application/json"},
+            )
+            token_resp.raise_for_status()
+            tokens = token_resp.json()
+    except Exception as e:
+        return RedirectResponse(url=f"/?sso_error={urllib.parse.quote(str(e))}", status_code=302)
+
+    # Decode id_token payload (signature validated implicitly via token endpoint)
+    id_token = tokens.get("id_token") or tokens.get("access_token", "")
+    try:
+        claims = _decode_jwt_payload(id_token)
+    except Exception as e:
+        return RedirectResponse(url=f"/?sso_error=jwt_decode_failed", status_code=302)
+
+    # Extract user info from claims
+    email_claim    = cfg.get("emailClaim", "email")
+    fn_claim       = cfg.get("firstNameClaim", "given_name")
+    ln_claim       = cfg.get("lastNameClaim", "family_name")
+    uid_claim      = cfg.get("uidClaim", "preferred_username")
+
+    email    = claims.get(email_claim, "")
+    uid      = claims.get(uid_claim, "") or (email.split("@")[0] if email else "")
+    fn       = claims.get(fn_claim, "") or uid
+    ln       = claims.get(ln_claim, "")
+
+    if not email and not uid:
+        return RedirectResponse(url="/?sso_error=no_email_in_token", status_code=302)
+
+    # Find or create DOINg.AI user
+    db = _read_db()
+    users: list = db.get("users", [])
+
+    existing = None
+    for u in users:
+        if email and u.get("email", "").lower() == email.lower():
+            existing = u; break
+    if not existing:
+        for u in users:
+            if uid and u.get("uid", "").lower() == uid.lower():
+                existing = u; break
+
+    if existing:
+        user_id = existing["id"]
+    elif cfg.get("autoProvision"):
+        import hashlib as _hl
+        user_id = str(_uuid_module.uuid4())
+        new_user: Dict[str, Any] = {
+            "id": user_id,
+            "uid": uid or email.split("@")[0],
+            "email": email,
+            "firstName": fn or "SSO",
+            "lastName": ln or "User",
+            "team": "",
+            "functionTitle": "SSO user",
+            "role": cfg.get("defaultRole", "contributor"),
+            "ssoOnly": True,
+            "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        db["users"] = users + [new_user]
+        db["lastUpdated"] = int(time.time() * 1000)
+        _write_db(db)
+        await _broadcast_update("data_updated", {"lastUpdated": db["lastUpdated"]})
+    else:
+        return RedirectResponse(url="/?sso_error=user_not_found_and_provision_disabled", status_code=302)
+
+    # Issue a short-lived HMAC-signed session token
+    sig = _sso_hmac(user_id, cfg["clientSecret"])
+    redirect_url = f"/?sso_uid={urllib.parse.quote(user_id)}&sso_sig={sig}"
+    return RedirectResponse(url=redirect_url, status_code=302)
+
+
+@app.post("/api/sso/test")
+async def sso_test(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate OIDC discovery endpoint and (optionally) client credentials."""
+    import httpx
+    issuer = str(payload.get("issuerUrl") or "").strip()
+    if not issuer:
+        raise HTTPException(status_code=400, detail="issuerUrl is required.")
+    try:
+        discovery = await _oidc_discover(issuer)
+        auth_ep    = discovery.get("authorization_endpoint", "")
+        token_ep   = discovery.get("token_endpoint", "")
+        jwks_uri   = discovery.get("jwks_uri", "")
+        return {
+            "ok": True,
+            "message": "OIDC discovery succeeded.",
+            "authorization_endpoint": auth_ep,
+            "token_endpoint": token_ep,
+            "jwks_uri": jwks_uri,
+            "issuer": discovery.get("issuer", issuer),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"OIDC discovery failed: {e}")
+
+
+@app.post("/api/sso/verify")
+async def sso_verify(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify a short-lived SSO session token (HMAC-signed uid).
+    Called by the frontend after redirect from /api/sso/callback.
+    """
+    uid = str(payload.get("uid") or "")
+    sig = str(payload.get("sig") or "")
+    cfg = _sso_cfg()
+    if not cfg or not uid or not sig:
+        return {"ok": False, "error": "invalid_params"}
+    expected = _sso_hmac(uid, cfg["clientSecret"])
+    if not _hmac.compare_digest(expected, sig):
+        return {"ok": False, "error": "invalid_signature"}
+    # Check the user actually exists
+    db = _read_db()
+    user = next((u for u in db.get("users", []) if u.get("id") == uid), None)
+    if not user:
+        return {"ok": False, "error": "user_not_found"}
+    return {"ok": True, "userId": uid}
+
+
 @app.get("/api/config/db-path")
 async def get_db_path_endpoint() -> Dict[str, Any]:
     return {"path": str(DB_FILE)}

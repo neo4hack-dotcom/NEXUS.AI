@@ -875,6 +875,38 @@ export interface AIContact {
   updatedAt: string;
 }
 
+/* ============================================================
+   SSO — Enterprise Single Sign-On (OIDC / OAuth2)
+   ============================================================
+   Configured by admins in Settings → SSO. The FastAPI backend
+   handles all token exchange; the frontend only initiates the
+   redirect and receives the final session hand-off.
+*/
+export type SSOProvider = 'generic_oidc' | 'azure_ad' | 'okta' | 'keycloak' | 'google';
+
+export interface SSOConfig {
+  enabled: boolean;
+  provider: SSOProvider;
+  // ── OIDC / OAuth2 ──────────────────────────────────────
+  issuerUrl: string;          // e.g. https://login.microsoftonline.com/{tenant}/v2.0
+  clientId: string;
+  clientSecret: string;       // stored server-side only; never sent to browser
+  redirectUri: string;        // must match IdP registration, default: {serverUrl}/api/sso/callback
+  scopes: string[];           // default: ['openid','email','profile']
+  // ── Field mapping ──────────────────────────────────────
+  emailClaim: string;         // OIDC claim to use as email   (default: "email")
+  firstNameClaim: string;     // OIDC claim for first name    (default: "given_name")
+  lastNameClaim: string;      // OIDC claim for last name     (default: "family_name")
+  uidClaim: string;           // OIDC claim to use as UID     (default: "preferred_username")
+  // ── Auto-provisioning ──────────────────────────────────
+  autoProvision: boolean;     // create a DOINg user on first SSO login
+  defaultRole: Role;          // role for auto-provisioned users
+  // ── State ──────────────────────────────────────────────
+  lastTestedAt?: string;
+  lastTestStatus?: 'success' | 'error';
+  lastTestMessage?: string;
+}
+
 export interface AppState {
   users: User[];
   projects: Project[];
@@ -901,6 +933,7 @@ export interface AppState {
   okrs: Objective[];
   aiContacts: AIContact[];
   aiContactFamilies: AIContactFamily[];
+  ssoConfig: SSOConfig;
   sharePointConfig: SharePointConfig;
   webhookConfig: WebhookConfig;
   llmConfig: LlmConfig;
