@@ -125,7 +125,7 @@ _MERGEABLE_COLLECTIONS = (
     "mailingLists", "weeklyCheckIns", "notifications", "hackathons",
     "workingGroups", "smartTodos", "mcpServers", "mcpFamilies",
     "mcpBestPractices", "agents", "agentFamilies", "dataFeeds",
-    "wishes", "pendingProjects", "okrs", "aiContacts", "aiContactFamilies",
+    "wishes", "pendingProjects", "aiContacts", "aiContactFamilies",
 )
 
 # Deletion tombstones; GC after this TTL prevents unbounded growth.

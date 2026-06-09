@@ -5,7 +5,6 @@ import {
   Cpu,
   Activity,
   CheckCircle2,
-  AlertTriangle,
   GitBranch,
   Sparkles,
   ArrowRight,
@@ -474,19 +473,6 @@ export const Dashboard: React.FC<Props> = ({ state, currentUser, setActiveTab, o
               </div>
             </div>
           </div>
-
-          {/* Risks */}
-          <button
-            onClick={() => setActiveTab('risk')}
-            className="surface border w-full p-4 flex items-center gap-3 text-left hover:border-brand transition-colors"
-          >
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-            <div className="flex-1">
-              <p className="label-xs">Heatmap</p>
-              <p className="text-sm font-bold">Open the RAG risk view</p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-muted" />
-          </button>
         </div>
       </div>
     </div>

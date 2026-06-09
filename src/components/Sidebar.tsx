@@ -8,7 +8,6 @@ import {
   Settings as SettingsIcon,
   GitBranch,
   Calendar,
-  AlertTriangle,
   ClipboardList,
   Sun,
   Moon,
@@ -28,10 +27,7 @@ import {
   Activity,
   Gauge,
   KanbanSquare,
-  ClipboardCheck,
-  Goal,
   Share2,
-  Workflow,
   FileBarChart,
   ContactRound,
 } from 'lucide-react';
@@ -42,7 +38,6 @@ export type TabId =
   | 'dashboard'
   | 'projects'
   | 'timeline'
-  | 'risk'
   | 'contributors'
   | 'checkin'
   | 'communications'
@@ -60,11 +55,8 @@ export type TabId =
   | 'pending'
   | 'board'
   | 'capacity'
-  | 'qbr'
   | 'activity'
-  | 'okrs'
   | 'graph'
-  | 'deps'
   | 'reports'
   | 'aicontacts';
 
@@ -116,10 +108,6 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'projects',       label: 'Projects',        icon: Target },
       { id: 'board',          label: 'Task Board',      icon: KanbanSquare },
       { id: 'timeline',       label: 'Timeline',        icon: Calendar },
-      { id: 'deps',           label: 'Dependencies',    icon: Workflow },
-      { id: 'risk',           label: 'Risk Heatmap',    icon: AlertTriangle },
-      { id: 'okrs',           label: 'OKRs',            icon: Goal },
-      { id: 'qbr',            label: 'Portfolio Review', icon: ClipboardCheck },
       { id: 'communications', label: 'Communications',  icon: Mail },
       { id: 'wishes',         label: 'Wish List',       icon: Lightbulb },
     ],
