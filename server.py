@@ -125,8 +125,66 @@ _MERGEABLE_COLLECTIONS = (
     "mailingLists", "weeklyCheckIns", "notifications", "hackathons",
     "workingGroups", "smartTodos", "mcpServers", "mcpFamilies",
     "mcpBestPractices", "agents", "agentFamilies", "dataFeeds",
-    "wishes", "pendingProjects",
+    "wishes", "pendingProjects", "okrs", "aiContacts", "aiContactFamilies",
 )
+
+# Deletion tombstones; GC after this TTL prevents unbounded growth.
+_TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000  # 30 days
+
+
+def _entity_recency_ms(e: Dict[str, Any]) -> float:
+    """When was this entity last touched, normalised to epoch ms."""
+    if not isinstance(e, dict):
+        return 0.0
+    for key in ("updatedAt", "createdAt"):
+        v = e.get(key)
+        if isinstance(v, str):
+            return _iso_to_epoch(v) * 1000.0
+        if isinstance(v, (int, float)):
+            # Numeric stamps may be seconds or ms; >1e11 ≈ already-ms.
+            return float(v) if v > 1e11 else float(v) * 1000.0
+    return 0.0
+
+
+def _reconcile_tombstones(current: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Make deletions authoritative so merge-by-id never resurrects removed entities.
+      1. Union the two `deletedIds` maps (keep the most recent timestamp per id).
+      2. For every mergeable collection, drop any entity that is tombstoned and
+         has NOT been modified since its deletion. An entity edited/recreated
+         after the tombstone (recency > deletedAt) survives and clears its tomb.
+      3. GC tombstones past the TTL.
+    Mutates and returns `incoming`.
+    """
+    now_ms = time.time() * 1000.0
+    cur_t = current.get("deletedIds") if isinstance(current.get("deletedIds"), dict) else {}
+    inc_t = incoming.get("deletedIds") if isinstance(incoming.get("deletedIds"), dict) else {}
+
+    merged_t: Dict[str, float] = {}
+    for src in (cur_t, inc_t):
+        for k, v in src.items():
+            if isinstance(v, (int, float)):
+                merged_t[k] = max(merged_t.get(k, 0.0), float(v))
+
+    for key in _MERGEABLE_COLLECTIONS:
+        coll = incoming.get(key)
+        if not isinstance(coll, list):
+            continue
+        kept = []
+        for e in coll:
+            if isinstance(e, dict) and e.get("id") in merged_t:
+                tomb = merged_t[e["id"]]
+                if _entity_recency_ms(e) <= tomb:
+                    continue  # tombstoned and untouched since → drop
+                merged_t.pop(e["id"], None)  # recreated after delete → keep & clear tomb
+            kept.append(e)
+        incoming[key] = kept
+
+    # GC expired tombstones.
+    cutoff = now_ms - _TOMBSTONE_TTL_MS
+    merged_t = {k: v for k, v in merged_t.items() if v >= cutoff}
+    incoming["deletedIds"] = merged_t
+    return incoming
 
 
 def _entity_recency(entity: Dict[str, Any]) -> float:
@@ -297,6 +355,11 @@ async def save_data(
                       f"server={server_version}) → merging by id")
                 new_data = _merge_states(current, new_data)
                 merged_flag = True
+
+        # ALWAYS reconcile tombstones — even on the non-conflict path — so a
+        # writer that still holds a just-deleted entity (and whose payload would
+        # otherwise overwrite the server's deletedIds) can't bring it back.
+        new_data = _reconcile_tombstones(current, new_data)
 
         new_data["lastUpdated"] = int(time.time() * 1000)
         _write_db(new_data)
