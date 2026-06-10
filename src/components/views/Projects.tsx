@@ -75,6 +75,8 @@ import {
   type ExtractedProjectDraft,
   type SheetPreview,
 } from '../../services/projectImport';
+import { evalRoi, fetchTelemetry } from '../../services/projectAnalytics';
+import { TelemetryMetric, RoiInput } from '../../types';
 
 interface Props {
   state: AppState;
@@ -1682,6 +1684,27 @@ const ProjectReadOnlyModal: React.FC<{
             {(p.tags || []).length > 0 && <Field label="Tags"><Chips items={p.tags} /></Field>}
           </Section>
 
+          {((p.telemetry || []).length > 0 || p.roiModel) && (
+            <Section title="Metrics & ROI">
+              {(p.telemetry || []).length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                  {(p.telemetry || []).map((m) => (
+                    <div key={m.id} className="border border-neutral-200 dark:border-ink-600 p-2">
+                      <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-muted truncate" title={m.label}>{m.label || '—'}</p>
+                      <p className="text-lg font-black">{m.value ?? '—'}{m.unit ? <span className="text-[10px] text-muted ml-0.5">{m.unit}</span> : null}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {p.roiModel && (() => { const r = evalRoi(p.roiModel); return (
+                <div className="surface-flat border p-3 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{p.roiModel.resultLabel || 'ROI'}</span>
+                  <span className="text-xl font-black text-brand">{r === null ? '—' : r.toLocaleString(undefined, { maximumFractionDigits: 2 })}{p.roiModel.resultUnit ? ` ${p.roiModel.resultUnit}` : ''}</span>
+                </div>
+              ); })()}
+            </Section>
+          )}
+
           {p.notes && (
             <Section title="Notes">
               <div className="prose-sm max-w-none"><MarkdownView content={p.notes} /></div>
@@ -1704,7 +1727,9 @@ const ProjectDetailModal: React.FC<{
   onDelete: () => void;
   onAudit: (action: string, details?: string) => void;
 }> = ({ project, state, currentUser, onClose, onSave, onDelete, onAudit }) => {
-  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit' | 'presentations'>('overview');
+  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit' | 'presentations' | 'telemetry' | 'roi'>('overview');
+  const [fetchingMetricId, setFetchingMetricId] = useState<string | null>(null);
+  const [roiAiLoading, setRoiAiLoading] = useState(false);
   const [draft, setDraft] = useState<Project>(project);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
@@ -1841,7 +1866,7 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
 
           {/* Tabs */}
           <div className="flex items-center gap-1 mt-4 border-b border-neutral-200 dark:border-ink-600 -mb-5">
-            {(['overview', 'kanban', 'presentations', 'notes', 'audit'] as const).map((t) => (
+            {(['overview', 'kanban', 'telemetry', 'roi', 'presentations', 'notes', 'audit'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -2218,6 +2243,157 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
               </div>
             </div>
           )}
+
+          {/* Telemetry Tab (#17) */}
+          {tab === 'telemetry' && (() => {
+            const metrics = draft.telemetry || [];
+            const upd = (id: string, patch: Partial<TelemetryMetric>) =>
+              setDraft({ ...draft, telemetry: metrics.map((m) => (m.id === id ? { ...m, ...patch } : m)) });
+            const addMetric = () =>
+              setDraft({ ...draft, telemetry: [...metrics, { id: generateId(), label: '', unit: '', source: 'manual', value: 0, apiMethod: 'GET' }] });
+            const removeMetric = (id: string) => setDraft({ ...draft, telemetry: metrics.filter((m) => m.id !== id) });
+            const fetchNow = async (m: TelemetryMetric) => {
+              setFetchingMetricId(m.id);
+              const r = await fetchTelemetry(m);
+              upd(m.id, { value: r.value ?? m.value, lastError: r.error, lastFetchedAt: new Date().toISOString() });
+              setFetchingMetricId(null);
+            };
+            return (
+              <div className="space-y-3">
+                <p className="text-xs text-muted">Track runtime metrics for this project — type them in (declarative) or pull them live from an API endpoint.</p>
+                {metrics.length === 0 && <p className="text-[12px] text-muted italic py-4 text-center">No telemetry metrics yet.</p>}
+                {metrics.map((m) => (
+                  <div key={m.id} className="surface-flat border p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input value={m.label} disabled={!canEdit} onChange={(e) => upd(m.id, { label: e.target.value })} placeholder="Metric label (e.g. Monthly active users)" className="flex-1" />
+                      <Input value={m.unit || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { unit: e.target.value })} placeholder="unit" className="w-24" />
+                      <Select value={m.source} disabled={!canEdit} onChange={(e) => upd(m.id, { source: e.target.value as TelemetryMetric['source'] })} className="w-28">
+                        <option value="manual">Manual</option>
+                        <option value="api">API</option>
+                      </Select>
+                      {canEdit && <button onClick={() => removeMetric(m.id)} className="text-muted hover:text-red-500"><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                    {m.source === 'manual' ? (
+                      <Input type="number" value={m.value ?? ''} disabled={!canEdit} onChange={(e) => upd(m.id, { value: e.target.value ? parseFloat(e.target.value) : undefined })} placeholder="Value" className="w-40" />
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <Select value={m.apiMethod || 'GET'} disabled={!canEdit} onChange={(e) => upd(m.id, { apiMethod: e.target.value as 'GET' | 'POST' })} className="w-24"><option>GET</option><option>POST</option></Select>
+                          <Input value={m.apiUrl || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { apiUrl: e.target.value })} placeholder="https://api.example.com/metric" className="flex-1" />
+                        </div>
+                        <div className="flex gap-2">
+                          <Input value={m.jsonPath || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { jsonPath: e.target.value })} placeholder="JSON path e.g. data.count" className="flex-1" />
+                          <Input value={m.apiHeaders || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { apiHeaders: e.target.value })} placeholder='Headers JSON e.g. {"Authorization":"Bearer …"}' className="flex-1" />
+                        </div>
+                        {m.apiMethod === 'POST' && <Textarea value={m.apiBody || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { apiBody: e.target.value })} placeholder="Request body (JSON)" rows={2} />}
+                        <div className="flex items-center gap-3">
+                          <Button size="sm" variant="outline" disabled={!canEdit || fetchingMetricId === m.id} onClick={() => fetchNow(m)}>
+                            {fetchingMetricId === m.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 mr-1" />} Fetch now
+                          </Button>
+                          <span className="text-sm font-bold">{m.value ?? '—'}{m.unit ? ` ${m.unit}` : ''}</span>
+                          {m.lastFetchedAt && !m.lastError && <span className="text-[10px] text-muted">updated {new Date(m.lastFetchedAt).toLocaleString()}</span>}
+                          {m.lastError && <span className="text-[10px] text-red-500">⚠ {m.lastError}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {canEdit && <Button size="sm" variant="outline" onClick={addMetric}><Plus className="w-3.5 h-3.5 mr-1" /> Add metric</Button>}
+              </div>
+            );
+          })()}
+
+          {/* ROI / Impact Tab (#18) */}
+          {tab === 'roi' && (() => {
+            const roi = draft.roiModel || { enabled: true, inputs: [], formula: '', resultLabel: 'Annual ROI', resultUnit: '€' };
+            const setRoi = (patch: Partial<typeof roi>) => setDraft({ ...draft, roiModel: { ...roi, ...patch } });
+            const addInput = () => setRoi({ inputs: [...(roi.inputs || []), { id: generateId(), key: `var${(roi.inputs || []).length + 1}`, label: '', value: 0, unit: '' }] });
+            const updInput = (id: string, patch: Partial<RoiInput>) => setRoi({ inputs: (roi.inputs || []).map((i) => (i.id === id ? { ...i, ...patch } : i)) });
+            const removeInput = (id: string) => setRoi({ inputs: (roi.inputs || []).filter((i) => i.id !== id) });
+            const result = evalRoi(roi);
+            const suggestAI = async () => {
+              setRoiAiLoading(true);
+              try {
+                const prompt = `You design ROI models for AI use cases. For the project below, propose a concrete, parametric ROI model.
+Return ONLY valid JSON (no prose, no fences) shaped exactly as:
+{"inputs":[{"key":"hoursSavedPerMonth","label":"Hours saved / month","value":120,"unit":"h"},{"key":"hourlyRate","label":"Loaded hourly rate","value":60,"unit":"€"},{"key":"annualCost","label":"Annual run cost","value":15000,"unit":"€"}],"formula":"(hoursSavedPerMonth*hourlyRate*12)-annualCost","resultLabel":"Annual net ROI","resultUnit":"€"}
+Keys must be valid identifiers used verbatim in the formula. Pick realistic default values from the context.
+
+PROJECT: ${draft.name}
+DESCRIPTION: ${draft.description || '(none)'}
+CONTEXT: ${(draft.context || '').slice(0, 600)}
+FTE GAIN: ${draft.fteGain ?? 'n/a'}`;
+                const out = await runPrompt(prompt, state.llmConfig);
+                const json = JSON.parse(out.replace(/```json|```/g, '').trim());
+                setRoi({
+                  enabled: true,
+                  inputs: (json.inputs || []).map((i: any) => ({ id: generateId(), key: String(i.key || ''), label: String(i.label || ''), value: Number(i.value) || 0, unit: i.unit || '' })),
+                  formula: String(json.formula || ''),
+                  resultLabel: json.resultLabel || roi.resultLabel,
+                  resultUnit: json.resultUnit || roi.resultUnit,
+                });
+              } catch {
+                alert('AI could not produce a valid ROI model. Try again or define it manually.');
+              } finally { setRoiAiLoading(false); }
+            };
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted">Define a dynamic, parametric ROI / impact model for this use case. Edit inputs and the formula — the result recomputes live.</p>
+                  {canEdit && state.llmConfig?.provider && (
+                    <Button size="sm" variant="outline" onClick={suggestAI} disabled={roiAiLoading}>
+                      {roiAiLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />} Suggest with AI
+                    </Button>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Inputs</p>
+                  <div className="space-y-2">
+                    {(roi.inputs || []).map((i) => (
+                      <div key={i.id} className="flex items-center gap-2">
+                        <Input value={i.key} disabled={!canEdit} onChange={(e) => updInput(i.id, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })} placeholder="key" className="w-40 font-mono text-[11px]" />
+                        <Input value={i.label} disabled={!canEdit} onChange={(e) => updInput(i.id, { label: e.target.value })} placeholder="Label" className="flex-1" />
+                        <Input type="number" value={i.value} disabled={!canEdit} onChange={(e) => updInput(i.id, { value: parseFloat(e.target.value) || 0 })} className="w-28" />
+                        <Input value={i.unit || ''} disabled={!canEdit} onChange={(e) => updInput(i.id, { unit: e.target.value })} placeholder="unit" className="w-20" />
+                        {canEdit && <button onClick={() => removeInput(i.id)} className="text-muted hover:text-red-500"><Trash2 className="w-4 h-4" /></button>}
+                      </div>
+                    ))}
+                    {(roi.inputs || []).length === 0 && <p className="text-[12px] text-muted italic">No inputs yet.</p>}
+                  </div>
+                  {canEdit && <Button size="sm" variant="outline" className="mt-2" onClick={addInput}><Plus className="w-3.5 h-3.5 mr-1" /> Add input</Button>}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-3">
+                    <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Formula (use the input keys)</label>
+                    <Input value={roi.formula} disabled={!canEdit} onChange={(e) => setRoi({ formula: e.target.value })} placeholder="(hoursSaved*rate*12)-annualCost" className="font-mono text-[12px]" />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Result label</label>
+                    <Input value={roi.resultLabel || ''} disabled={!canEdit} onChange={(e) => setRoi({ resultLabel: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Result unit</label>
+                    <Input value={roi.resultUnit || ''} disabled={!canEdit} onChange={(e) => setRoi({ resultUnit: e.target.value })} />
+                  </div>
+                </div>
+
+                <div className="surface-flat border p-4 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted">{roi.resultLabel || 'Result'}</span>
+                  <span className="text-2xl font-black text-brand">
+                    {result === null ? '—' : result.toLocaleString(undefined, { maximumFractionDigits: 2 })}{roi.resultUnit ? ` ${roi.resultUnit}` : ''}
+                  </span>
+                </div>
+                {result === null && roi.formula.trim() && <p className="text-[11px] text-red-500">Formula is invalid — it must only reference the input keys and use + - * / ( ).</p>}
+
+                <div>
+                  <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Notes</label>
+                  <Textarea value={roi.notes || ''} disabled={!canEdit} onChange={(e) => setRoi({ notes: e.target.value })} rows={2} placeholder="Assumptions, methodology, caveats…" />
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Presentations Tab */}
           {tab === 'presentations' && (
