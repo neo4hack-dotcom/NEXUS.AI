@@ -36,6 +36,7 @@ import { canAccessGroup, TAB_GROUP } from '../services/permissions';
 
 export type TabId =
   | 'dashboard'
+  | 'manager'
   | 'projects'
   | 'timeline'
   | 'contributors'
@@ -100,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Dashboard',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'manager',   label: 'Manager View', icon: Gauge },
     ],
   },
   {

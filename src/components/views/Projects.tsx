@@ -75,6 +75,9 @@ import {
   type ExtractedProjectDraft,
   type SheetPreview,
 } from '../../services/projectImport';
+import { evalRoi, fetchTelemetry } from '../../services/projectAnalytics';
+import { findDuplicatesFor, findDuplicatesAI, findDuplicatePairs, mergeProjects, type DuplicateGroup } from '../../services/duplicateDetection';
+import { TelemetryMetric, RoiInput } from '../../types';
 
 interface Props {
   state: AppState;
@@ -581,6 +584,8 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [dupTargetIds, setDupTargetIds] = useState<string[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -647,6 +652,28 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         ? s.projects.map((x) => (x.id === p.id ? p : x))
         : [p, ...s.projects],
     }));
+
+  // Merge one or more duplicate projects into a chosen primary, then delete them.
+  const mergeDuplicates = (primaryId: string, secondaryIds: string[]) => {
+    update((s) => {
+      const primary = s.projects.find((x) => x.id === primaryId);
+      if (!primary) return s;
+      let merged = primary;
+      secondaryIds.forEach((sid) => {
+        const sec = s.projects.find((x) => x.id === sid);
+        if (sec) merged = mergeProjects(merged, sec, `${currentUser.firstName} ${currentUser.lastName}`);
+      });
+      const drop = new Set(secondaryIds);
+      return { ...s, projects: s.projects.map((x) => (x.id === primaryId ? merged : x)).filter((x) => !drop.has(x.id)) };
+    });
+  };
+
+  // After a create/import, surface a clear duplicate warning if any are found.
+  const flagDuplicates = (newOnes: Project[]) => {
+    const ids = newOnes.map((p) => p.id);
+    const pool = [...newOnes, ...state.projects.filter((sp) => !ids.includes(sp.id))];
+    if (findDuplicatesFor(pool, ids).length > 0) { setDupTargetIds(ids); setShowDuplicates(true); }
+  };
 
   const handleCreate = (templateId?: string) => {
     const template = templateId ? (state.projectTemplates || []).find((t) => t.id === templateId) : null;
@@ -756,6 +783,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             onImport={() => setShowBulkImport(true)}
             onBooklet={() => setShowBooklet(true)}
           />
+          {canEdit && state.projects.length > 1 && (
+            <Button variant="outline" size="md" onClick={() => { setDupTargetIds([]); setShowDuplicates(true); }} title="Scan the portfolio for duplicate projects">
+              <Layers className="w-4 h-4 mr-2" />
+              Find duplicates
+            </Button>
+          )}
           {canEdit && (
             <>
               {(state.projectTemplates || []).length > 0 && (
@@ -1139,6 +1172,16 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         ) : null;
       })()}
 
+      {showDuplicates && (
+        <DuplicatesModal
+          projects={state.projects}
+          llmConfig={state.llmConfig}
+          targetIds={dupTargetIds}
+          onClose={() => { setShowDuplicates(false); setDupTargetIds([]); }}
+          onMerge={(primaryId, secondaryIds) => mergeDuplicates(primaryId, secondaryIds)}
+        />
+      )}
+
       {showTemplatePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatePicker(false)}>
           <div className="bg-white dark:bg-ink-900 w-full max-w-lg border border-neutral-200 dark:border-ink-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1177,8 +1220,8 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           onClose={() => setShowAiBot(false)}
           onCreate={(p) => {
             upsertProject(addAudit(p, currentUser, 'Project created via AI PRJ'));
-            setSelectedId(p.id);
             setShowAiBot(false);
+            flagDuplicates([p]);
           }}
         />
       )}
@@ -1191,6 +1234,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           onImport={(projects) => {
             update((s) => ({ ...s, projects: [...projects, ...s.projects] }));
             setShowBulkImport(false);
+            flagDuplicates(projects);
           }}
         />
       )}
@@ -1538,6 +1582,117 @@ const FamilyManagerModal: React.FC<{
   );
 };
 
+/* === Duplicate detection & smart merge (#20) === */
+
+const DuplicatesModal: React.FC<{
+  projects: Project[];
+  llmConfig: AppState['llmConfig'];
+  targetIds: string[];
+  onClose: () => void;
+  onMerge: (primaryId: string, secondaryIds: string[]) => void;
+}> = ({ projects, llmConfig, targetIds, onClose, onMerge }) => {
+  const [loading, setLoading] = useState(true);
+  const [usedAI, setUsedAI] = useState(false);
+  const [groups, setGroups] = useState<DuplicateGroup[]>([]);
+  const [primaryByGroup, setPrimaryByGroup] = useState<Record<number, string>>({});
+  const [done, setDone] = useState<Set<number>>(new Set());
+
+  const projById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+
+  const run = async (useAI: boolean) => {
+    setLoading(true); setDone(new Set());
+    let found: DuplicateGroup[];
+    if (useAI && llmConfig?.provider) { found = await findDuplicatesAI(projects, llmConfig); setUsedAI(true); }
+    else { found = targetIds.length ? findDuplicatesFor(projects, targetIds) : findDuplicatePairs(projects); setUsedAI(false); }
+    // keep only groups whose projects still exist
+    found = found.map((g) => ({ ...g, projectIds: g.projectIds.filter((id) => projById.has(id)) })).filter((g) => g.projectIds.length >= 2);
+    setGroups(found);
+    setPrimaryByGroup(Object.fromEntries(found.map((g, i) => [i, g.projectIds[0]])));
+    setLoading(false);
+  };
+
+  useEffect(() => { run(!!llmConfig?.provider); /* eslint-disable-next-line */ }, []);
+
+  const mergeGroup = (gi: number) => {
+    const g = groups[gi];
+    const primary = primaryByGroup[gi] || g.projectIds[0];
+    const secondaries = g.projectIds.filter((id) => id !== primary);
+    if (!secondaries.length) return;
+    const names = secondaries.map((id) => projById.get(id)?.name).filter(Boolean).join(', ');
+    if (!window.confirm(`Merge ${secondaries.length} project(s) (${names}) into "${projById.get(primary)?.name}"? Information is combined; the others are removed.`)) return;
+    onMerge(primary, secondaries);
+    setDone((d) => new Set([...d, gi]));
+  };
+
+  const activeGroups = groups.filter((_, i) => !done.has(i));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="surface border w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-black uppercase tracking-tight flex items-center gap-2"><Layers className="w-5 h-5 text-brand" /> Duplicate projects</h2>
+            <p className="text-[11px] text-muted mt-0.5">{usedAI ? 'Detected semantically by the local LLM' : 'Detected by name/description similarity'}{targetIds.length ? ' · focused on your latest import' : ''}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {llmConfig?.provider && <Button size="sm" variant="outline" onClick={() => run(true)} disabled={loading}><Sparkles className="w-3.5 h-3.5 mr-1" /> AI rescan</Button>}
+            <Button size="sm" variant="outline" onClick={() => run(false)} disabled={loading}><RotateCcw className="w-3.5 h-3.5 mr-1" /> Quick scan</Button>
+            <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted">
+              <Loader2 className="w-8 h-8 animate-spin text-brand mb-3" />
+              <p className="text-[11px] uppercase tracking-[0.16em]">Scanning for duplicates…</p>
+            </div>
+          ) : activeGroups.length === 0 ? (
+            <div className="text-center py-16">
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-500" />
+              <p className="text-sm font-bold">No duplicates found.</p>
+              <p className="text-[11px] text-muted mt-1">Your portfolio looks clean.</p>
+            </div>
+          ) : (
+            groups.map((g, gi) => done.has(gi) ? null : (
+              <div key={gi} className="border border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                  <p className="text-[12px] font-semibold flex-1">{g.reason}</p>
+                  <span className="text-[10px] font-mono text-muted">{Math.round((g.confidence || 0) * 100)}%</span>
+                </div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted mb-2">Keep as primary:</p>
+                <div className="space-y-1.5 mb-3">
+                  {g.projectIds.map((id) => {
+                    const p = projById.get(id);
+                    if (!p) return null;
+                    return (
+                      <label key={id} className="flex items-start gap-2 p-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-600 cursor-pointer">
+                        <input type="radio" name={`primary-${gi}`} checked={(primaryByGroup[gi] || g.projectIds[0]) === id} onChange={() => setPrimaryByGroup((m) => ({ ...m, [gi]: id }))} className="mt-1" />
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-bold truncate">{p.name}</p>
+                          <p className="text-[10px] text-muted line-clamp-2">{p.description || 'No description.'}</p>
+                          <p className="text-[9px] text-muted mt-0.5">{(p.tasks || []).length} tasks · created {new Date(p.createdAt).toLocaleDateString('en-GB')}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={() => mergeGroup(gi)}><Layers className="w-3.5 h-3.5 mr-1" /> Merge into primary</Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end">
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* === Project Read-Only Details (clean, reading-oriented popup) === */
 
 const ProjectReadOnlyModal: React.FC<{
@@ -1682,6 +1837,27 @@ const ProjectReadOnlyModal: React.FC<{
             {(p.tags || []).length > 0 && <Field label="Tags"><Chips items={p.tags} /></Field>}
           </Section>
 
+          {((p.telemetry || []).length > 0 || p.roiModel) && (
+            <Section title="Metrics & ROI">
+              {(p.telemetry || []).length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                  {(p.telemetry || []).map((m) => (
+                    <div key={m.id} className="border border-neutral-200 dark:border-ink-600 p-2">
+                      <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-muted truncate" title={m.label}>{m.label || '—'}</p>
+                      <p className="text-lg font-black">{m.value ?? '—'}{m.unit ? <span className="text-[10px] text-muted ml-0.5">{m.unit}</span> : null}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {p.roiModel && (() => { const r = evalRoi(p.roiModel); return (
+                <div className="surface-flat border p-3 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{p.roiModel.resultLabel || 'ROI'}</span>
+                  <span className="text-xl font-black text-brand">{r === null ? '—' : r.toLocaleString(undefined, { maximumFractionDigits: 2 })}{p.roiModel.resultUnit ? ` ${p.roiModel.resultUnit}` : ''}</span>
+                </div>
+              ); })()}
+            </Section>
+          )}
+
           {p.notes && (
             <Section title="Notes">
               <div className="prose-sm max-w-none"><MarkdownView content={p.notes} /></div>
@@ -1704,7 +1880,9 @@ const ProjectDetailModal: React.FC<{
   onDelete: () => void;
   onAudit: (action: string, details?: string) => void;
 }> = ({ project, state, currentUser, onClose, onSave, onDelete, onAudit }) => {
-  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit' | 'presentations'>('overview');
+  const [tab, setTab] = useState<'overview' | 'kanban' | 'notes' | 'audit' | 'presentations' | 'telemetry' | 'roi'>('overview');
+  const [fetchingMetricId, setFetchingMetricId] = useState<string | null>(null);
+  const [roiAiLoading, setRoiAiLoading] = useState(false);
   const [draft, setDraft] = useState<Project>(project);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOutput, setAiOutput] = useState('');
@@ -1841,7 +2019,7 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
 
           {/* Tabs */}
           <div className="flex items-center gap-1 mt-4 border-b border-neutral-200 dark:border-ink-600 -mb-5">
-            {(['overview', 'kanban', 'presentations', 'notes', 'audit'] as const).map((t) => (
+            {(['overview', 'kanban', 'telemetry', 'roi', 'presentations', 'notes', 'audit'] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -2218,6 +2396,157 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
               </div>
             </div>
           )}
+
+          {/* Telemetry Tab (#17) */}
+          {tab === 'telemetry' && (() => {
+            const metrics = draft.telemetry || [];
+            const upd = (id: string, patch: Partial<TelemetryMetric>) =>
+              setDraft({ ...draft, telemetry: metrics.map((m) => (m.id === id ? { ...m, ...patch } : m)) });
+            const addMetric = () =>
+              setDraft({ ...draft, telemetry: [...metrics, { id: generateId(), label: '', unit: '', source: 'manual', value: 0, apiMethod: 'GET' }] });
+            const removeMetric = (id: string) => setDraft({ ...draft, telemetry: metrics.filter((m) => m.id !== id) });
+            const fetchNow = async (m: TelemetryMetric) => {
+              setFetchingMetricId(m.id);
+              const r = await fetchTelemetry(m);
+              upd(m.id, { value: r.value ?? m.value, lastError: r.error, lastFetchedAt: new Date().toISOString() });
+              setFetchingMetricId(null);
+            };
+            return (
+              <div className="space-y-3">
+                <p className="text-xs text-muted">Track runtime metrics for this project — type them in (declarative) or pull them live from an API endpoint.</p>
+                {metrics.length === 0 && <p className="text-[12px] text-muted italic py-4 text-center">No telemetry metrics yet.</p>}
+                {metrics.map((m) => (
+                  <div key={m.id} className="surface-flat border p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input value={m.label} disabled={!canEdit} onChange={(e) => upd(m.id, { label: e.target.value })} placeholder="Metric label (e.g. Monthly active users)" className="flex-1" />
+                      <Input value={m.unit || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { unit: e.target.value })} placeholder="unit" className="w-24" />
+                      <Select value={m.source} disabled={!canEdit} onChange={(e) => upd(m.id, { source: e.target.value as TelemetryMetric['source'] })} className="w-28">
+                        <option value="manual">Manual</option>
+                        <option value="api">API</option>
+                      </Select>
+                      {canEdit && <button onClick={() => removeMetric(m.id)} className="text-muted hover:text-red-500"><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                    {m.source === 'manual' ? (
+                      <Input type="number" value={m.value ?? ''} disabled={!canEdit} onChange={(e) => upd(m.id, { value: e.target.value ? parseFloat(e.target.value) : undefined })} placeholder="Value" className="w-40" />
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <Select value={m.apiMethod || 'GET'} disabled={!canEdit} onChange={(e) => upd(m.id, { apiMethod: e.target.value as 'GET' | 'POST' })} className="w-24"><option>GET</option><option>POST</option></Select>
+                          <Input value={m.apiUrl || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { apiUrl: e.target.value })} placeholder="https://api.example.com/metric" className="flex-1" />
+                        </div>
+                        <div className="flex gap-2">
+                          <Input value={m.jsonPath || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { jsonPath: e.target.value })} placeholder="JSON path e.g. data.count" className="flex-1" />
+                          <Input value={m.apiHeaders || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { apiHeaders: e.target.value })} placeholder='Headers JSON e.g. {"Authorization":"Bearer …"}' className="flex-1" />
+                        </div>
+                        {m.apiMethod === 'POST' && <Textarea value={m.apiBody || ''} disabled={!canEdit} onChange={(e) => upd(m.id, { apiBody: e.target.value })} placeholder="Request body (JSON)" rows={2} />}
+                        <div className="flex items-center gap-3">
+                          <Button size="sm" variant="outline" disabled={!canEdit || fetchingMetricId === m.id} onClick={() => fetchNow(m)}>
+                            {fetchingMetricId === m.id ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 mr-1" />} Fetch now
+                          </Button>
+                          <span className="text-sm font-bold">{m.value ?? '—'}{m.unit ? ` ${m.unit}` : ''}</span>
+                          {m.lastFetchedAt && !m.lastError && <span className="text-[10px] text-muted">updated {new Date(m.lastFetchedAt).toLocaleString()}</span>}
+                          {m.lastError && <span className="text-[10px] text-red-500">⚠ {m.lastError}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {canEdit && <Button size="sm" variant="outline" onClick={addMetric}><Plus className="w-3.5 h-3.5 mr-1" /> Add metric</Button>}
+              </div>
+            );
+          })()}
+
+          {/* ROI / Impact Tab (#18) */}
+          {tab === 'roi' && (() => {
+            const roi = draft.roiModel || { enabled: true, inputs: [], formula: '', resultLabel: 'Annual ROI', resultUnit: '€' };
+            const setRoi = (patch: Partial<typeof roi>) => setDraft({ ...draft, roiModel: { ...roi, ...patch } });
+            const addInput = () => setRoi({ inputs: [...(roi.inputs || []), { id: generateId(), key: `var${(roi.inputs || []).length + 1}`, label: '', value: 0, unit: '' }] });
+            const updInput = (id: string, patch: Partial<RoiInput>) => setRoi({ inputs: (roi.inputs || []).map((i) => (i.id === id ? { ...i, ...patch } : i)) });
+            const removeInput = (id: string) => setRoi({ inputs: (roi.inputs || []).filter((i) => i.id !== id) });
+            const result = evalRoi(roi);
+            const suggestAI = async () => {
+              setRoiAiLoading(true);
+              try {
+                const prompt = `You design ROI models for AI use cases. For the project below, propose a concrete, parametric ROI model.
+Return ONLY valid JSON (no prose, no fences) shaped exactly as:
+{"inputs":[{"key":"hoursSavedPerMonth","label":"Hours saved / month","value":120,"unit":"h"},{"key":"hourlyRate","label":"Loaded hourly rate","value":60,"unit":"€"},{"key":"annualCost","label":"Annual run cost","value":15000,"unit":"€"}],"formula":"(hoursSavedPerMonth*hourlyRate*12)-annualCost","resultLabel":"Annual net ROI","resultUnit":"€"}
+Keys must be valid identifiers used verbatim in the formula. Pick realistic default values from the context.
+
+PROJECT: ${draft.name}
+DESCRIPTION: ${draft.description || '(none)'}
+CONTEXT: ${(draft.context || '').slice(0, 600)}
+FTE GAIN: ${draft.fteGain ?? 'n/a'}`;
+                const out = await runPrompt(prompt, state.llmConfig);
+                const json = JSON.parse(out.replace(/```json|```/g, '').trim());
+                setRoi({
+                  enabled: true,
+                  inputs: (json.inputs || []).map((i: any) => ({ id: generateId(), key: String(i.key || ''), label: String(i.label || ''), value: Number(i.value) || 0, unit: i.unit || '' })),
+                  formula: String(json.formula || ''),
+                  resultLabel: json.resultLabel || roi.resultLabel,
+                  resultUnit: json.resultUnit || roi.resultUnit,
+                });
+              } catch {
+                alert('AI could not produce a valid ROI model. Try again or define it manually.');
+              } finally { setRoiAiLoading(false); }
+            };
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted">Define a dynamic, parametric ROI / impact model for this use case. Edit inputs and the formula — the result recomputes live.</p>
+                  {canEdit && state.llmConfig?.provider && (
+                    <Button size="sm" variant="outline" onClick={suggestAI} disabled={roiAiLoading}>
+                      {roiAiLoading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 mr-1" />} Suggest with AI
+                    </Button>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Inputs</p>
+                  <div className="space-y-2">
+                    {(roi.inputs || []).map((i) => (
+                      <div key={i.id} className="flex items-center gap-2">
+                        <Input value={i.key} disabled={!canEdit} onChange={(e) => updInput(i.id, { key: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') })} placeholder="key" className="w-40 font-mono text-[11px]" />
+                        <Input value={i.label} disabled={!canEdit} onChange={(e) => updInput(i.id, { label: e.target.value })} placeholder="Label" className="flex-1" />
+                        <Input type="number" value={i.value} disabled={!canEdit} onChange={(e) => updInput(i.id, { value: parseFloat(e.target.value) || 0 })} className="w-28" />
+                        <Input value={i.unit || ''} disabled={!canEdit} onChange={(e) => updInput(i.id, { unit: e.target.value })} placeholder="unit" className="w-20" />
+                        {canEdit && <button onClick={() => removeInput(i.id)} className="text-muted hover:text-red-500"><Trash2 className="w-4 h-4" /></button>}
+                      </div>
+                    ))}
+                    {(roi.inputs || []).length === 0 && <p className="text-[12px] text-muted italic">No inputs yet.</p>}
+                  </div>
+                  {canEdit && <Button size="sm" variant="outline" className="mt-2" onClick={addInput}><Plus className="w-3.5 h-3.5 mr-1" /> Add input</Button>}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="md:col-span-3">
+                    <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Formula (use the input keys)</label>
+                    <Input value={roi.formula} disabled={!canEdit} onChange={(e) => setRoi({ formula: e.target.value })} placeholder="(hoursSaved*rate*12)-annualCost" className="font-mono text-[12px]" />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Result label</label>
+                    <Input value={roi.resultLabel || ''} disabled={!canEdit} onChange={(e) => setRoi({ resultLabel: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Result unit</label>
+                    <Input value={roi.resultUnit || ''} disabled={!canEdit} onChange={(e) => setRoi({ resultUnit: e.target.value })} />
+                  </div>
+                </div>
+
+                <div className="surface-flat border p-4 flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted">{roi.resultLabel || 'Result'}</span>
+                  <span className="text-2xl font-black text-brand">
+                    {result === null ? '—' : result.toLocaleString(undefined, { maximumFractionDigits: 2 })}{roi.resultUnit ? ` ${roi.resultUnit}` : ''}
+                  </span>
+                </div>
+                {result === null && roi.formula.trim() && <p className="text-[11px] text-red-500">Formula is invalid — it must only reference the input keys and use + - * / ( ).</p>}
+
+                <div>
+                  <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Notes</label>
+                  <Textarea value={roi.notes || ''} disabled={!canEdit} onChange={(e) => setRoi({ notes: e.target.value })} rows={2} placeholder="Assumptions, methodology, caveats…" />
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Presentations Tab */}
           {tab === 'presentations' && (

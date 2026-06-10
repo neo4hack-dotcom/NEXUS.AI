@@ -427,6 +427,10 @@ export const sanitizeAppState = (data: any): AppState => {
     mcpServerIds: arr(p.mcpServerIds),
     agentIds: arr(p.agentIds),
     dataFeedIds: arr(p.dataFeedIds),
+    telemetry: arr(p.telemetry),
+    roiModel: p.roiModel && typeof p.roiModel === 'object'
+      ? { ...p.roiModel, inputs: arr(p.roiModel.inputs) }
+      : undefined,
     tags: arr(p.tags),
     auditLog: arr(p.auditLog),
     presentations: arr(p.presentations),
