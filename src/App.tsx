@@ -23,6 +23,7 @@ import { AiInsightModal } from './components/AiInsightModal';
 const Dashboard = lazy(() => import('./components/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const Projects = lazy(() => import('./components/views/Projects').then(m => ({ default: m.Projects })));
 const Timeline = lazy(() => import('./components/views/Timeline').then(m => ({ default: m.Timeline })));
+const ManagerView = lazy(() => import('./components/views/ManagerView').then(m => ({ default: m.ManagerView })));
 const Contributors = lazy(() => import('./components/views/Contributors').then(m => ({ default: m.Contributors })));
 const WeeklyCheckIn = lazy(() => import('./components/views/WeeklyCheckIn').then(m => ({ default: m.WeeklyCheckIn })));
 const Communications = lazy(() => import('./components/views/Communications').then(m => ({ default: m.Communications })));
@@ -546,6 +547,10 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard state={filteredState} currentUser={currentUser} setActiveTab={setActiveTab} onOpenAi={() => setAiInsightOpen(true)} />;
+      case 'manager':
+        return currentUser.role === 'admin'
+          ? <ManagerView state={appState} currentUser={currentUser} setActiveTab={setActiveTab} />
+          : <div className="p-10 text-center text-muted">Admin only.</div>;
       case 'projects':
         return <Projects state={filteredState} currentUser={currentUser} update={update} />;
       case 'timeline':
