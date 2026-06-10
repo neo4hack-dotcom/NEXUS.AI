@@ -108,6 +108,21 @@ const computeNotifications = (state: AppState): AppNotification[] => {
     });
   });
 
+  // Wish declined — notify the requester with the admin's rationale.
+  (state.wishes ?? []).forEach((w) => {
+    if (w.requesterId !== me.id || w.status !== 'rejected') return;
+    out.push({
+      id: `wish_rejected_${w.id}`,
+      type: 'info',
+      message: `Your wish "${w.title}" was declined.`,
+      details: w.reviewNotes ? `Reason: ${w.reviewNotes}` : 'No reason was provided.',
+      relatedId: w.id,
+      targetUserId: me.id,
+      createdAt: w.decidedAt || w.updatedAt,
+      seenBy: [],
+    });
+  });
+
   // Weekly report overdue
   const myReports = state.weeklyCheckIns.filter((c) => c.userId === me.id);
   if (myReports.length === 0) {
