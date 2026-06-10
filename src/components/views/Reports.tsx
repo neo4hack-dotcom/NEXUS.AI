@@ -12,9 +12,10 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { FileBarChart, Sparkles, Loader2, Copy, Check, Download, CalendarRange } from 'lucide-react';
+import { FileBarChart, Sparkles, Loader2, Copy, Check, Download, CalendarRange, Printer } from 'lucide-react';
 import { AppState, User, ProjectStatus, TaskStatus } from '../../types';
 import { runPrompt } from '../../services/llmService';
+import { MarkdownView } from '../ui/MarkdownView';
 
 interface Props {
   state: AppState;
@@ -85,7 +86,11 @@ export const Reports: React.FC<Props> = ({ state }) => {
 
   const generate = async () => {
     setLoading(true); setError(''); setReport('');
-    const prompt = `You are DOINg.AI, an executive operations assistant. Produce a concise, professional ${period === 'week' ? 'weekly' : 'monthly'} portfolio digest in English, formatted as clean Markdown with short sections and bullet points. Cover: overall health, projects needing attention, team sentiment from check-ins, notable new wishes, and agents shipped to production. Be specific and reference names. Do not invent data beyond what is given.\n\nDATA:\n${buildDataBlock()}`;
+    const prompt = `You are DOINg.AI, an executive operations assistant. Produce a polished, professional ${period === 'week' ? 'weekly' : 'monthly'} portfolio digest in English using rich GitHub-flavoured Markdown for a "wow" executive read.
+Use: a short "## Executive summary" lead paragraph, clear "##"/"###" section headings, bullet lists, **bold** for key figures, and at least one Markdown table (e.g. a RAG status table). Keep it scannable and specific — reference real names. Do not invent data beyond what is given.
+Sections to cover: Executive summary, Portfolio health (with a table), Projects needing attention, Team sentiment (from check-ins), New wishes, Agents shipped to production, and a short "## Recommendations" list.
+
+DATA:\n${buildDataBlock()}`;
     try {
       const out = await runPrompt(prompt, state.llmConfig);
       setReport(out);
@@ -103,6 +108,28 @@ export const Reports: React.FC<Props> = ({ state }) => {
     const a = document.createElement('a');
     a.href = url; a.download = `doing-ai-${period}-report-${new Date().toISOString().slice(0, 10)}.md`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+  // Print / Save-as-PDF: render the rendered HTML in a branded print window.
+  const printPdf = () => {
+    const body = document.getElementById('report-render')?.innerHTML ?? '';
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>DOINg.AI — ${period === 'week' ? 'Weekly' : 'Monthly'} digest</title>
+<style>
+  @media print{@page{size:A4;margin:18mm}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#111;max-width:820px;margin:0 auto;padding:32px;line-height:1.6}
+  h1,h2,h3{font-weight:800;letter-spacing:-0.02em;margin:1.4em 0 .5em} h2{border-bottom:2px solid #FF3E00;padding-bottom:4px} h3{color:#FF3E00}
+  table{border-collapse:collapse;width:100%;margin:1em 0;font-size:10pt} th,td{border:1px solid #e5e7eb;padding:6px 10px;text-align:left} th{background:#faf3f0}
+  code{background:#f4f4f4;padding:1px 5px;border-radius:3px} a{color:#FF3E00}
+  .cover{background:#050505;color:#fff;padding:32px;margin:-32px -32px 24px}
+  .cover .brand{font-size:30pt;font-weight:900} .cover .brand span{color:#FF3E00}
+</style></head><body>
+<div class="cover"><div style="font-size:8pt;letter-spacing:.25em;text-transform:uppercase;color:#FF3E00;margin-bottom:10px">Portfolio Digest · ${today}</div><div class="brand">DOINg<span>.AI</span></div></div>
+${body}
+<div style="margin-top:32px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:8pt;color:#888;text-align:right">DOINg.AI · Generated ${today} · Confidential</div>
+</body></html>`);
+    w.document.close(); w.focus(); w.print();
   };
 
   return (
@@ -157,6 +184,9 @@ export const Reports: React.FC<Props> = ({ state }) => {
           <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200 dark:border-ink-600">
             <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{period === 'week' ? 'Weekly' : 'Monthly'} digest</span>
             <div className="flex gap-2">
+              <button onClick={printPdf} className="flex items-center gap-1.5 px-2.5 h-8 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90">
+                <Printer className="w-3.5 h-3.5" /> Print / PDF
+              </button>
               <button onClick={copy} className="flex items-center gap-1.5 px-2.5 h-8 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand">
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />} {copied ? 'Copied' : 'Copy'}
               </button>
@@ -165,7 +195,9 @@ export const Reports: React.FC<Props> = ({ state }) => {
               </button>
             </div>
           </div>
-          <pre className="p-5 text-[12px] leading-relaxed whitespace-pre-wrap font-sans">{report}</pre>
+          <div id="report-render" className="report-prose p-6 md:p-8 text-[13px] leading-relaxed">
+            <MarkdownView content={report} />
+          </div>
         </div>
       )}
     </div>
