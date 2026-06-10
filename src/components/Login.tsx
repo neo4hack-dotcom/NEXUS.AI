@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Shield, ArrowRight, Sun, Moon, Eye, EyeOff, KeyRound, Loader2, Check } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Shield, ArrowRight, Sun, Moon, Eye, EyeOff, KeyRound, Loader2, Check, LogIn as SsoIcon, AlertTriangle } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
 import { User, Theme } from '../types';
@@ -15,13 +15,20 @@ interface Props {
   toggleTheme: () => void;
 }
 
+/* ── SSO public config (non-secret, fetched from /api/sso/config) ──────── */
+interface SSOPublicCfg { enabled: boolean; provider: string }
+const PROVIDER_LABELS: Record<string, string> = {
+  azure_ad: 'Azure AD', okta: 'Okta', keycloak: 'Keycloak',
+  google: 'Google Workspace', generic_oidc: 'SSO',
+};
+
 /**
  * Login flow:
- *  1. Match `uid` (case-insensitive).
- *  2. Verify password against the stored hash if present, otherwise fall back
- *     to the legacy plaintext field (auto-migrates on success).
- *  3. If `mustChangePassword` is set, present the forced-change modal and
- *     refuse to call onLogin until the user has chosen a new password.
+ *  1. On mount, check /api/sso/config and if SSO is enabled expose the SSO
+ *     button.  Also handle the ?sso_uid=…&sso_sig=… redirect from the backend
+ *     callback by verifying the HMAC server-side and logging the user in.
+ *  2. Regular uid/password flow: verify PBKDF2 hash, migrate legacy, enforce
+ *     mustChangePassword.
  */
 export const Login: React.FC<Props> = ({ users, onLogin, onPasswordChange, theme, toggleTheme }) => {
   const [uid, setUid] = useState('');
@@ -30,6 +37,62 @@ export const Login: React.FC<Props> = ({ users, onLogin, onPasswordChange, theme
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [forcedUser, setForcedUser] = useState<User | null>(null);
+  const [sso, setSso] = useState<SSOPublicCfg | null>(null);
+  const [ssoLoading, setSsoLoading] = useState(true);
+
+  // ── Fetch SSO config + handle SSO callback ────────────────────────────
+  useEffect(() => {
+    // Handle SSO callback: ?sso_uid=…&sso_sig=… (set by backend after OIDC)
+    const params = new URLSearchParams(window.location.search);
+    const ssoUid = params.get('sso_uid');
+    const ssoSig = params.get('sso_sig');
+    const ssoErr = params.get('sso_error');
+
+    if (ssoErr) {
+      setError(`SSO error: ${decodeURIComponent(ssoErr)}`);
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+
+    if (ssoUid && ssoSig) {
+      // Verify with backend then log in — the backend holds the HMAC key
+      (async () => {
+        try {
+          const res = await fetch('/api/sso/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: ssoUid, sig: ssoSig }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            const u = users.find((x) => x.id === ssoUid);
+            if (u) {
+              window.history.replaceState({}, '', window.location.pathname);
+              onLogin(u);
+              return;
+            }
+            // User was just provisioned — we may need a page reload to pick it up
+            // from the server state. Trigger a refresh via a custom event.
+            window.history.replaceState({}, '', window.location.pathname);
+            window.dispatchEvent(new CustomEvent('doing_sso_login', { detail: { userId: ssoUid } }));
+          } else {
+            setError('SSO session verification failed. Please try again.');
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        } catch {
+          setError('SSO verification request failed.');
+        }
+      })();
+    }
+
+    // Fetch SSO public config
+    fetch('/api/sso/config')
+      .then((r) => r.json())
+      .then((d: SSOPublicCfg) => setSso(d))
+      .catch(() => setSso({ enabled: false, provider: 'generic_oidc' }))
+      .finally(() => setSsoLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,7 +216,12 @@ export const Login: React.FC<Props> = ({ users, onLogin, onPasswordChange, theme
               </button>
             </div>
           </div>
-          {error && <p className="text-red-500 text-xs font-bold">{error}</p>}
+          {error && (
+            <div className="flex items-start gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+              <p className="text-red-600 dark:text-red-400 text-[11px]">{error}</p>
+            </div>
+          )}
           <Button type="submit" size="lg" className="w-full" disabled={submitting}>
             {submitting ? (
               <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Signing in…</>
@@ -161,6 +229,24 @@ export const Login: React.FC<Props> = ({ users, onLogin, onPasswordChange, theme
               <>Sign in <ArrowRight className="w-4 h-4 ml-2" /></>
             )}
           </Button>
+
+          {/* SSO separator + button */}
+          {!ssoLoading && sso?.enabled && (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-px bg-neutral-200 dark:bg-ink-600" />
+                <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">or</span>
+                <div className="flex-1 h-px bg-neutral-200 dark:bg-ink-600" />
+              </div>
+              <a
+                href="/api/sso/login"
+                className="flex items-center justify-center gap-2 w-full h-10 border border-brand/40 text-brand text-[11px] font-bold uppercase tracking-[0.14em] hover:bg-brand hover:text-white transition-colors"
+              >
+                <SsoIcon className="w-4 h-4" />
+                Sign in with {PROVIDER_LABELS[sso.provider] ?? 'SSO'}
+              </a>
+            </>
+          )}
         </form>
       </div>
     </div>

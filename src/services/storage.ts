@@ -32,6 +32,7 @@ import {
   WebhookConfig,
   AIContact,
   AIContactFamily,
+  SSOConfig,
   SharePointConfig,
 } from '../types';
 
@@ -236,6 +237,22 @@ const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = {
   events: ['project_red', 'wish_accepted', 'agent_production'],
 };
 
+const DEFAULT_SSO_CONFIG: SSOConfig = {
+  enabled: false,
+  provider: 'generic_oidc',
+  issuerUrl: '',
+  clientId: '',
+  clientSecret: '',
+  redirectUri: '',
+  scopes: ['openid', 'email', 'profile'],
+  emailClaim: 'email',
+  firstNameClaim: 'given_name',
+  lastNameClaim: 'family_name',
+  uidClaim: 'preferred_username',
+  autoProvision: true,
+  defaultRole: 'contributor',
+};
+
 export const generateId = (): string => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -289,6 +306,7 @@ export const getDefaultState = (): AppState => {
     okrs: [],
     aiContacts: [],
     aiContactFamilies: [],
+    ssoConfig: DEFAULT_SSO_CONFIG,
     sharePointConfig: DEFAULT_SHAREPOINT_CONFIG,
     webhookConfig: DEFAULT_WEBHOOK_CONFIG,
     llmConfig: DEFAULT_LLM_CONFIG,
@@ -363,6 +381,9 @@ export const sanitizeAppState = (data: any): AppState => {
       spRawItem: (p && typeof p.spRawItem === 'object') ? p.spRawItem : {},
       draft: (p && typeof p.draft === 'object') ? p.draft : {},
     })),
+    ssoConfig: { ...DEFAULT_SSO_CONFIG, ...(data.ssoConfig || {}),
+      scopes: Array.isArray((data.ssoConfig || {}).scopes) ? (data.ssoConfig as any).scopes : DEFAULT_SSO_CONFIG.scopes,
+    },
     sharePointConfig: { ...DEFAULT_SHAREPOINT_CONFIG, ...(data.sharePointConfig || {}),
       fieldMapping: { ...DEFAULT_SHAREPOINT_CONFIG.fieldMapping, ...((data.sharePointConfig || {}).fieldMapping || {}) },
     },

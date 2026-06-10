@@ -229,6 +229,22 @@ const App: React.FC = () => {
     };
     window.addEventListener('nexus_merged', onMerged);
 
+    // Handle SSO login for newly-provisioned users
+    const onSsoLogin = async (e: Event) => {
+      const userId = (e as CustomEvent).detail?.userId;
+      if (!userId) return;
+      const serverState = await fetchFromServer();
+      if (serverState) {
+        const provisionedUser = serverState.users.find((u) => u.id === userId);
+        if (provisionedUser) {
+          setAppState((curr) =>
+            curr ? { ...serverState, currentUserId: userId, theme: curr.theme } : curr
+          );
+        }
+      }
+    };
+    window.addEventListener('doing_sso_login', onSsoLogin);
+
     // Real-time collaboration.
     // Primary channel: SSE (Server-Sent Events) — the backend pushes a
     // 'data_updated' event the instant any client writes. Latency <100ms.
@@ -267,6 +283,7 @@ const App: React.FC = () => {
       stopSSE();
       window.removeEventListener('nexus_conflict', onConflict);
       window.removeEventListener('nexus_merged', onMerged);
+      window.removeEventListener('doing_sso_login', onSsoLogin);
     };
   }, []);
 

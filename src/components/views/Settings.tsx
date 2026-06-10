@@ -32,8 +32,11 @@ import {
   FileText,
   Bell,
   Send,
+  Lock,
+  Globe,
+  FlaskConical,
 } from 'lucide-react';
-import { AppState, LlmConfig, ProjectFamily, User, SharePointConfig, SharePointFieldMapping, SharePointAuthMethod, SharePointScheduleRecurrence, WebhookConfig, WebhookEvent } from '../../types';
+import { AppState, LlmConfig, ProjectFamily, User, SharePointConfig, SharePointFieldMapping, SharePointAuthMethod, SharePointScheduleRecurrence, WebhookConfig, WebhookEvent, SSOConfig, SSOProvider } from '../../types';
 import { runSync, computeNextSyncAt, DEFAULT_SP_IMPORT_PROMPT } from '../../services/sharepointService';
 import { sendWebhook, EVENT_LABELS } from '../../services/webhookService';
 import { generateId } from '../../services/storage';
@@ -55,7 +58,7 @@ interface DataProps {
   replaceState: (s: AppState) => void;
 }
 
-type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families' | 'sharepoint' | 'webhooks';
+type Tab = 'llm' | 'prompts' | 'security' | 'data' | 'families' | 'sharepoint' | 'webhooks' | 'sso';
 
 export const Settings: React.FC<Props> = ({ state, update }) => {
   const [tab, setTab] = useState<Tab>('llm');
@@ -88,6 +91,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
             { id: 'families', label: 'Project Families', icon: Folders },
             { id: 'security', label: 'Security', icon: Key },
             { id: 'sharepoint', label: 'SharePoint Import', icon: CloudDownload },
+            { id: 'sso', label: 'SSO', icon: Lock },
             { id: 'webhooks', label: 'Notifications', icon: Bell },
             { id: 'data', label: 'Data', icon: Database },
           ] as { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[]
@@ -113,6 +117,7 @@ export const Settings: React.FC<Props> = ({ state, update }) => {
       {tab === 'security' && <SecuritySection state={state} update={update} />}
       {tab === 'sharepoint' && <SharePointSection state={state} update={update} />}
       {tab === 'webhooks' && <WebhooksSection state={state} update={update} />}
+      {tab === 'sso' && <SSOSection state={state} update={update} />}
       {tab === 'data' && (
         <DataSection
           state={state}
@@ -1475,6 +1480,236 @@ const WebhooksSection: React.FC<Props> = ({ state, update }) => {
           tenants block cross-origin posts entirely; if your test never lands, route the webhook through the
           backend instead.
         </p>
+      </div>
+    </div>
+  );
+};
+
+/* ────────────────────────────────────────────────────────────────────────
+   SSO — Enterprise OIDC / OAuth2 configuration
+   ──────────────────────────────────────────────────────────────────────── */
+
+const PROVIDER_PRESETS: Record<SSOProvider, Partial<SSOConfig>> = {
+  generic_oidc: { scopes: ['openid', 'email', 'profile'], emailClaim: 'email', firstNameClaim: 'given_name', lastNameClaim: 'family_name', uidClaim: 'preferred_username' },
+  azure_ad:     { scopes: ['openid', 'email', 'profile'], emailClaim: 'preferred_username', firstNameClaim: 'given_name', lastNameClaim: 'family_name', uidClaim: 'unique_name' },
+  okta:         { scopes: ['openid', 'email', 'profile'], emailClaim: 'email', firstNameClaim: 'given_name', lastNameClaim: 'family_name', uidClaim: 'preferred_username' },
+  keycloak:     { scopes: ['openid', 'email', 'profile'], emailClaim: 'email', firstNameClaim: 'given_name', lastNameClaim: 'family_name', uidClaim: 'preferred_username' },
+  google:       { scopes: ['openid', 'email', 'profile'], emailClaim: 'email', firstNameClaim: 'given_name', lastNameClaim: 'family_name', uidClaim: 'email' },
+};
+
+const PROVIDER_LABELS: Record<SSOProvider, string> = {
+  generic_oidc: 'Generic OIDC / OAuth2',
+  azure_ad:     'Azure Active Directory',
+  okta:         'Okta',
+  keycloak:     'Keycloak (self-hosted)',
+  google:       'Google Workspace',
+};
+
+const PROVIDER_HINTS: Record<SSOProvider, string> = {
+  generic_oidc: 'Any OIDC-compliant IdP. Issuer URL = base URL of your provider (e.g. https://sso.acme.com/realms/main).',
+  azure_ad:     'Issuer URL: https://login.microsoftonline.com/{tenant-id}/v2.0   — found in your Azure App Registration.',
+  okta:         'Issuer URL: https://{your-domain}.okta.com — or a custom auth server URI from the Okta admin console.',
+  keycloak:     'Issuer URL: https://{host}/realms/{realm-name}',
+  google:       'Issuer URL: https://accounts.google.com   — create OAuth 2.0 credentials in Google Cloud Console.',
+};
+
+const SSOSection: React.FC<Props> = ({ state, update }) => {
+  const cfg = state.ssoConfig;
+  const [draft, setDraft] = useState<SSOConfig>(cfg);
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; details?: string } | null>(null);
+
+  React.useEffect(() => { setDraft(cfg); }, [cfg]);
+
+  const setField = <K extends keyof SSOConfig>(k: K, v: SSOConfig[K]) =>
+    setDraft((d) => ({ ...d, [k]: v }));
+
+  const applyPreset = (provider: SSOProvider) => {
+    const preset = PROVIDER_PRESETS[provider];
+    setDraft((d) => ({ ...d, provider, ...preset }));
+  };
+
+  const save = () => {
+    update((s) => ({ ...s, ssoConfig: draft }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const testConnection = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await fetch('/api/sso/test', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issuerUrl: draft.issuerUrl }),
+      });
+      const data = await res.json();
+      setTestResult({
+        ok: data.ok ?? false,
+        message: data.ok ? 'OIDC discovery succeeded ✓' : (data.detail || data.message || 'Failed'),
+        details: data.ok ? `Auth: ${data.authorization_endpoint}\nToken: ${data.token_endpoint}` : undefined,
+      });
+    } catch (e: any) {
+      setTestResult({ ok: false, message: e.message || 'Network error' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const inputCls = 'w-full h-9 px-3 text-[11px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand transition-colors disabled:opacity-60';
+
+  return (
+    <div className="space-y-4">
+      {/* Main config card */}
+      <div className="surface border">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center gap-3">
+          <Lock className="w-5 h-5 text-brand" />
+          <div className="flex-1">
+            <h3 className="text-lg font-black uppercase tracking-tight">Enterprise SSO</h3>
+            <p className="text-xs text-muted mt-1">
+              OIDC / OAuth2 single sign-on. The backend handles all token exchange —
+              your client_secret never leaves the server.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={draft.enabled} onChange={(e) => setField('enabled', e.target.checked)} className="w-4 h-4 accent-brand" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em]">{draft.enabled ? 'Enabled' : 'Disabled'}</span>
+          </label>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Provider */}
+          <div>
+            <label className="label-xs mb-2 block">Identity Provider</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {(Object.keys(PROVIDER_LABELS) as SSOProvider[]).map((pv) => (
+                <button key={pv} type="button" onClick={() => applyPreset(pv)}
+                  className={`p-3 text-left border text-[11px] transition-colors ${
+                    draft.provider === pv ? 'border-brand bg-brand/5 text-brand font-bold' : 'border-neutral-200 dark:border-ink-600 hover:border-brand'
+                  }`}>
+                  <Globe className="w-3.5 h-3.5 mb-1" />
+                  {PROVIDER_LABELS[pv]}
+                </button>
+              ))}
+            </div>
+            {draft.provider && (
+              <p className="text-[10px] text-muted mt-2 leading-relaxed">{PROVIDER_HINTS[draft.provider]}</p>
+            )}
+          </div>
+
+          {/* Core OIDC settings */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="label-xs">Issuer URL *</label>
+              <Input value={draft.issuerUrl} onChange={(e) => setField('issuerUrl', e.target.value)}
+                placeholder="https://your-idp.example.com/realms/main" disabled={!draft.enabled} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">Client ID *</label>
+              <Input value={draft.clientId} onChange={(e) => setField('clientId', e.target.value)}
+                placeholder="doing-ai" disabled={!draft.enabled} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="label-xs">Client Secret *</label>
+              <Input type="password" value={draft.clientSecret} onChange={(e) => setField('clientSecret', e.target.value)}
+                placeholder="stored server-side only" disabled={!draft.enabled} autoComplete="new-password" />
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="label-xs">Redirect URI</label>
+              <Input value={draft.redirectUri} onChange={(e) => setField('redirectUri', e.target.value)}
+                placeholder="Leave blank to auto-detect from server URL — e.g. http://localhost:3001/api/sso/callback" disabled={!draft.enabled} />
+              <p className="text-[9px] text-muted">Must match exactly what you registered in your IdP. Leave blank for auto-detect.</p>
+            </div>
+            <div className="md:col-span-2 space-y-1.5">
+              <label className="label-xs">Scopes (space-separated)</label>
+              <input className={inputCls} value={(draft.scopes || []).join(' ')}
+                onChange={(e) => setField('scopes', e.target.value.split(/\s+/).filter(Boolean))}
+                placeholder="openid email profile" disabled={!draft.enabled} />
+            </div>
+          </div>
+
+          {/* Claim mapping */}
+          <div>
+            <p className="label-xs mb-2">Claim → DOINg field mapping</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {([['emailClaim','Email claim','email'], ['firstNameClaim','First name claim','given_name'], ['lastNameClaim','Last name claim','family_name'], ['uidClaim','UID claim','preferred_username']] as [keyof SSOConfig, string, string][]).map(([field, label, ph]) => (
+                <div key={field} className="space-y-1">
+                  <label className="label-xs text-[8px]">{label}</label>
+                  <input className={inputCls} value={(draft[field] as string) ?? ''} onChange={(e) => setField(field, e.target.value)} placeholder={ph} disabled={!draft.enabled} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Auto-provisioning */}
+          <div className="border border-neutral-200 dark:border-ink-600 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-tight">Auto-provisioning</p>
+                <p className="text-[10px] text-muted mt-0.5">Create a DOINg.AI user account on first SSO login if no matching email/UID exists.</p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={draft.autoProvision} onChange={(e) => setField('autoProvision', e.target.checked)} disabled={!draft.enabled} className="w-4 h-4 accent-brand" />
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em]">{draft.autoProvision ? 'On' : 'Off'}</span>
+              </label>
+            </div>
+            {draft.autoProvision && (
+              <div className="space-y-1.5">
+                <label className="label-xs">Default role for new users</label>
+                <Select value={draft.defaultRole} onChange={(e) => setField('defaultRole', e.target.value as SSOConfig['defaultRole'])} disabled={!draft.enabled}>
+                  <option value="viewer">Viewer</option>
+                  <option value="contributor">Contributor</option>
+                  <option value="manager">Manager</option>
+                </Select>
+                <p className="text-[9px] text-muted">Admins are never auto-provisioned — assign the admin role manually after first login.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Test + telemetry + save */}
+        <div className="p-5 border-t border-neutral-200 dark:border-ink-600 bg-neutral-50 dark:bg-ink-800 space-y-3">
+          {cfg.lastTestedAt && (
+            <div className="text-[10px] text-muted">
+              Last test: <span className="font-mono">{new Date(cfg.lastTestedAt).toLocaleString()}</span>
+              {' · '}
+              <span className={cfg.lastTestStatus === 'success' ? 'text-emerald-600' : 'text-red-600'}>{cfg.lastTestStatus}</span>
+              {cfg.lastTestMessage && ` — ${cfg.lastTestMessage}`}
+            </div>
+          )}
+
+          {testResult && (
+            <div className={`flex items-start gap-2 p-3 border ${testResult.ok ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20' : 'border-red-300 bg-red-50 dark:bg-red-900/20'}`}>
+              <FlaskConical className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${testResult.ok ? 'text-emerald-500' : 'text-red-500'}`} />
+              <div>
+                <p className={`text-[11px] font-bold ${testResult.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-400'}`}>{testResult.message}</p>
+                {testResult.details && <pre className="text-[9px] text-muted mt-1 whitespace-pre-wrap font-mono">{testResult.details}</pre>}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={testConnection} disabled={!draft.issuerUrl || testing}>
+              <FlaskConical className="w-4 h-4 mr-2" />{testing ? 'Testing…' : 'Test discovery'}
+            </Button>
+            <Button onClick={save}>
+              <Save className="w-4 h-4 mr-2" />{saved ? 'Saved!' : 'Save configuration'}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* How it works info box */}
+      <div className="surface border p-4 flex items-start gap-3">
+        <AlertCircle className="w-4 h-4 text-brand shrink-0 mt-0.5" />
+        <div className="text-[11px] space-y-1">
+          <p className="font-bold text-brand uppercase tracking-tight text-[10px]">How it works</p>
+          <p className="text-muted">1. Admin enables SSO and saves this config. The client_secret stays on the server.</p>
+          <p className="text-muted">2. Login page shows a "Sign in with {draft.provider ? PROVIDER_LABELS[draft.provider] : 'SSO'}" button.</p>
+          <p className="text-muted">3. Click → backend redirects to your IdP → user authenticates → backend validates the token, finds or creates the DOINg user, redirects back with a short-lived HMAC-signed token.</p>
+          <p className="text-muted">4. Frontend verifies and logs the user in. No secrets or id_tokens ever reach the browser.</p>
+          <p className="font-bold mt-1">Register this redirect URI in your IdP: <span className="font-mono text-brand">{window.location.origin}/api/sso/callback</span></p>
+        </div>
       </div>
     </div>
   );
