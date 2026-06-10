@@ -691,6 +691,22 @@ const App: React.FC = () => {
         onClose={() => setAiInsightOpen(false)}
         state={appState}
       />
+      {/* Prominent floating launcher — DOINg Assistant is the app's cornerstone */}
+      {!assistantOpen && (
+        <button
+          onClick={() => setAssistantOpen(true)}
+          title="Open DOINg Assistant — chat & intelligent Canvas"
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 pl-4 pr-5 h-14 bg-brand text-white shadow-2xl shadow-brand/40 hover:bg-brand/90 hover:scale-[1.03] active:scale-95 transition-all"
+        >
+          <span className="relative flex items-center justify-center w-7 h-7 shrink-0">
+            <span className="absolute inline-flex h-7 w-7 rounded-full bg-white/30 animate-ping" />
+            <svg className="relative w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>
+            </svg>
+          </span>
+          <span className="text-[13px] font-black uppercase tracking-[0.14em]">DOINg Assistant</span>
+        </button>
+      )}
       <NexusAssistant
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}
