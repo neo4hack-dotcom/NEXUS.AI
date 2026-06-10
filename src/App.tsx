@@ -23,6 +23,7 @@ import { AiInsightModal } from './components/AiInsightModal';
 const Dashboard = lazy(() => import('./components/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const Projects = lazy(() => import('./components/views/Projects').then(m => ({ default: m.Projects })));
 const Timeline = lazy(() => import('./components/views/Timeline').then(m => ({ default: m.Timeline })));
+const ManagerView = lazy(() => import('./components/views/ManagerView').then(m => ({ default: m.ManagerView })));
 const Contributors = lazy(() => import('./components/views/Contributors').then(m => ({ default: m.Contributors })));
 const WeeklyCheckIn = lazy(() => import('./components/views/WeeklyCheckIn').then(m => ({ default: m.WeeklyCheckIn })));
 const Communications = lazy(() => import('./components/views/Communications').then(m => ({ default: m.Communications })));
@@ -59,18 +60,21 @@ const applyThemeDom = (theme: Theme) => {
 const computeNotifications = (state: AppState): AppNotification[] => {
   const me = state.users.find((u) => u.id === state.currentUserId);
   if (!me) return [];
+  const isAdmin = me.role === 'admin';
   const out: AppNotification[] = [];
   const now = Date.now();
   const tenDaysMs = 10 * 24 * 3600 * 1000;
   const eightDaysMs = 8 * 24 * 3600 * 1000;
+  const nameOf = (uid?: string) => {
+    const u = state.users.find((x) => x.id === uid);
+    return u ? `${u.firstName} ${u.lastName}` : null;
+  };
 
-  // Stale projects (no audit in 10 days) for projects user follows
+  // ── Stale projects + slipping tasks ──────────────────────────────────
+  // Admin sees every active project/task; everyone else only their own.
   state.projects.forEach((p) => {
     if (p.isArchived || p.status === 'Done') return;
-    const isMine =
-      me.role === 'admin' ||
-      p.managerId === me.id ||
-      p.members.some((m) => m.userId === me.id);
+    const isMine = isAdmin || p.managerId === me.id || p.members.some((m) => m.userId === me.id);
     if (!isMine) return;
     const last = p.auditLog?.[p.auditLog.length - 1];
     const lastTs = last ? new Date(last.date).getTime() : new Date(p.updatedAt).getTime();
@@ -79,17 +83,17 @@ const computeNotifications = (state: AppState): AppNotification[] => {
         id: `stale_${p.id}`,
         type: 'stale_project',
         message: `Project "${p.name}" hasn't been updated in 10+ days.`,
-        details: last ? `Last activity: ${last.action} by ${last.userName}` : 'No activity yet.',
+        details: (last ? `Last activity: ${last.action} by ${last.userName}` : 'No activity yet.')
+          + (isAdmin && nameOf(p.managerId) ? ` • PM: ${nameOf(p.managerId)}` : ''),
         relatedId: p.id,
-        targetUserId: me.id,
+        targetUserId: p.managerId || me.id,
         createdAt: new Date().toISOString(),
         seenBy: [],
       });
     }
-    // Task slipping
     (p.tasks || []).forEach((t) => {
       if (t.status === 'Done') return;
-      if (t.assigneeId !== me.id && me.role !== 'admin') return;
+      if (!isAdmin && t.assigneeId !== me.id) return;
       const eta = t.currentEta || t.originalEta;
       if (!eta) return;
       const etaTs = new Date(eta).getTime();
@@ -99,8 +103,10 @@ const computeNotifications = (state: AppState): AppNotification[] => {
           id: `slip_${t.id}`,
           type: 'task_slipping',
           message: `Task "${t.title}" is ${daysLate} day${daysLate > 1 ? 's' : ''} late.`,
-          details: `Project: ${p.name} • Status: ${t.status}`,
+          details: `Project: ${p.name} • Status: ${t.status}`
+            + (isAdmin && nameOf(t.assigneeId) ? ` • Owner: ${nameOf(t.assigneeId)}` : ''),
           relatedId: p.id,
+          targetUserId: t.assigneeId,
           createdAt: new Date().toISOString(),
           seenBy: [],
         });
@@ -108,47 +114,48 @@ const computeNotifications = (state: AppState): AppNotification[] => {
     });
   });
 
-  // Wish declined — notify the requester with the admin's rationale.
+  // ── Declined wishes — requester is notified; admin sees all declines ──
   (state.wishes ?? []).forEach((w) => {
-    if (w.requesterId !== me.id || w.status !== 'rejected') return;
+    if (w.status !== 'rejected') return;
+    if (!isAdmin && w.requesterId !== me.id) return;
     out.push({
       id: `wish_rejected_${w.id}`,
       type: 'info',
-      message: `Your wish "${w.title}" was declined.`,
-      details: w.reviewNotes ? `Reason: ${w.reviewNotes}` : 'No reason was provided.',
+      message: w.requesterId === me.id ? `Your wish "${w.title}" was declined.` : `Wish "${w.title}" was declined.`,
+      details: (w.reviewNotes ? `Reason: ${w.reviewNotes}` : 'No reason was provided.')
+        + (isAdmin && w.requesterId !== me.id && nameOf(w.requesterId) ? ` • Requester: ${nameOf(w.requesterId)}` : ''),
       relatedId: w.id,
-      targetUserId: me.id,
+      targetUserId: w.requesterId,
       createdAt: w.decidedAt || w.updatedAt,
       seenBy: [],
     });
   });
 
-  // Weekly report overdue
-  const myReports = state.weeklyCheckIns.filter((c) => c.userId === me.id);
-  if (myReports.length === 0) {
+  // ── Weekly check-in overdue — per user; admin sees everyone's ─────────
+  const checkOverdue = (uid: string) => {
+    const reports = state.weeklyCheckIns.filter((c) => c.userId === uid);
+    if (reports.length === 0) return 'none';
+    const last = [...reports].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+    return now - new Date(last.updatedAt).getTime() > eightDaysMs ? 'stale' : 'ok';
+  };
+  const targets = isAdmin ? state.users : [me];
+  targets.forEach((u) => {
+    const st = checkOverdue(u.id);
+    if (st === 'ok') return;
+    const self = u.id === me.id;
+    const who = self ? 'You have' : `${u.firstName} ${u.lastName} has`;
     out.push({
-      id: `report_overdue_${me.id}`,
+      id: `report_overdue_${u.id}`,
       type: 'report_overdue',
-      message: 'You have not submitted a weekly check-in yet.',
-      details: 'Share your status to keep the team aligned.',
+      message: st === 'none'
+        ? `${who} not submitted a weekly check-in yet.`
+        : `${self ? 'Your' : `${u.firstName} ${u.lastName}'s`} last weekly check-in is over 8 days old.`,
+      details: self ? 'Share your status to keep the team aligned.' : 'No recent status update.',
+      targetUserId: u.id,
       createdAt: new Date().toISOString(),
       seenBy: [],
     });
-  } else {
-    const last = [...myReports].sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    )[0];
-    if (now - new Date(last.updatedAt).getTime() > eightDaysMs) {
-      out.push({
-        id: `report_overdue_${me.id}`,
-        type: 'report_overdue',
-        message: 'Your last weekly check-in is over 8 days old.',
-        details: 'Update your status.',
-        createdAt: new Date().toISOString(),
-        seenBy: [],
-      });
-    }
-  }
+  });
 
   return out;
 };
@@ -169,7 +176,8 @@ const App: React.FC = () => {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [syncFlash, setSyncFlash] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [seenNotifIds, setSeenNotifIds] = useState<Set<string>>(new Set());
+  // Dismissed alert ids, persisted per user so dismissals survive refresh.
+  const [dismissedNotifIds, setDismissedNotifIds] = useState<Set<string>>(new Set());
   const [pendingProjectId, setPendingProjectId] = useState<string | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [changePwdOpen, setChangePwdOpen] = useState(false);
@@ -503,14 +511,34 @@ const App: React.FC = () => {
 
   const filteredState = useMemo(() => (appState ? getFilteredState(appState) : null), [appState]);
 
-  const notifications = useMemo(() => (appState ? computeNotifications(appState) : []), [appState]);
-  const unreadCount = useMemo(
-    () => notifications.filter((n) => !seenNotifIds.has(n.id)).length,
-    [notifications, seenNotifIds]
+  const dismissKey = appState?.currentUserId ? `doing_dismissed_notifs_${appState.currentUserId}` : null;
+  // Load this user's dismissed alert ids whenever the signed-in user changes.
+  useEffect(() => {
+    if (!dismissKey) { setDismissedNotifIds(new Set()); return; }
+    try {
+      const raw = localStorage.getItem(dismissKey);
+      setDismissedNotifIds(new Set(raw ? JSON.parse(raw) : []));
+    } catch { setDismissedNotifIds(new Set()); }
+  }, [dismissKey]);
+
+  const allNotifications = useMemo(() => (appState ? computeNotifications(appState) : []), [appState]);
+  // Only alerts the user hasn't dismissed are shown (and counted).
+  const notifications = useMemo(
+    () => allNotifications.filter((n) => !dismissedNotifIds.has(n.id)),
+    [allNotifications, dismissedNotifIds]
   );
-  const markAllRead = useCallback(() => {
-    setSeenNotifIds(new Set(notifications.map((n) => n.id)));
-  }, [notifications]);
+  const unreadCount = notifications.length;
+
+  const persistDismissed = useCallback((next: Set<string>) => {
+    setDismissedNotifIds(next);
+    if (dismissKey) { try { localStorage.setItem(dismissKey, JSON.stringify([...next])); } catch { /* quota */ } }
+  }, [dismissKey]);
+  const dismissNotif = useCallback((id: string) => {
+    persistDismissed(new Set([...dismissedNotifIds, id]));
+  }, [dismissedNotifIds, persistDismissed]);
+  const dismissAllNotifs = useCallback(() => {
+    persistDismissed(new Set([...dismissedNotifIds, ...notifications.map((n) => n.id)]));
+  }, [dismissedNotifIds, notifications, persistDismissed]);
 
   // renderView MUST be defined before any conditional returns to satisfy Rules of Hooks.
   // Null-guard inside keeps it safe when appState / filteredState aren't ready yet.
@@ -519,6 +547,10 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard state={filteredState} currentUser={currentUser} setActiveTab={setActiveTab} onOpenAi={() => setAiInsightOpen(true)} />;
+      case 'manager':
+        return currentUser.role === 'admin'
+          ? <ManagerView state={appState} currentUser={currentUser} setActiveTab={setActiveTab} />
+          : <div className="p-10 text-center text-muted">Admin only.</div>;
       case 'projects':
         return <Projects state={filteredState} currentUser={currentUser} update={update} />;
       case 'timeline':
@@ -674,10 +706,10 @@ const App: React.FC = () => {
 
       <NotificationCenter
         open={notifOpen}
-        onClose={() => { setNotifOpen(false); markAllRead(); }}
+        onClose={() => setNotifOpen(false)}
         notifications={notifications}
-        onDismiss={() => {}}
-        onMarkAllRead={markAllRead}
+        onDismiss={dismissNotif}
+        onMarkAllRead={dismissAllNotifs}
       />
       <CommandPalette
         open={cmdOpen}
@@ -691,6 +723,22 @@ const App: React.FC = () => {
         onClose={() => setAiInsightOpen(false)}
         state={appState}
       />
+      {/* Prominent floating launcher — DOINg Assistant is the app's cornerstone */}
+      {!assistantOpen && (
+        <button
+          onClick={() => setAssistantOpen(true)}
+          title="Open DOINg Assistant — chat & intelligent Canvas"
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 pl-4 pr-5 h-14 bg-brand text-white shadow-2xl shadow-brand/40 hover:bg-brand/90 hover:scale-[1.03] active:scale-95 transition-all"
+        >
+          <span className="relative flex items-center justify-center w-7 h-7 shrink-0">
+            <span className="absolute inline-flex h-7 w-7 rounded-full bg-white/30 animate-ping" />
+            <svg className="relative w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>
+            </svg>
+          </span>
+          <span className="text-[13px] font-black uppercase tracking-[0.14em]">DOINg Assistant</span>
+        </button>
+      )}
       <NexusAssistant
         open={assistantOpen}
         onClose={() => setAssistantOpen(false)}

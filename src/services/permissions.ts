@@ -42,6 +42,7 @@ export type Group = 'g1' | 'g2' | 'g3' | 'g4' | 'g5' | 'g6' | 'public';
  */
 export const TAB_GROUP: Record<string, Group> = {
   dashboard:      'public',
+  manager:        'g3',       // admin-only executive cockpit
   projects:       'g1',
   timeline:       'g1',
   communications: 'g1',

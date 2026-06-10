@@ -160,8 +160,45 @@ export interface Project {
   /** Inter-project dependencies (#2): ids of projects this one depends on
    *  (i.e. is blocked by). Surfaced on the Timeline and Knowledge Graph. */
   dependsOnProjectIds?: string[];
+  telemetry?: TelemetryMetric[];   // declarative or API-fed runtime metrics
+  roiModel?: RoiModel;             // parametric ROI / impact model
   createdAt: string;
   updatedAt: string;
+}
+
+/* === Project telemetry (#17) === */
+export interface TelemetryMetric {
+  id: string;
+  label: string;                 // e.g. "Monthly active users"
+  unit?: string;                 // e.g. "users", "%", "€"
+  value?: number;                // declared value, or last value fetched from API
+  source: 'manual' | 'api';
+  apiUrl?: string;               // for source === 'api'
+  apiMethod?: 'GET' | 'POST';
+  apiHeaders?: string;           // JSON object string of request headers
+  apiBody?: string;              // request body (POST)
+  jsonPath?: string;             // dot path to the numeric value, e.g. "data.count"
+  lastFetchedAt?: string;
+  lastError?: string;
+}
+
+/* === Project ROI / impact model (#18) === */
+export interface RoiInput {
+  id: string;
+  key: string;                   // identifier used in the formula, e.g. "hoursSaved"
+  label: string;                 // human label
+  value: number;                 // current parameter value
+  unit?: string;
+}
+export interface RoiModel {
+  enabled?: boolean;
+  inputs: RoiInput[];            // parametrable variables
+  formula: string;               // arithmetic over input keys, e.g. "(hoursSaved*rate*12)-annualCost"
+  resultLabel?: string;          // e.g. "Annual net ROI"
+  resultUnit?: string;           // e.g. "€"
+  notes?: string;
+  lastResult?: number;           // cached computed result
+  lastComputedAt?: string;
 }
 
 export type TechLayer =
@@ -898,10 +935,21 @@ export type WGActionStatus = 'todo' | 'ongoing' | 'blocked' | 'done';
 export interface WGActionItem {
   id: string;
   text: string;
-  ownerId?: string;
+  ownerId?: string;              // user id, or free-text name for an external person
   dueDate?: string;
+  eta?: string;
   status: WGActionStatus;
+  priority?: WGTaskPriority;
+  category?: string;             // free-text grouping (e.g. "Legal", "Tech")
   carriedFromSessionId?: string;
+}
+
+export interface WGChecklistItem {
+  id: string;
+  text: string;
+  comment?: string;
+  isUrgent?: boolean;
+  done: boolean;
 }
 
 export interface WGMember {
@@ -932,6 +980,7 @@ export interface WGMeetingNote {
   notes: string;
   decisions: string[];
   actionItems?: WGActionItem[];
+  checklist?: WGChecklistItem[];
   createdAt: string;
   updatedAt: string;
 }
@@ -943,9 +992,10 @@ export interface WorkingGroup {
   objective: string;
   status: WGStatus;
   ownerId?: string;
+  projectId?: string;            // optional linked project
   members: WGMember[];
   tasks: WGTask[];
-  meetings: WGMeetingNote[];
+  meetings: WGMeetingNote[];     // sessions, newest-first in the UI
   tags: string[];
   createdAt: string;
   updatedAt: string;
