@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, X, Target, Users, Cpu, GitBranch, Zap, Network,
-  LayoutDashboard, Calendar, AlertTriangle, ClipboardList,
+  LayoutDashboard, Calendar, ClipboardList,
   Mail, Settings, ArrowRight, FileText,
 } from 'lucide-react';
 import { AppState } from '../types';
@@ -47,7 +47,6 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, state, setActiv
     { id: 'nav-dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" />, action: () => { setActiveTab('dashboard'); onClose(); }, category: 'Navigate' },
     { id: 'nav-projects', label: 'Projects', icon: <Target className="w-4 h-4" />, action: () => { setActiveTab('projects'); onClose(); }, category: 'Navigate' },
     { id: 'nav-timeline', label: 'Timeline', icon: <Calendar className="w-4 h-4" />, action: () => { setActiveTab('timeline'); onClose(); }, category: 'Navigate' },
-    { id: 'nav-risk', label: 'Risk Heatmap', icon: <AlertTriangle className="w-4 h-4" />, action: () => { setActiveTab('risk'); onClose(); }, category: 'Navigate' },
     { id: 'nav-contributors', label: 'Contributors', icon: <Users className="w-4 h-4" />, action: () => { setActiveTab('contributors'); onClose(); }, category: 'Navigate' },
     { id: 'nav-checkin', label: 'Weekly Check-in', icon: <ClipboardList className="w-4 h-4" />, action: () => { setActiveTab('checkin'); onClose(); }, category: 'Navigate' },
     { id: 'nav-comms', label: 'Communications', icon: <Mail className="w-4 h-4" />, action: () => { setActiveTab('communications'); onClose(); }, category: 'Navigate' },

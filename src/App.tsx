@@ -23,7 +23,6 @@ import { AiInsightModal } from './components/AiInsightModal';
 const Dashboard = lazy(() => import('./components/views/Dashboard').then(m => ({ default: m.Dashboard })));
 const Projects = lazy(() => import('./components/views/Projects').then(m => ({ default: m.Projects })));
 const Timeline = lazy(() => import('./components/views/Timeline').then(m => ({ default: m.Timeline })));
-const RiskHeatmap = lazy(() => import('./components/views/RiskHeatmap').then(m => ({ default: m.RiskHeatmap })));
 const Contributors = lazy(() => import('./components/views/Contributors').then(m => ({ default: m.Contributors })));
 const WeeklyCheckIn = lazy(() => import('./components/views/WeeklyCheckIn').then(m => ({ default: m.WeeklyCheckIn })));
 const Communications = lazy(() => import('./components/views/Communications').then(m => ({ default: m.Communications })));
@@ -46,10 +45,7 @@ const PendingProjects = lazy(() => import('./components/views/PendingProjects').
 const ActivityFeed = lazy(() => import('./components/views/ActivityFeed').then(m => ({ default: m.ActivityFeed })));
 const Capacity = lazy(() => import('./components/views/Capacity').then(m => ({ default: m.Capacity })));
 const TaskBoard = lazy(() => import('./components/views/TaskBoard').then(m => ({ default: m.TaskBoard })));
-const PortfolioReview = lazy(() => import('./components/views/PortfolioReview').then(m => ({ default: m.PortfolioReview })));
-const Okrs = lazy(() => import('./components/views/Okrs').then(m => ({ default: m.Okrs })));
 const KnowledgeGraph = lazy(() => import('./components/views/KnowledgeGraph').then(m => ({ default: m.KnowledgeGraph })));
-const Dependencies = lazy(() => import('./components/views/Dependencies').then(m => ({ default: m.Dependencies })));
 const Reports = lazy(() => import('./components/views/Reports').then(m => ({ default: m.Reports })));
 const AIContacts = lazy(() => import('./components/views/AIContacts').then(m => ({ default: m.AIContacts })));
 import { runSync, computeNextSyncAt, shouldRunSyncNow } from './services/sharepointService';
@@ -109,6 +105,21 @@ const computeNotifications = (state: AppState): AppNotification[] => {
           seenBy: [],
         });
       }
+    });
+  });
+
+  // Wish declined — notify the requester with the admin's rationale.
+  (state.wishes ?? []).forEach((w) => {
+    if (w.requesterId !== me.id || w.status !== 'rejected') return;
+    out.push({
+      id: `wish_rejected_${w.id}`,
+      type: 'info',
+      message: `Your wish "${w.title}" was declined.`,
+      details: w.reviewNotes ? `Reason: ${w.reviewNotes}` : 'No reason was provided.',
+      relatedId: w.id,
+      targetUserId: me.id,
+      createdAt: w.decidedAt || w.updatedAt,
+      seenBy: [],
     });
   });
 
@@ -512,8 +523,6 @@ const App: React.FC = () => {
         return <Projects state={filteredState} currentUser={currentUser} update={update} />;
       case 'timeline':
         return <Timeline state={filteredState} />;
-      case 'risk':
-        return <RiskHeatmap state={filteredState} update={update} currentUser={currentUser} />;
       case 'contributors':
         return <Contributors state={filteredState} currentUser={currentUser} update={update} />;
       case 'checkin':
@@ -554,16 +563,10 @@ const App: React.FC = () => {
         );
       case 'board':
         return <TaskBoard state={filteredState} currentUser={currentUser} update={update} />;
-      case 'qbr':
-        return <PortfolioReview state={filteredState} currentUser={currentUser} update={update} />;
       case 'activity':
         return <ActivityFeed state={filteredState} currentUser={currentUser} update={update} />;
-      case 'okrs':
-        return <Okrs state={filteredState} currentUser={currentUser} update={update} />;
       case 'graph':
         return <KnowledgeGraph state={filteredState} currentUser={currentUser} update={update} />;
-      case 'deps':
-        return <Dependencies state={filteredState} currentUser={currentUser} update={update} />;
       case 'reports':
         return (currentUser.role === 'admin' || currentUser.role === 'manager') ? (
           <Reports state={appState} currentUser={currentUser} update={update} />

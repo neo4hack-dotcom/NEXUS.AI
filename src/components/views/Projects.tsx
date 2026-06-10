@@ -33,6 +33,7 @@ import {
   Target,
   Server,
   Database,
+  Workflow,
 } from 'lucide-react';
 import { useEditingLock } from '../../hooks/useEditingLock';
 import { MarkdownView } from '../ui/MarkdownView';
@@ -2092,6 +2093,17 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                   selectedIds={draft.dataFeedIds || []}
                   onChange={(ids) => setDraft({ ...draft, dataFeedIds: ids })}
                   emptyHint="No data feeds defined yet."
+                  disabled={!canEdit}
+                />
+                <MultiSelectChips
+                  label="Depends on (blocked by)"
+                  icon={<Workflow className="w-3 h-3" />}
+                  options={state.projects
+                    .filter((x) => x.id !== draft.id && !x.isArchived)
+                    .map((x) => ({ id: x.id, label: x.name }))}
+                  selectedIds={draft.dependsOnProjectIds || []}
+                  onChange={(ids) => setDraft({ ...draft, dependsOnProjectIds: ids })}
+                  emptyHint="No other projects to depend on yet."
                   disabled={!canEdit}
                 />
               </div>

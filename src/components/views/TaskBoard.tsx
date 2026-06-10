@@ -10,7 +10,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { KanbanSquare, Search, User as UserIcon, GripVertical } from 'lucide-react';
+import { KanbanSquare, Search, User as UserIcon, GripVertical, X } from 'lucide-react';
 import { AppState, User, Task, TaskStatus, TaskPriority } from '../../types';
 
 interface Props {
@@ -82,16 +82,34 @@ export const TaskBoard: React.FC<Props> = ({ state, currentUser, update }) => {
   };
 
   const projectsWithTasks = state.projects.filter((p) => !p.isArchived && (p.tasks || []).length > 0);
+  const selectedProject = projectFilter ? state.projects.find((p) => p.id === projectFilter) : null;
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <p className="label-xs">All projects</p>
+          <p className="label-xs">{selectedProject ? 'Single project' : 'All projects'}</p>
           <h1 className="display-xl flex items-center gap-3"><KanbanSquare className="w-7 h-7 text-brand" /> Task Board</h1>
-          <p className="text-sm text-muted mt-1">Every task across your portfolio, in one board. Drag to update status.</p>
+          <p className="text-sm text-muted mt-1">
+            {selectedProject
+              ? <>Showing tasks for <span className="font-bold text-neutral-900 dark:text-white">{selectedProject.name}</span> only. Drag to update status.</>
+              : 'Every task across your portfolio, in one board. Drag to update status.'}
+          </p>
         </div>
       </div>
+
+      {/* Clear banner of what is currently displayed */}
+      {selectedProject && (
+        <div className="flex items-center gap-3 px-4 py-2.5 border-l-2 border-brand bg-brand/5">
+          <KanbanSquare className="w-4 h-4 text-brand shrink-0" />
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand">Viewing:</span>
+          <span className="text-sm font-bold truncate">{selectedProject.name}</span>
+          <span className="text-[11px] font-mono text-muted">{cards.length} task{cards.length === 1 ? '' : 's'}</span>
+          <button onClick={() => setProjectFilter('')} className="ml-auto flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.14em] text-muted hover:text-brand transition-colors">
+            <X className="w-3.5 h-3.5" /> Show all projects
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
@@ -100,7 +118,7 @@ export const TaskBoard: React.FC<Props> = ({ state, currentUser, update }) => {
             className="w-full h-9 pl-9 pr-3 text-[11px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand" />
         </div>
         <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}
-          className="h-9 px-3 text-[11px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand">
+          className={`h-9 px-3 text-[11px] border bg-white dark:bg-ink-800 focus:outline-none focus:border-brand ${selectedProject ? 'border-brand text-brand font-bold' : 'border-neutral-300 dark:border-ink-600'}`}>
           <option value="">All projects</option>
           {projectsWithTasks.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>

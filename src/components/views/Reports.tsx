@@ -55,8 +55,7 @@ export const Reports: React.FC<Props> = ({ state }) => {
     const recentCheckins = state.weeklyCheckIns.filter((c) => new Date(c.updatedAt).getTime() >= since);
     const newWishes = (state.wishes ?? []).filter((w) => new Date(w.createdAt).getTime() >= since);
     const prodAgents = (state.agents ?? []).filter((a) => a.status === 'production');
-    const okrs = state.okrs ?? [];
-    return { active, rag, recentCheckins, newWishes, prodAgents, okrs };
+    return { active, rag, recentCheckins, newWishes, prodAgents };
   }, [state, period]);
 
   const buildDataBlock = (): string => {
@@ -81,15 +80,12 @@ export const Reports: React.FC<Props> = ({ state }) => {
     lines.push('');
     lines.push(`AGENTS IN PRODUCTION: ${snapshot.prodAgents.length}`);
     snapshot.prodAgents.slice(0, 15).forEach((a) => lines.push(`- ${a.name}`));
-    lines.push('');
-    lines.push(`OKRs: ${snapshot.okrs.length}`);
-    snapshot.okrs.slice(0, 15).forEach((o) => lines.push(`- ${o.title} [${o.period}] status=${o.status}`));
     return lines.join('\n');
   };
 
   const generate = async () => {
     setLoading(true); setError(''); setReport('');
-    const prompt = `You are DOINg.AI, an executive operations assistant. Produce a concise, professional ${period === 'week' ? 'weekly' : 'monthly'} portfolio digest in English, formatted as clean Markdown with short sections and bullet points. Cover: overall health, projects needing attention, team sentiment from check-ins, notable new wishes, agents shipped to production, and OKR progress. Be specific and reference names. Do not invent data beyond what is given.\n\nDATA:\n${buildDataBlock()}`;
+    const prompt = `You are DOINg.AI, an executive operations assistant. Produce a concise, professional ${period === 'week' ? 'weekly' : 'monthly'} portfolio digest in English, formatted as clean Markdown with short sections and bullet points. Cover: overall health, projects needing attention, team sentiment from check-ins, notable new wishes, and agents shipped to production. Be specific and reference names. Do not invent data beyond what is given.\n\nDATA:\n${buildDataBlock()}`;
     try {
       const out = await runPrompt(prompt, state.llmConfig);
       setReport(out);

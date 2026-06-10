@@ -28,7 +28,6 @@ import {
   DataFeed,
   WishItem,
   PendingProject,
-  Objective,
   WebhookConfig,
   AIContact,
   AIContactFamily,
@@ -50,7 +49,7 @@ const MERGEABLE_KEYS = [
   'mailingLists', 'weeklyCheckIns', 'notifications', 'hackathons',
   'workingGroups', 'smartTodos', 'mcpServers', 'mcpFamilies',
   'mcpBestPractices', 'agents', 'agentFamilies', 'dataFeeds',
-  'wishes', 'pendingProjects', 'okrs', 'aiContacts', 'aiContactFamilies',
+  'wishes', 'pendingProjects', 'aiContacts', 'aiContactFamilies',
 ] as const;
 
 // Tombstones older than this are garbage-collected — a deleted entity that has
@@ -286,7 +285,6 @@ export const getDefaultState = (): AppState => {
     dataFeeds: [],
     wishes: [],
     pendingProjects: [],
-    okrs: [],
     aiContacts: [],
     aiContactFamilies: [],
     sharePointConfig: DEFAULT_SHAREPOINT_CONFIG,
@@ -351,7 +349,7 @@ export const sanitizeAppState = (data: any): AppState => {
       evaluations: arr(a.evaluations),
     })),
     agentFamilies: arr<AgentFamily>(data.agentFamilies),
-    dataFeeds: arr<DataFeed>(data.dataFeeds),
+    dataFeeds: arr<DataFeed>(data.dataFeeds).map((d) => ({ ...d, mcpServerIds: arr(d.mcpServerIds) })),
     wishes: arr<WishItem>(data.wishes).map((w) => ({
       ...w,
       comments: arr(w.comments),
@@ -368,11 +366,6 @@ export const sanitizeAppState = (data: any): AppState => {
     },
     aiContacts: arr<AIContact>(data.aiContacts).map((a) => ({ ...a, skills: arr(a.skills) })),
     aiContactFamilies: arr<AIContactFamily>(data.aiContactFamilies),
-    okrs: arr<Objective>(data.okrs).map((o) => ({
-      ...o,
-      keyResults: arr(o.keyResults).map((kr: any) => ({ ...kr, linkedProjectIds: arr(kr.linkedProjectIds) })),
-      tags: arr(o.tags),
-    })),
     webhookConfig: { ...DEFAULT_WEBHOOK_CONFIG, ...(data.webhookConfig || {}),
       events: Array.isArray((data.webhookConfig || {}).events) ? (data.webhookConfig as any).events : DEFAULT_WEBHOOK_CONFIG.events,
     },

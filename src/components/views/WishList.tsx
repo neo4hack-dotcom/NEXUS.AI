@@ -218,6 +218,34 @@ export const WishList: React.FC<Props> = ({ state, currentUser, update }) => {
     update((s) => ({ ...s, wishes: (s.wishes ?? []).filter((w) => w.id !== id) }));
   };
 
+  // Admin unit validation: accept or decline a single wish. On a decline the
+  // rationale is captured and the requester is notified (see computeNotifications
+  // in App.tsx, which surfaces rejected wishes back to their author).
+  const decideWish = (w: WishItem, decision: 'accepted' | 'rejected') => {
+    let reviewNotes = w.reviewNotes;
+    if (decision === 'rejected') {
+      const reason = window.prompt(
+        'Reason for declining this wish (the requester will be notified):',
+        w.reviewNotes || ''
+      );
+      if (reason === null) return; // cancelled
+      reviewNotes = reason.trim();
+    }
+    const now = new Date().toISOString();
+    const patch = {
+      status: decision as WishStatus,
+      reviewNotes,
+      decidedAt: now,
+      decidedByUserId: currentUser.id,
+      updatedAt: now,
+    };
+    update((s) => ({
+      ...s,
+      wishes: (s.wishes ?? []).map((x) => (x.id === w.id ? { ...x, ...patch } : x)),
+    }));
+    setModalWish((curr) => (curr && curr.id === w.id ? { ...curr, ...patch } : curr));
+  };
+
   const addComment = (wishId: string, text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -459,6 +487,26 @@ export const WishList: React.FC<Props> = ({ state, currentUser, update }) => {
                   </div>
                 </div>
 
+                {/* Admin unit validation — accept / decline a pending wish */}
+                {currentUser.role === 'admin' && !['accepted', 'rejected', 'done'].includes(w.status) && (
+                  <div className="flex items-center gap-2 -mb-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); decideWish(w, 'accepted'); }}
+                      className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] border border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 transition-colors"
+                      title="Accept this wish"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Accept
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); decideWish(w, 'rejected'); }}
+                      className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] border border-red-300 text-red-700 dark:border-red-800 dark:text-red-300 hover:bg-red-500 hover:text-white hover:border-red-500 transition-colors"
+                      title="Decline this wish (the requester is notified)"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Decline
+                    </button>
+                  </div>
+                )}
+
                 {/* Quick actions */}
                 {editable && (
                   <div className="flex items-center gap-1 -mb-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -495,6 +543,7 @@ export const WishList: React.FC<Props> = ({ state, currentUser, update }) => {
           onDelete={!isNew && canEditWish(modalWish) ? () => { deleteWish(modalWish.id); setModalWish(null); } : undefined}
           onClose={() => setModalWish(null)}
           onAddComment={(txt) => addComment(modalWish.id, txt)}
+          onDecide={(decision) => decideWish(modalWish, decision)}
           readOnly={!isNew && !canEditWish(modalWish)}
         />
       )}
@@ -516,7 +565,8 @@ const WishModal: React.FC<{
   onDelete?: () => void;
   onClose: () => void;
   onAddComment: (text: string) => void;
-}> = ({ wish, isNew, currentUser, state, readOnly, onSave, onDelete, onClose, onAddComment }) => {
+  onDecide: (decision: 'accepted' | 'rejected') => void;
+}> = ({ wish, isNew, currentUser, state, readOnly, onSave, onDelete, onClose, onAddComment, onDecide }) => {
   const [form, setForm] = useState<WishItem>(wish);
   const [newComment, setNewComment] = useState('');
   const [newTag, setNewTag] = useState('');
@@ -695,6 +745,37 @@ const WishModal: React.FC<{
                   <p className="text-[10px] text-amber-700 dark:text-amber-400">
                     Status changes are reviewed by an admin. Submit your wish and an admin will triage it.
                   </p>
+                </div>
+              )}
+              {/* Admin unit validation — one decision per wish */}
+              {currentUser.role === 'admin' && (
+                <div className="mb-3">
+                  {form.status === 'rejected' ? (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                      <XCircle className="w-4 h-4 text-red-500 shrink-0" />
+                      <p className="text-[11px] text-red-700 dark:text-red-300 font-bold">Declined — the requester has been notified.</p>
+                    </div>
+                  ) : form.status === 'accepted' ? (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 font-bold">Accepted.</p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onDecide('accepted')}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Accept
+                      </button>
+                      <button
+                        onClick={() => onDecide('rejected')}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-[0.14em] bg-red-500 text-white hover:bg-red-600 transition-colors"
+                      >
+                        <XCircle className="w-4 h-4" /> Decline
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

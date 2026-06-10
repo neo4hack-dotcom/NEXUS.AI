@@ -615,6 +615,7 @@ export interface DataFeed {
   projectManager?: string;       // nom du PM
   developer?: string;            // nom du développeur
   presentationUrl?: string;      // lien vers la présentation du feed
+  mcpServerIds?: string[];       // MCP servers that benefit from this feed's availability
   createdAt: string;
   updatedAt: string;
 }
@@ -794,37 +795,6 @@ export interface PendingProject {
 }
 
 /* ============================================================
-   OKRs (#4) — objectives & key results
-   ============================================================ */
-export type OkrStatus = 'on_track' | 'at_risk' | 'off_track' | 'done';
-export type KeyResultKind = 'percent' | 'number' | 'linked_projects';
-
-export interface KeyResult {
-  id: string;
-  title: string;
-  kind: KeyResultKind;
-  /** For 'number' / 'percent': current + target. For 'linked_projects':
-   *  progress is derived from the % of linked projects marked Done. */
-  current?: number;
-  target?: number;
-  unit?: string;                 // e.g. "%", "users", "k€"
-  linkedProjectIds?: string[];   // for kind === 'linked_projects'
-}
-
-export interface Objective {
-  id: string;
-  title: string;
-  description?: string;
-  ownerUserId?: string;
-  period: string;                // e.g. "Q1 2026"
-  status: OkrStatus;             // manual override; auto-progress shown alongside
-  keyResults: KeyResult[];
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-/* ============================================================
    Webhook notifications (#5) — Slack / Teams outbound
    ============================================================ */
 export type WebhookEvent =
@@ -902,7 +872,6 @@ export interface AppState {
   dataFeeds: DataFeed[];
   wishes: WishItem[];
   pendingProjects: PendingProject[];
-  okrs: Objective[];
   aiContacts: AIContact[];
   aiContactFamilies: AIContactFamily[];
   sharePointConfig: SharePointConfig;
