@@ -615,6 +615,7 @@ export interface DataFeed {
   projectManager?: string;       // nom du PM
   developer?: string;            // nom du développeur
   presentationUrl?: string;      // lien vers la présentation du feed
+  mcpServerIds?: string[];       // MCP servers that benefit from this feed's availability
   createdAt: string;
   updatedAt: string;
 }

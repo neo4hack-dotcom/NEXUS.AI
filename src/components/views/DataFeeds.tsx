@@ -34,9 +34,16 @@ import {
   Eye,
   Sparkles,
   BookOpen,
+  Printer,
+  Copy,
+  Plug,
+  Loader2,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
-import { AppState, DataFeed, DataFeedFrequency, DataFeedStatus, User } from '../../types';
+import { AppState, DataFeed, DataFeedFrequency, DataFeedStatus, McpServer, LlmConfig, User } from '../../types';
 import { generateId } from '../../services/storage';
+import { runPrompt } from '../../services/llmService';
 
 interface Props {
   state: AppState;
@@ -81,6 +88,7 @@ const EMPTY_FEED = (): Omit<DataFeed, 'id' | 'createdAt' | 'updatedAt'> => ({
   projectManager: '',
   developer: '',
   presentationUrl: '',
+  mcpServerIds: [],
 });
 
 const fmt = (iso?: string) =>
@@ -90,9 +98,10 @@ const fmt = (iso?: string) =>
    Main view
    ────────────────────────────────────────────────────────────────────────── */
 
-const openDataFeedBooklet = (feeds: DataFeed[]): void => {
+const buildDataFeedBookletHTML = (feeds: DataFeed[], mcpServers: McpServer[], summary?: string): string => {
   const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
   const BRAND = '#FF3E00';
+  const mcpName = (id: string) => mcpServers.find((m) => m.id === id)?.name;
 
   // KPIs
   const total = feeds.length;
@@ -150,10 +159,25 @@ const openDataFeedBooklet = (feeds: DataFeed[]): void => {
         ${f.prodDate ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">Production date</span><br><strong style="color:#10b981">${esc(new Date(f.prodDate).toLocaleDateString('en-GB'))}</strong></div>` : ''}
         ${!f.prodDate && f.eta ? `<div><span style="color:#888;text-transform:uppercase;font-size:7pt;font-weight:700">ETA</span><br><strong style="color:#f59e0b">${esc(new Date(f.eta).toLocaleDateString('en-GB'))}</strong></div>` : ''}
       </div>
+      ${(() => {
+        const names = (f.mcpServerIds || []).map(mcpName).filter(Boolean) as string[];
+        return names.length
+          ? `<div style="margin-top:10px;padding:8px;background:#fff7f4;border-left:2px solid ${BRAND};font-size:8pt;color:#333"><span style="font-size:7pt;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#888">Consumed by MCP</span><br>${names.map((n) => `<span style="display:inline-block;margin:2px 4px 0 0;padding:2px 8px;background:${BRAND}15;color:${BRAND};font-weight:700">${esc(n)}</span>`).join('')}</div>`
+          : '';
+      })()}
       ${f.comments ? `<div style="margin-top:8px;padding:8px;background:#f9fafb;border-left:2px solid #e5e7eb;font-size:8pt;color:#555;font-style:italic">${esc(f.comments)}</div>` : ''}
       ${f.presentationUrl ? `<div style="margin-top:6px"><a href="${esc(f.presentationUrl)}" style="font-size:8pt;color:${BRAND};text-decoration:none">📎 View presentation →</a></div>` : ''}
     </div>`;
   }).join('');
+
+  // LLM-generated executive narrative (optional). Rendered as simple paragraphs;
+  // we strip any stray markdown fences so it embeds cleanly in the booklet.
+  const summaryBlock = summary && summary.trim()
+    ? `<div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid ${BRAND};padding:20px;margin-bottom:20px">
+        <div style="font-size:8pt;text-transform:uppercase;letter-spacing:0.12em;font-weight:700;color:${BRAND};margin-bottom:10px">Executive Summary</div>
+        <div style="font-size:9.5pt;line-height:1.55;color:#333;white-space:pre-wrap">${esc(summary.replace(/```[a-z]*\n?|```/g, '').trim())}</div>
+      </div>`
+    : '';
 
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DOINg.AI — Data Feeds Booklet</title>
@@ -181,6 +205,8 @@ const openDataFeedBooklet = (feeds: DataFeed[]): void => {
     ${kpi('Planned', planned, '#f59e0b')}
   </div>
 
+  ${summaryBlock}
+
   <!-- Frequency chart -->
   <div style="background:#fff;border:1px solid #e5e7eb;padding:20px;margin-bottom:20px">
     <div style="font-size:8pt;text-transform:uppercase;letter-spacing:0.12em;font-weight:700;color:#888;margin-bottom:12px">Refresh frequency breakdown</div>
@@ -196,11 +222,9 @@ const openDataFeedBooklet = (feeds: DataFeed[]): void => {
     DOINg.AI · Generated ${esc(today)} · Confidential
   </div>
 </div>
-<script>window.onload=()=>{window.print()}</script>
 </body></html>`;
 
-  const w = window.open('', '_blank');
-  if (w) { w.document.write(html); w.document.close(); }
+  return html;
 };
 
 export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) => {
@@ -210,6 +234,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
   const [isNew, setIsNew] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [previewFeed, setPreviewFeed] = useState<DataFeed | null>(null);
+  const [showBooklet, setShowBooklet] = useState(false);
 
   const feeds = state.dataFeeds ?? [];
 
@@ -288,10 +313,10 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => openDataFeedBooklet(feeds)}
+            onClick={() => setShowBooklet(true)}
             disabled={feeds.length === 0}
             className="flex items-center gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] border border-brand text-brand hover:bg-brand hover:text-white transition-colors disabled:opacity-40"
-            title="Generate a styled AI Booklet for board sharing"
+            title="Build a shareable AI Booklet for board communication"
           >
             <Sparkles className="w-4 h-4" />
             AI Booklet
@@ -562,6 +587,7 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
       {previewFeed && (
         <FeedPreviewModal
           feed={previewFeed}
+          mcpServers={state.mcpServers ?? []}
           onClose={() => setPreviewFeed(null)}
           onEdit={canEdit ? () => { setPreviewFeed(null); openEdit(previewFeed); } : undefined}
         />
@@ -571,8 +597,18 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
         <FeedModal
           feed={modalFeed}
           isNew={isNew}
+          mcpServers={state.mcpServers ?? []}
           onSave={saveFeed}
           onClose={() => setModalFeed(null)}
+        />
+      )}
+
+      {showBooklet && (
+        <BookletModal
+          feeds={feeds}
+          mcpServers={state.mcpServers ?? []}
+          llmConfig={state.llmConfig}
+          onClose={() => setShowBooklet(false)}
         />
       )}
     </div>
@@ -586,12 +622,17 @@ export const DataFeedsView: React.FC<Props> = ({ state, currentUser, update }) =
 const FeedModal: React.FC<{
   feed: DataFeed;
   isNew: boolean;
+  mcpServers: McpServer[];
   onSave: (f: DataFeed) => void;
   onClose: () => void;
-}> = ({ feed, isNew, onSave, onClose }) => {
+}> = ({ feed, isNew, mcpServers, onSave, onClose }) => {
   const [form, setForm] = useState<DataFeed>(feed);
   const set = <K extends keyof DataFeed>(k: K, v: DataFeed[K]) =>
     setForm((prev) => ({ ...prev, [k]: v }));
+  const toggleMcp = (id: string) => {
+    const cur = form.mcpServerIds || [];
+    set('mcpServerIds', cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  };
 
   const valid = form.platformName.trim() && form.source.trim() && form.destination.trim();
 
@@ -744,6 +785,34 @@ const FeedModal: React.FC<{
               </Field>
             </div>
           </Section>
+
+          {/* ── Consumers ── */}
+          <Section title="Consuming MCP servers">
+            <p className="text-[10px] text-muted mb-2">Link the MCP servers that benefit from this feed's availability.</p>
+            {mcpServers.length === 0 ? (
+              <p className="text-[11px] text-muted italic">No MCP servers in the catalog yet.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {mcpServers.map((m) => {
+                  const on = (form.mcpServerIds || []).includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleMcp(m.id)}
+                      className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold border transition-colors ${
+                        on
+                          ? 'bg-brand text-white border-brand'
+                          : 'border-neutral-300 dark:border-ink-600 text-muted hover:border-brand hover:text-brand'
+                      }`}
+                    >
+                      <Plug className="w-3 h-3" /> {m.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </Section>
         </div>
 
         {/* Footer */}
@@ -763,6 +832,179 @@ const FeedModal: React.FC<{
             {isNew ? 'Create Feed' : 'Save Changes'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+/* ──────────────────────────────────────────────────────────────────────────
+   AI Booklet — selectable feeds, LLM narrative, in-app preview (no auto-print),
+   with Print / Copy / Open-to-share actions for board communication.
+   ────────────────────────────────────────────────────────────────────────── */
+
+const BookletModal: React.FC<{
+  feeds: DataFeed[];
+  mcpServers: McpServer[];
+  llmConfig: LlmConfig;
+  onClose: () => void;
+}> = ({ feeds, mcpServers, llmConfig, onClose }) => {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(feeds.map((f) => f.id)));
+  const [stage, setStage] = useState<'select' | 'preview'>('select');
+  const [loading, setLoading] = useState(false);
+  const [html, setHtml] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const chosen = useMemo(() => feeds.filter((f) => selected.has(f.id)), [feeds, selected]);
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const selectAll = () => setSelected(new Set(feeds.map((f) => f.id)));
+  const selectNone = () => setSelected(new Set());
+
+  const buildDataBlock = (): string => {
+    const lines: string[] = [];
+    chosen.forEach((f) => {
+      const mcps = (f.mcpServerIds || [])
+        .map((id) => mcpServers.find((m) => m.id === id)?.name)
+        .filter(Boolean);
+      lines.push(
+        `- ${f.platformName} | type=${f.dataType || 'n/a'} | status=${STATUS_META[f.status]?.label ?? f.status} | freq=${FREQUENCY_LABELS[f.frequency]} | ${f.source || '?'} → ${f.destination || '?'}` +
+        (f.prodDate ? ` | prod=${f.prodDate.slice(0, 10)}` : f.eta ? ` | eta=${f.eta.slice(0, 10)}` : '') +
+        (f.costManDays ? ` | cost=${f.costManDays}MD` : '') +
+        (mcps.length ? ` | consumed by MCP: ${mcps.join(', ')}` : '')
+      );
+    });
+    return lines.join('\n');
+  };
+
+  const generate = async () => {
+    setLoading(true);
+    setStage('preview');
+    setHtml('');
+    let summary = '';
+    const prod = chosen.filter((f) => f.status === 'production').length;
+    const prompt = `You are DOINg.AI, an executive data-platform analyst. Write a concise, professional executive summary (in English, 120-180 words, plain prose, no markdown, no headings) describing the state of the company's data feed portfolio for a board communication.
+There are ${chosen.length} feeds in scope, ${prod} already in production.
+Describe overall maturity, delivery momentum, what is live vs upcoming, notable dependencies (which MCP servers rely on which feeds), and any risks or recommendations. Be specific and reference platform names. Do not invent data beyond what is provided.
+
+FEEDS:
+${buildDataBlock()}`;
+    try {
+      summary = await runPrompt(prompt, llmConfig);
+    } catch {
+      summary = '';
+    }
+    setHtml(buildDataFeedBookletHTML(chosen, mcpServers, summary));
+    setLoading(false);
+  };
+
+  const print = () => {
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); w.focus(); w.print(); }
+  };
+  const openInTab = () => {
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+  const copyHtml = async () => {
+    try { await navigator.clipboard.writeText(html); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { /* ignore */ }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-5xl h-[88vh] flex flex-col bg-white dark:bg-ink-900 border border-neutral-200 dark:border-ink-700 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-ink-700 bg-neutral-50 dark:bg-ink-800">
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-4 h-4 text-brand" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em]">AI Booklet — Data Feeds</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {stage === 'preview' && !loading && (
+              <>
+                <button onClick={() => setStage('select')} className="px-3 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 text-muted hover:border-brand hover:text-brand transition-colors">
+                  ← Back
+                </button>
+                <button onClick={copyHtml} className="flex items-center gap-1.5 px-3 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors">
+                  <Copy className="w-3.5 h-3.5" /> {copied ? 'Copied!' : 'Copy HTML'}
+                </button>
+                <button onClick={openInTab} className="flex items-center gap-1.5 px-3 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors">
+                  <ExternalLink className="w-3.5 h-3.5" /> Open / Send
+                </button>
+                <button onClick={print} className="flex items-center gap-1.5 px-3 h-9 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90 transition-colors">
+                  <Printer className="w-3.5 h-3.5" /> Print
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center text-muted hover:text-neutral-900 dark:hover:text-white transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        {stage === 'select' ? (
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-sm font-bold">Choose the feeds to include</p>
+                <p className="text-[11px] text-muted mt-0.5">{selected.size} of {feeds.length} selected · a local-LLM executive summary will be generated.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={selectAll} className="px-3 h-8 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors">Select all</button>
+                <button onClick={selectNone} className="px-3 h-8 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand transition-colors">Select none</button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {feeds.map((f) => {
+                const on = selected.has(f.id);
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => toggle(f.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 border text-left transition-colors ${on ? 'border-brand bg-brand/5' : 'border-neutral-200 dark:border-ink-700 hover:border-neutral-400'}`}
+                  >
+                    {on ? <CheckSquare className="w-4 h-4 text-brand shrink-0" /> : <Square className="w-4 h-4 text-muted shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-bold">{f.platformName}</span>
+                      <span className="text-[11px] text-muted ml-2">{f.dataType}</span>
+                    </div>
+                    <span className={`px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] shrink-0 ${STATUS_META[f.status]?.color || ''}`}>{STATUS_META[f.status]?.label ?? f.status}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-hidden bg-neutral-100 dark:bg-ink-950">
+            {loading ? (
+              <div className="h-full flex flex-col items-center justify-center text-muted">
+                <Loader2 className="w-7 h-7 animate-spin text-brand mb-3" />
+                <p className="text-[11px] uppercase tracking-[0.16em]">Generating booklet with local LLM…</p>
+              </div>
+            ) : (
+              <iframe srcDoc={html} className="w-full h-full border-0 bg-white" title="Data Feeds Booklet" sandbox="allow-same-origin" />
+            )}
+          </div>
+        )}
+
+        {/* Footer (select stage) */}
+        {stage === 'select' && (
+          <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
+            <button onClick={onClose} className="px-4 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 text-muted hover:border-neutral-400 transition-colors">Cancel</button>
+            <button
+              onClick={generate}
+              disabled={chosen.length === 0}
+              className="flex items-center gap-2 px-4 h-9 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Generate booklet ({chosen.length})
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -792,10 +1034,14 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
    ────────────────────────────────────────────────────────────────────────── */
 const FeedPreviewModal: React.FC<{
   feed: DataFeed;
+  mcpServers: McpServer[];
   onClose: () => void;
   onEdit?: () => void;
-}> = ({ feed, onClose, onEdit }) => {
+}> = ({ feed, mcpServers, onClose, onEdit }) => {
   const meta = STATUS_META[feed.status];
+  const linkedMcps = (feed.mcpServerIds || [])
+    .map((id) => mcpServers.find((m) => m.id === id)?.name)
+    .filter(Boolean) as string[];
   React.useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', fn);
@@ -884,6 +1130,20 @@ const FeedPreviewModal: React.FC<{
                 className="text-[11px] text-brand hover:underline flex items-center gap-1">
                 View presentation <ExternalLink className="w-3 h-3" />
               </a>
+            </div>
+          )}
+
+          {/* Consuming MCP servers */}
+          {linkedMcps.length > 0 && (
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1.5">Consumed by MCP</p>
+              <div className="flex flex-wrap gap-1.5">
+                {linkedMcps.map((n) => (
+                  <span key={n} className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold bg-brand/10 text-brand border border-brand/30">
+                    <Plug className="w-3 h-3" /> {n}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 

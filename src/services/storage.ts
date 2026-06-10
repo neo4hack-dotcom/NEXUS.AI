@@ -349,7 +349,7 @@ export const sanitizeAppState = (data: any): AppState => {
       evaluations: arr(a.evaluations),
     })),
     agentFamilies: arr<AgentFamily>(data.agentFamilies),
-    dataFeeds: arr<DataFeed>(data.dataFeeds),
+    dataFeeds: arr<DataFeed>(data.dataFeeds).map((d) => ({ ...d, mcpServerIds: arr(d.mcpServerIds) })),
     wishes: arr<WishItem>(data.wishes).map((w) => ({
       ...w,
       comments: arr(w.comments),
