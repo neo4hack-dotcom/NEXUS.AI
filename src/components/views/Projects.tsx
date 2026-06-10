@@ -76,6 +76,7 @@ import {
   type SheetPreview,
 } from '../../services/projectImport';
 import { evalRoi, fetchTelemetry } from '../../services/projectAnalytics';
+import { findDuplicatesFor, findDuplicatesAI, findDuplicatePairs, mergeProjects, type DuplicateGroup } from '../../services/duplicateDetection';
 import { TelemetryMetric, RoiInput } from '../../types';
 
 interface Props {
@@ -583,6 +584,8 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [dupTargetIds, setDupTargetIds] = useState<string[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -649,6 +652,28 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         ? s.projects.map((x) => (x.id === p.id ? p : x))
         : [p, ...s.projects],
     }));
+
+  // Merge one or more duplicate projects into a chosen primary, then delete them.
+  const mergeDuplicates = (primaryId: string, secondaryIds: string[]) => {
+    update((s) => {
+      const primary = s.projects.find((x) => x.id === primaryId);
+      if (!primary) return s;
+      let merged = primary;
+      secondaryIds.forEach((sid) => {
+        const sec = s.projects.find((x) => x.id === sid);
+        if (sec) merged = mergeProjects(merged, sec, `${currentUser.firstName} ${currentUser.lastName}`);
+      });
+      const drop = new Set(secondaryIds);
+      return { ...s, projects: s.projects.map((x) => (x.id === primaryId ? merged : x)).filter((x) => !drop.has(x.id)) };
+    });
+  };
+
+  // After a create/import, surface a clear duplicate warning if any are found.
+  const flagDuplicates = (newOnes: Project[]) => {
+    const ids = newOnes.map((p) => p.id);
+    const pool = [...newOnes, ...state.projects.filter((sp) => !ids.includes(sp.id))];
+    if (findDuplicatesFor(pool, ids).length > 0) { setDupTargetIds(ids); setShowDuplicates(true); }
+  };
 
   const handleCreate = (templateId?: string) => {
     const template = templateId ? (state.projectTemplates || []).find((t) => t.id === templateId) : null;
@@ -758,6 +783,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             onImport={() => setShowBulkImport(true)}
             onBooklet={() => setShowBooklet(true)}
           />
+          {canEdit && state.projects.length > 1 && (
+            <Button variant="outline" size="md" onClick={() => { setDupTargetIds([]); setShowDuplicates(true); }} title="Scan the portfolio for duplicate projects">
+              <Layers className="w-4 h-4 mr-2" />
+              Find duplicates
+            </Button>
+          )}
           {canEdit && (
             <>
               {(state.projectTemplates || []).length > 0 && (
@@ -1141,6 +1172,16 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         ) : null;
       })()}
 
+      {showDuplicates && (
+        <DuplicatesModal
+          projects={state.projects}
+          llmConfig={state.llmConfig}
+          targetIds={dupTargetIds}
+          onClose={() => { setShowDuplicates(false); setDupTargetIds([]); }}
+          onMerge={(primaryId, secondaryIds) => mergeDuplicates(primaryId, secondaryIds)}
+        />
+      )}
+
       {showTemplatePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatePicker(false)}>
           <div className="bg-white dark:bg-ink-900 w-full max-w-lg border border-neutral-200 dark:border-ink-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1179,8 +1220,8 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           onClose={() => setShowAiBot(false)}
           onCreate={(p) => {
             upsertProject(addAudit(p, currentUser, 'Project created via AI PRJ'));
-            setSelectedId(p.id);
             setShowAiBot(false);
+            flagDuplicates([p]);
           }}
         />
       )}
@@ -1193,6 +1234,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           onImport={(projects) => {
             update((s) => ({ ...s, projects: [...projects, ...s.projects] }));
             setShowBulkImport(false);
+            flagDuplicates(projects);
           }}
         />
       )}
@@ -1534,6 +1576,117 @@ const FamilyManagerModal: React.FC<{
             <Button variant="outline" onClick={onClose}>Cancel</Button>
             <Button onClick={() => { onSave(draft); onClose(); }}>Save</Button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* === Duplicate detection & smart merge (#20) === */
+
+const DuplicatesModal: React.FC<{
+  projects: Project[];
+  llmConfig: AppState['llmConfig'];
+  targetIds: string[];
+  onClose: () => void;
+  onMerge: (primaryId: string, secondaryIds: string[]) => void;
+}> = ({ projects, llmConfig, targetIds, onClose, onMerge }) => {
+  const [loading, setLoading] = useState(true);
+  const [usedAI, setUsedAI] = useState(false);
+  const [groups, setGroups] = useState<DuplicateGroup[]>([]);
+  const [primaryByGroup, setPrimaryByGroup] = useState<Record<number, string>>({});
+  const [done, setDone] = useState<Set<number>>(new Set());
+
+  const projById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+
+  const run = async (useAI: boolean) => {
+    setLoading(true); setDone(new Set());
+    let found: DuplicateGroup[];
+    if (useAI && llmConfig?.provider) { found = await findDuplicatesAI(projects, llmConfig); setUsedAI(true); }
+    else { found = targetIds.length ? findDuplicatesFor(projects, targetIds) : findDuplicatePairs(projects); setUsedAI(false); }
+    // keep only groups whose projects still exist
+    found = found.map((g) => ({ ...g, projectIds: g.projectIds.filter((id) => projById.has(id)) })).filter((g) => g.projectIds.length >= 2);
+    setGroups(found);
+    setPrimaryByGroup(Object.fromEntries(found.map((g, i) => [i, g.projectIds[0]])));
+    setLoading(false);
+  };
+
+  useEffect(() => { run(!!llmConfig?.provider); /* eslint-disable-next-line */ }, []);
+
+  const mergeGroup = (gi: number) => {
+    const g = groups[gi];
+    const primary = primaryByGroup[gi] || g.projectIds[0];
+    const secondaries = g.projectIds.filter((id) => id !== primary);
+    if (!secondaries.length) return;
+    const names = secondaries.map((id) => projById.get(id)?.name).filter(Boolean).join(', ');
+    if (!window.confirm(`Merge ${secondaries.length} project(s) (${names}) into "${projById.get(primary)?.name}"? Information is combined; the others are removed.`)) return;
+    onMerge(primary, secondaries);
+    setDone((d) => new Set([...d, gi]));
+  };
+
+  const activeGroups = groups.filter((_, i) => !done.has(i));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="surface border w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-black uppercase tracking-tight flex items-center gap-2"><Layers className="w-5 h-5 text-brand" /> Duplicate projects</h2>
+            <p className="text-[11px] text-muted mt-0.5">{usedAI ? 'Detected semantically by the local LLM' : 'Detected by name/description similarity'}{targetIds.length ? ' · focused on your latest import' : ''}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {llmConfig?.provider && <Button size="sm" variant="outline" onClick={() => run(true)} disabled={loading}><Sparkles className="w-3.5 h-3.5 mr-1" /> AI rescan</Button>}
+            <Button size="sm" variant="outline" onClick={() => run(false)} disabled={loading}><RotateCcw className="w-3.5 h-3.5 mr-1" /> Quick scan</Button>
+            <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted">
+              <Loader2 className="w-8 h-8 animate-spin text-brand mb-3" />
+              <p className="text-[11px] uppercase tracking-[0.16em]">Scanning for duplicates…</p>
+            </div>
+          ) : activeGroups.length === 0 ? (
+            <div className="text-center py-16">
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-500" />
+              <p className="text-sm font-bold">No duplicates found.</p>
+              <p className="text-[11px] text-muted mt-1">Your portfolio looks clean.</p>
+            </div>
+          ) : (
+            groups.map((g, gi) => done.has(gi) ? null : (
+              <div key={gi} className="border border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                  <p className="text-[12px] font-semibold flex-1">{g.reason}</p>
+                  <span className="text-[10px] font-mono text-muted">{Math.round((g.confidence || 0) * 100)}%</span>
+                </div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted mb-2">Keep as primary:</p>
+                <div className="space-y-1.5 mb-3">
+                  {g.projectIds.map((id) => {
+                    const p = projById.get(id);
+                    if (!p) return null;
+                    return (
+                      <label key={id} className="flex items-start gap-2 p-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-600 cursor-pointer">
+                        <input type="radio" name={`primary-${gi}`} checked={(primaryByGroup[gi] || g.projectIds[0]) === id} onChange={() => setPrimaryByGroup((m) => ({ ...m, [gi]: id }))} className="mt-1" />
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-bold truncate">{p.name}</p>
+                          <p className="text-[10px] text-muted line-clamp-2">{p.description || 'No description.'}</p>
+                          <p className="text-[9px] text-muted mt-0.5">{(p.tasks || []).length} tasks · created {new Date(p.createdAt).toLocaleDateString('en-GB')}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={() => mergeGroup(gi)}><Layers className="w-3.5 h-3.5 mr-1" /> Merge into primary</Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end">
+          <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
     </div>
