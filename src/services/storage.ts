@@ -40,6 +40,60 @@ const VERSION_KEY = 'nexus_ai_app_version';
 const CURRENT_APP_VERSION = '1.0.0';
 const API_URL = '/api/data';
 
+// ── Deletion tombstones ─────────────────────────────────────────────────────
+// Every top-level collection that is an array of {id, ...} entities. Must mirror
+// the server's _MERGEABLE_COLLECTIONS. Used to (a) auto-detect user deletions by
+// diffing successive saves and (b) prune any entity the server-merge resurrected.
+const MERGEABLE_KEYS = [
+  'users', 'projects', 'projectTemplates', 'projectFamilies',
+  'technologies', 'repositories', 'communications', 'emailTemplates',
+  'mailingLists', 'weeklyCheckIns', 'notifications', 'hackathons',
+  'workingGroups', 'smartTodos', 'mcpServers', 'mcpFamilies',
+  'mcpBestPractices', 'agents', 'agentFamilies', 'dataFeeds',
+  'wishes', 'pendingProjects', 'okrs', 'aiContacts', 'aiContactFamilies',
+] as const;
+
+// Tombstones older than this are garbage-collected — a deleted entity that has
+// been gone for this long can no longer be resurrected by a stale client.
+const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/** Best-effort "when was this entity last touched", normalised to epoch ms. */
+const entityRecencyMs = (e: any): number => {
+  if (!e || typeof e !== 'object') return 0;
+  for (const k of ['updatedAt', 'createdAt']) {
+    const v = e[k];
+    if (typeof v === 'string') {
+      const t = Date.parse(v);
+      if (!Number.isNaN(t)) return t;
+    }
+    // Numeric stamps may be seconds or ms; >1e11 ≈ already-ms (year 1973+ in ms).
+    if (typeof v === 'number') return v > 1e11 ? v : v * 1000;
+  }
+  return 0;
+};
+
+/**
+ * Drop any entity that is tombstoned and has NOT been modified since its
+ * deletion. An entity recreated/edited after the tombstone (recency > deletedAt)
+ * is a genuine resurrection by the user and is kept. Guarantees the UI never
+ * renders a phantom, regardless of where the state came from (local, server,
+ * import, merge).
+ */
+const pruneTombstoned = (state: AppState): AppState => {
+  const tombs = state.deletedIds;
+  if (!tombs || Object.keys(tombs).length === 0) return state;
+  for (const key of MERGEABLE_KEYS) {
+    const coll = (state as any)[key];
+    if (!Array.isArray(coll)) continue;
+    (state as any)[key] = coll.filter((e: any) => {
+      const id = e?.id;
+      if (id == null || !(id in tombs)) return true;
+      return entityRecencyMs(e) > tombs[id]; // keep only if recreated after delete
+    });
+  }
+  return state;
+};
+
 // Tracks the lastUpdated timestamp the server last confirmed. Used as X-Base-Version
 // to avoid 409s caused by server-side timestamp drift.
 let _serverVersion = 0;
@@ -242,6 +296,7 @@ export const getDefaultState = (): AppState => {
     theme: 'dark',
     currentUserId: null,
     lastUpdated: Date.now(),
+    deletedIds: {},
   };
 };
 
@@ -346,6 +401,12 @@ export const sanitizeAppState = (data: any): AppState => {
     theme: (data.theme === 'light' ? 'light' : 'dark') as Theme,
     currentUserId: typeof data.currentUserId === 'string' ? data.currentUserId : null,
     lastUpdated: typeof data.lastUpdated === 'number' ? data.lastUpdated : Date.now(),
+    deletedIds:
+      data.deletedIds && typeof data.deletedIds === 'object' && !Array.isArray(data.deletedIds)
+        ? Object.fromEntries(
+            Object.entries(data.deletedIds).filter(([, v]) => typeof v === 'number')
+          ) as Record<string, number>
+        : {},
   };
 
   // Project sanitation
@@ -360,11 +421,17 @@ export const sanitizeAppState = (data: any): AppState => {
     milestones: arr(p.milestones),
     technologyIds: arr(p.technologyIds),
     repoIds: arr(p.repoIds),
+    mcpServerIds: arr(p.mcpServerIds),
+    agentIds: arr(p.agentIds),
+    dataFeedIds: arr(p.dataFeedIds),
     tags: arr(p.tags),
     auditLog: arr(p.auditLog),
     presentations: arr(p.presentations),
     linkedApps: arr(p.linkedApps),
   }));
+
+  // Drop any entity the server-merge may have resurrected, so phantoms never render.
+  pruneTombstoned(state);
 
   // Seed empty state to ensure UX
   if (state.users.length === 0) {
@@ -416,7 +483,47 @@ export const fetchFromServer = async (): Promise<AppState | null> => {
 export const saveState = (state: AppState): void => {
   try {
     const timestamp = Date.now();
-    const stamped = { ...state, lastUpdated: timestamp };
+
+    // ── Auto-tombstone deletions ──────────────────────────────────────────
+    // Diff this full state against the previously-persisted full state. Any
+    // entity id that was present before but is gone now was deleted by the user;
+    // record a tombstone so the server-merge (union-by-id) can't resurrect it.
+    // saveState always receives the FULL appState (App.update mutates the full
+    // tree, never the filtered view), so this diff is safe and can't mistake a
+    // role-filtered subset for a deletion.
+    const deletedIds: Record<string, number> = { ...(state.deletedIds || {}) };
+    try {
+      const prevRaw = localStorage.getItem(STORAGE_KEY);
+      if (prevRaw) {
+        const prev = JSON.parse(prevRaw);
+        for (const key of MERGEABLE_KEYS) {
+          const prevArr = Array.isArray(prev[key]) ? prev[key] : [];
+          const newArr = Array.isArray((state as any)[key]) ? (state as any)[key] : [];
+          if (prevArr.length === 0) continue;
+          const liveIds = new Set(
+            newArr.map((e: any) => e?.id).filter((id: any) => id != null)
+          );
+          for (const e of prevArr) {
+            if (e && e.id != null && !liveIds.has(e.id)) deletedIds[e.id] = timestamp;
+          }
+        }
+      }
+    } catch { /* diff is best-effort; never block a save */ }
+    // Any id that is live again (recreated, or kept by another writer) loses its
+    // tombstone so it isn't pruned away.
+    for (const key of MERGEABLE_KEYS) {
+      const newArr = Array.isArray((state as any)[key]) ? (state as any)[key] : [];
+      for (const e of newArr) {
+        if (e && e.id != null && deletedIds[e.id] != null) delete deletedIds[e.id];
+      }
+    }
+    // GC tombstones past their TTL to keep the map (and payload) bounded.
+    const cutoff = timestamp - TOMBSTONE_TTL_MS;
+    for (const id of Object.keys(deletedIds)) {
+      if (deletedIds[id] < cutoff) delete deletedIds[id];
+    }
+
+    const stamped = { ...state, lastUpdated: timestamp, deletedIds };
 
     // 1. localStorage: always instant.
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stamped));

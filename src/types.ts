@@ -142,6 +142,7 @@ export interface Project {
   budget?: number;
   familyId?: string;
   fteGain?: number;
+  isBigBet?: boolean;              // flagged as a strategic high-impact bet
   confidentiality?: 'public' | 'internal' | 'confidential' | 'restricted';
   members: ProjectMember[];
   externalMembers?: ExternalMember[];   // people outside the contributor list
@@ -149,6 +150,9 @@ export interface Project {
   milestones: Milestone[];
   technologyIds: string[];
   repoIds: string[];
+  mcpServerIds?: string[];        // MCP servers the project relies on
+  agentIds?: string[];            // AI agents the project relies on
+  dataFeedIds?: string[];         // data feeds the project relies on
   tags: string[];
   auditLog: AuditEntry[];
   presentations?: ProjectPresentation[];
@@ -908,6 +912,10 @@ export interface AppState {
   theme: Theme;
   currentUserId: string | null;
   lastUpdated: number;
+  /** Tombstones: entityId → deletion epoch ms. Makes deletions authoritative so the
+   *  server-side merge-by-id never resurrects a removed entity (no phantom data).
+   *  GC'd after ~30 days. Populated automatically by storage.saveState diffing. */
+  deletedIds?: Record<string, number>;
 }
 
 /* === Working Groups === */

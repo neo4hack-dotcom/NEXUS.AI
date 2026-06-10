@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -19,7 +19,9 @@ import {
   Bot,
   Clipboard,
   ChevronRight,
+  ChevronDown,
   Edit2,
+  Eye,
   Loader2,
   LayoutGrid,
   Layers,
@@ -28,6 +30,9 @@ import {
   FileSpreadsheet,
   Upload,
   AlertCircle,
+  Target,
+  Server,
+  Database,
 } from 'lucide-react';
 import { useEditingLock } from '../../hooks/useEditingLock';
 import { MarkdownView } from '../ui/MarkdownView';
@@ -76,6 +81,125 @@ interface Props {
   update: (mutator: (s: AppState) => AppState) => void;
 }
 
+/* === Tools dropdown (AI PRJ / Import XLSX / Booklet) === */
+const ProjectToolsMenu: React.FC<{
+  canUseAI: boolean;
+  onAiPrj: () => void;
+  onImport: () => void;
+  onBooklet: () => void;
+}> = ({ canUseAI, onAiPrj, onImport, onBooklet }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const Item: React.FC<{
+    icon: React.ReactNode; title: string; desc: string; onClick: () => void;
+  }> = ({ icon, title, desc, onClick }) => (
+    <button
+      onClick={() => { setOpen(false); onClick(); }}
+      className="w-full text-left px-3 py-2.5 hover:bg-neutral-100 dark:hover:bg-ink-700 transition-colors"
+    >
+      <div className="flex items-center gap-2 text-sm font-bold">
+        {icon}
+        {title}
+      </div>
+      <p className="text-[11px] text-muted mt-0.5 leading-snug">{desc}</p>
+    </button>
+  );
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button variant="outline" size="md" onClick={() => setOpen((v) => !v)}>
+        <Sparkles className="w-4 h-4 mr-2" />
+        Tools
+        <ChevronDown className={`w-3.5 h-3.5 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </Button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 surface border z-30 shadow-xl divide-y divide-neutral-200 dark:divide-ink-600 animate-fade-in">
+          {canUseAI && (
+            <Item
+              icon={<Bot className="w-4 h-4 text-brand" />}
+              title="AI PRJ"
+              desc="Generate a structured project from pasted notes using the local LLM."
+              onClick={onAiPrj}
+            />
+          )}
+          {canUseAI && (
+            <Item
+              icon={<FileSpreadsheet className="w-4 h-4 text-brand" />}
+              title="Import XLSX"
+              desc="Bulk-import many projects at once from an Excel / CSV spreadsheet."
+              onClick={onImport}
+            />
+          )}
+          <Item
+            icon={<Printer className="w-4 h-4 text-brand" />}
+            title="Booklet"
+            desc="Export a print-ready PDF booklet of selected projects to share."
+            onClick={onBooklet}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* === Reusable multi-select chip picker (MCPs / agents / data feeds) === */
+const MultiSelectChips: React.FC<{
+  label: string;
+  icon: React.ReactNode;
+  options: { id: string; label: string; sub?: string }[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+  emptyHint?: string;
+  disabled?: boolean;
+}> = ({ label, icon, options, selectedIds, onChange, emptyHint, disabled }) => {
+  const toggle = (id: string) =>
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.18em] text-muted">
+        {icon}
+        {label}
+        {selectedIds.length > 0 && <span className="text-brand">· {selectedIds.length}</span>}
+      </label>
+      {options.length === 0 ? (
+        <p className="text-[11px] text-muted italic">{emptyHint || 'None available yet.'}</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {options.map((o) => {
+            const on = selectedIds.includes(o.id);
+            return (
+              <button
+                key={o.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => toggle(o.id)}
+                title={o.sub}
+                className={`px-2.5 py-1 text-[11px] font-semibold border transition-colors disabled:opacity-50 ${
+                  on
+                    ? 'bg-brand text-white border-brand'
+                    : 'border-neutral-300 dark:border-ink-600 text-muted hover:border-brand hover:text-brand'
+                }`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const newProject = (managerId: string): Project => {
   const now = new Date();
   const deadline = new Date(now.getTime() + 30 * 86400000).toISOString();
@@ -94,11 +218,15 @@ const newProject = (managerId: string): Project => {
     confidentiality: 'internal',
     familyId: undefined,
     fteGain: undefined,
+    isBigBet: false,
     members: [{ userId: managerId, role: ProjectRole.OWNER }],
     tasks: [],
     milestones: [],
     technologyIds: [],
     repoIds: [],
+    mcpServerIds: [],
+    agentIds: [],
+    dataFeedIds: [],
     tags: [],
     auditLog: [
       {
@@ -451,6 +579,7 @@ const AIProjectBot: React.FC<{
 export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [showAiBot, setShowAiBot] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
@@ -540,7 +669,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
 
   // Hold the editing lock while any project editor/builder is open so a
   // concurrent teammate's save can't refresh the tree out from under the form.
-  useEditingLock(showAiBot || showBulkImport || selectedId !== null);
+  useEditingLock(showAiBot || showBulkImport || showFamilyManager || selectedId !== null);
   return (
     <div className="space-y-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-end gap-4 justify-between">
@@ -620,22 +749,12 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
               Families
             </Button>
           )}
-          {canUseAI && (
-            <Button variant="outline" size="md" onClick={() => setShowAiBot(true)}>
-              <Bot className="w-4 h-4 mr-2" />
-              AI PRJ
-            </Button>
-          )}
-          {canUseAI && (
-            <Button variant="outline" size="md" onClick={() => setShowBulkImport(true)}>
-              <FileSpreadsheet className="w-4 h-4 mr-2" />
-              Import xlsx
-            </Button>
-          )}
-          <Button variant="outline" size="md" onClick={() => setShowBooklet(true)}>
-            <Printer className="w-4 h-4 mr-2" />
-            Booklet
-          </Button>
+          <ProjectToolsMenu
+            canUseAI={canUseAI}
+            onAiPrj={() => setShowAiBot(true)}
+            onImport={() => setShowBulkImport(true)}
+            onBooklet={() => setShowBooklet(true)}
+          />
           {canEdit && (
             <>
               {(state.projectTemplates || []).length > 0 && (
@@ -792,10 +911,13 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
             const rag = ragHealth(p);
             const family = p.familyId ? (state.projectFamilies || []).find((f) => f.id === p.familyId) : null;
             return (
-              <button
+              <div
                 key={p.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedId(p.id)}
-                className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-brand/5 transition-colors"
+                onKeyDown={(e) => { if (e.key === 'Enter') setSelectedId(p.id); }}
+                className="w-full cursor-pointer text-left flex items-center gap-3 px-4 py-2.5 hover:bg-brand/5 transition-colors"
               >
                 {/* Family color + important */}
                 <div className="flex items-center gap-1 shrink-0 w-[14px]">
@@ -805,6 +927,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     {p.botCreated && <Bot className="w-3 h-3 text-purple-500 shrink-0" />}
+                    {p.isBigBet && <Target className="w-3 h-3 text-amber-500 shrink-0" />}
                     {p.isImportant && <Star className="w-3 h-3 text-brand fill-brand shrink-0" />}
                     <span className="text-[12px] font-black uppercase tracking-tight truncate">{p.name}</span>
                     {family && (
@@ -850,8 +973,15 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                 <span className="shrink-0 hidden lg:block text-[10px] text-muted truncate w-[120px]">
                   {owner ? `${owner.firstName} ${owner.lastName}` : '—'}
                 </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setDetailsId(p.id); }}
+                  title="Show details (read-only)"
+                  className="shrink-0 p-1 text-muted hover:text-brand transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                </button>
                 <ChevronRight className="w-3.5 h-3.5 text-muted shrink-0" />
-              </button>
+              </div>
             );
           })}
           {filtered.length === 0 && (
@@ -872,10 +1002,13 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
           const rag = ragHealth(p);
           const family = p.familyId ? (state.projectFamilies || []).find((f) => f.id === p.familyId) : null;
           return (
-            <button
+            <div
               key={p.id}
+              role="button"
+              tabIndex={0}
               onClick={() => setSelectedId(p.id)}
-              className="surface border text-left hover:border-brand transition-colors flex flex-col"
+              onKeyDown={(e) => { if (e.key === 'Enter') setSelectedId(p.id); }}
+              className="surface border text-left cursor-pointer hover:border-brand transition-colors flex flex-col"
             >
               <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex-1">
                 <div className="flex items-start justify-between gap-2 mb-2">
@@ -898,6 +1031,11 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                       </span>
                     )}
                     <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] ${RAG_STYLE[rag.tone]}`}>{rag.label}</span>
+                    {p.isBigBet && (
+                      <span title="Big Bet" className="flex items-center gap-1 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                        <Target className="w-3 h-3" /> Big Bet
+                      </span>
+                    )}
                     {p.isImportant && <Star className="w-4 h-4 text-brand fill-brand" />}
                   </div>
                 </div>
@@ -957,8 +1095,14 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
                   </span>
                   <span>{owner ? `${owner.firstName} ${owner.lastName}` : 'Unassigned'}</span>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setDetailsId(p.id); }}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 text-muted hover:border-brand hover:text-brand transition-colors"
+                >
+                  <Eye className="w-3.5 h-3.5" /> Show details
+                </button>
               </div>
-            </button>
+            </div>
           );
         })}
         {filtered.length === 0 && (
@@ -987,6 +1131,13 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
         />
       )}
 
+      {detailsId && (() => {
+        const dp = state.projects.find((x) => x.id === detailsId);
+        return dp ? (
+          <ProjectReadOnlyModal project={dp} state={state} onClose={() => setDetailsId(null)} onEdit={() => { setDetailsId(null); setSelectedId(dp.id); }} />
+        ) : null;
+      })()}
+
       {showTemplatePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatePicker(false)}>
           <div className="bg-white dark:bg-ink-900 w-full max-w-lg border border-neutral-200 dark:border-ink-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -1011,7 +1162,7 @@ export const Projects: React.FC<Props> = ({ state, currentUser, update }) => {
               ))}
             </div>
             <div className="px-5 py-3 border-t border-neutral-200 dark:border-ink-700 flex justify-between items-center">
-              <p className="text-[9px] text-muted">Templates are saved by admin from project "Save as template"</p>
+              <p className="text-[9px] text-muted">Reusable project templates managed by your admin</p>
               <button onClick={() => { handleCreate(); setShowTemplatePicker(false); }} className="text-[10px] text-brand font-bold">Blank project →</button>
             </div>
           </div>
@@ -1386,6 +1537,161 @@ const FamilyManagerModal: React.FC<{
   );
 };
 
+/* === Project Read-Only Details (clean, reading-oriented popup) === */
+
+const ProjectReadOnlyModal: React.FC<{
+  project: Project;
+  state: AppState;
+  onClose: () => void;
+  onEdit: () => void;
+}> = ({ project: p, state, onClose, onEdit }) => {
+  const owner = state.users.find((u) => u.id === p.managerId);
+  const family = p.familyId ? (state.projectFamilies || []).find((f) => f.id === p.familyId) : null;
+  const rag = ragHealth(p);
+  const pct = projectProgress(p);
+  const techs = (p.technologyIds || [])
+    .map((id) => state.technologies.find((t) => t.id === id)?.name)
+    .filter(Boolean) as string[];
+  const repos = (p.repoIds || [])
+    .map((id) => state.repositories.find((r) => r.id === id)?.name)
+    .filter(Boolean) as string[];
+  const mcps = (p.mcpServerIds || [])
+    .map((id) => state.mcpServers.find((m) => m.id === id)?.name)
+    .filter(Boolean) as string[];
+  const agents = (p.agentIds || [])
+    .map((id) => state.agents.find((a) => a.id === id)?.name)
+    .filter(Boolean) as string[];
+  const feeds = (p.dataFeedIds || [])
+    .map((id) => state.dataFeeds.find((d) => d.id === id)?.platformName)
+    .filter(Boolean) as string[];
+  const deps = (p.dependsOnProjectIds || [])
+    .map((id) => state.projects.find((x) => x.id === id)?.name)
+    .filter(Boolean) as string[];
+  const fmtDate = (d?: string) => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+  const doneTasks = (p.tasks || []).filter((t) => t.status === TaskStatus.DONE).length;
+
+  const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+    <div>
+      <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">{label}</p>
+      <div className="text-sm">{children}</div>
+    </div>
+  );
+  const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+    <div className="space-y-3">
+      <h3 className="text-[10px] font-black uppercase tracking-[0.18em] text-brand border-b border-neutral-200 dark:border-ink-600 pb-1">{title}</h3>
+      {children}
+    </div>
+  );
+  const Chips: React.FC<{ items: string[]; empty?: string }> = ({ items, empty }) =>
+    items.length ? (
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((x, i) => (
+          <span key={i} className="px-2 py-0.5 text-[11px] font-semibold bg-neutral-100 dark:bg-ink-700 border border-neutral-200 dark:border-ink-600">{x}</span>
+        ))}
+      </div>
+    ) : <span className="text-[12px] text-muted italic">{empty || 'None'}</span>;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="surface border w-full max-w-3xl max-h-[90vh] flex flex-col animate-slide-up" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              {family && (
+                <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.14em] text-muted">
+                  <span className="w-2 h-2" style={{ backgroundColor: family.color || '#FF3E00' }} />{family.name}
+                </span>
+              )}
+              {p.isBigBet && (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-[0.12em] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                  <Target className="w-3 h-3" /> Big Bet
+                </span>
+              )}
+              {p.isImportant && <Star className="w-3.5 h-3.5 text-brand fill-brand" />}
+            </div>
+            <h2 className="text-xl font-black uppercase tracking-tight truncate">{p.name}</h2>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="outline" onClick={onEdit}><Edit2 className="w-3.5 h-3.5 mr-1" /> Edit</Button>
+            <button onClick={onClose} className="w-9 h-9 flex items-center justify-center hover:text-brand"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-6 overflow-y-auto">
+          {/* Status strip */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="Health"><span className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] ${RAG_STYLE[rag.tone]}`}>{rag.label}</span></Field>
+            <Field label="Status"><Badge tone={p.status === 'Done' ? 'muted' : 'green'}>{p.status}</Badge></Field>
+            <Field label="Dev Workflow">{p.devStatus ? <span className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] ${DEV_STATUS_STYLE[p.devStatus]}`}>{DEV_STATUS_LABEL[p.devStatus]}</span> : <span className="text-muted">—</span>}</Field>
+            <Field label="Innovation">{p.innovationStatus ? <span className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] ${INNOVATION_STYLE[p.innovationStatus]}`}>{INNOVATION_LABEL[p.innovationStatus]}</span> : <span className="text-muted">—</span>}</Field>
+          </div>
+
+          {/* Progress */}
+          <div>
+            <div className="flex justify-between text-[10px] font-mono uppercase tracking-[0.14em] text-muted mb-1">
+              <span>{pct}% complete</span>
+              <span>{doneTasks}/{(p.tasks || []).length} tasks done</span>
+            </div>
+            <div className="w-full h-1.5 bg-neutral-200 dark:bg-ink-600 overflow-hidden"><div className="h-full bg-brand" style={{ width: `${pct}%` }} /></div>
+          </div>
+
+          <Section title="Overview">
+            <Field label="Description"><p className="whitespace-pre-wrap leading-relaxed">{p.description || <span className="text-muted italic">No description.</span>}</p></Field>
+            {p.context && <Field label="Context"><p className="whitespace-pre-wrap leading-relaxed text-muted">{p.context}</p></Field>}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field label="Owner / PM">{owner ? `${owner.firstName} ${owner.lastName}` : '—'}</Field>
+              <Field label="Confidentiality"><span className="capitalize">{p.confidentiality || 'internal'}</span></Field>
+              <Field label="Budget">{p.budget ? p.budget.toLocaleString() : '—'}</Field>
+              <Field label="FTE gain">{(p.fteGain ?? 0) > 0 ? `${p.fteGain} FTE` : '—'}</Field>
+            </div>
+          </Section>
+
+          <Section title="Timeline">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field label="Start">{fmtDate(p.startDate)}</Field>
+              <Field label="Deadline">{fmtDate(p.deadline)}</Field>
+              <Field label="Initial deadline">{fmtDate(p.initialDeadline)}</Field>
+              <Field label="Milestones">{(p.milestones || []).length}</Field>
+            </div>
+          </Section>
+
+          <Section title="People">
+            <Field label={`Members (${(p.members || []).length})`}>
+              <Chips items={(p.members || []).map((m) => {
+                const u = state.users.find((x) => x.id === m.userId);
+                return u ? `${u.firstName} ${u.lastName} · ${m.role}` : m.role;
+              })} />
+            </Field>
+            {(p.externalMembers || []).length > 0 && (
+              <Field label="External members"><Chips items={(p.externalMembers || []).map((e) => e.name + (e.company ? ` (${e.company})` : ''))} /></Field>
+            )}
+          </Section>
+
+          <Section title="Linked Assets">
+            <Field label="MCP servers"><Chips items={mcps} /></Field>
+            <Field label="Agents"><Chips items={agents} /></Field>
+            <Field label="Data feeds"><Chips items={feeds} /></Field>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label="Technologies"><Chips items={techs} /></Field>
+              <Field label="Repositories"><Chips items={repos} /></Field>
+            </div>
+            {deps.length > 0 && <Field label="Depends on"><Chips items={deps} /></Field>}
+            {(p.tags || []).length > 0 && <Field label="Tags"><Chips items={p.tags} /></Field>}
+          </Section>
+
+          {p.notes && (
+            <Section title="Notes">
+              <div className="prose-sm max-w-none"><MarkdownView content={p.notes} /></div>
+            </Section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* === Project Detail (with Kanban + audit log) === */
 
 const ProjectDetailModal: React.FC<{
@@ -1700,6 +2006,21 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                   disabled={!canEdit}
                 />
               </Field>
+              <Field label="Strategic flag">
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={() => setDraft({ ...draft, isBigBet: !draft.isBigBet })}
+                  className={`w-full flex items-center justify-center gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] border transition-colors disabled:opacity-50 ${
+                    draft.isBigBet
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'border-neutral-300 dark:border-ink-500 text-muted hover:border-amber-500 hover:text-amber-500'
+                  }`}
+                >
+                  <Target className="w-3.5 h-3.5" />
+                  {draft.isBigBet ? 'Is a Big Bet' : 'Mark as Big Bet'}
+                </button>
+              </Field>
 
               <div className="md:col-span-2">
                 <Field label="Context (background, constraints, notes — paste freely)">
@@ -1742,6 +2063,37 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                     })}
                   </div>
                 </Field>
+              </div>
+
+              {/* Linked AI assets needed by the project */}
+              <div className="md:col-span-2 space-y-4 border-t border-neutral-200 dark:border-ink-600 pt-4">
+                <MultiSelectChips
+                  label="MCP servers needed"
+                  icon={<Server className="w-3 h-3" />}
+                  options={(state.mcpServers || []).map((m) => ({ id: m.id, label: m.name }))}
+                  selectedIds={draft.mcpServerIds || []}
+                  onChange={(ids) => setDraft({ ...draft, mcpServerIds: ids })}
+                  emptyHint="No MCP servers in the catalog yet."
+                  disabled={!canEdit}
+                />
+                <MultiSelectChips
+                  label="Agents needed"
+                  icon={<Bot className="w-3 h-3" />}
+                  options={(state.agents || []).map((a) => ({ id: a.id, label: a.name }))}
+                  selectedIds={draft.agentIds || []}
+                  onChange={(ids) => setDraft({ ...draft, agentIds: ids })}
+                  emptyHint="No agents in the catalog yet."
+                  disabled={!canEdit}
+                />
+                <MultiSelectChips
+                  label="Data feeds needed"
+                  icon={<Database className="w-3 h-3" />}
+                  options={(state.dataFeeds || []).map((d) => ({ id: d.id, label: d.platformName }))}
+                  selectedIds={draft.dataFeedIds || []}
+                  onChange={(ids) => setDraft({ ...draft, dataFeedIds: ids })}
+                  emptyHint="No data feeds defined yet."
+                  disabled={!canEdit}
+                />
               </div>
 
               <div className="md:col-span-2">
@@ -1964,22 +2316,7 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
             {canEdit && state.llmConfig?.provider && (
               <Button variant="outline" size="md" onClick={generateInfographic} disabled={infographicLoading}>
                 <Sparkles className="w-4 h-4 mr-2" />
-                {infographicLoading ? 'Generating…' : 'AI Infographic'}
-              </Button>
-            )}
-            {canEdit && currentUser.role === 'admin' && (
-              <Button
-                variant="outline" size="md"
-                onClick={() => {
-                  onSave({ ...draft });
-                  onAudit('Saved as template', draft.name);
-                  // signal parent to save template
-                  window.dispatchEvent(new CustomEvent('doing_save_template', { detail: { project: draft } }));
-                }}
-                title="Save current project structure as a reusable template"
-              >
-                <Clipboard className="w-4 h-4 mr-2" />
-                Save as template
+                {infographicLoading ? 'Generating…' : 'AI Quick synthesis'}
               </Button>
             )}
           </div>
@@ -2018,7 +2355,7 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
       <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-ink-900 w-full max-w-5xl h-[90vh] flex flex-col">
           <div className="flex items-center justify-between p-4 border-b border-neutral-200 dark:border-ink-600">
-            <h3 className="text-sm font-bold uppercase tracking-widest">AI Infographic — {draft.name}</h3>
+            <h3 className="text-sm font-bold uppercase tracking-widest">AI Quick synthesis — {draft.name}</h3>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => {
                 const w = window.open('', '_blank');
@@ -2041,7 +2378,7 @@ Return ONLY valid HTML — no markdown fences, no commentary.`;
                 <span className="ml-3 text-sm text-muted">Generating infographic…</span>
               </div>
             ) : (
-              <iframe srcDoc={infographicHtml} className="w-full h-full border-0" title="AI Infographic" sandbox="allow-same-origin" />
+              <iframe srcDoc={infographicHtml} className="w-full h-full border-0" title="AI Quick synthesis" sandbox="allow-same-origin" />
             )}
           </div>
         </div>
