@@ -2,8 +2,9 @@ import React, { useState, useMemo } from 'react';
 import {
   Search, BookOpen, LayoutDashboard, Target, Users, Cpu, GitBranch,
   Zap, Network, Mail, ClipboardList, Settings, Sparkles, Bot,
-  Command, Keyboard, ChevronRight, X, AlertTriangle, Calendar,
-  FileText, Shield, Star, TrendingUp, CalendarClock, Clipboard,
+  Keyboard, ChevronRight, X, Calendar,
+  Shield, Gauge, DatabaseZap, Lightbulb, ContactRound, Layers, Plug,
+  KanbanSquare, Share2, Bell, FileBarChart,
 } from 'lucide-react';
 import { User } from '../../types';
 
@@ -72,512 +73,308 @@ const SECTIONS: Section[] = [
     title: 'Overview',
     icon: <BookOpen className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>What is DOINg.AI?</H2>
-        <P>
-          <strong>DOINg.AI</strong> is an AI-powered Project Operations Platform designed for managing AI initiative portfolios, cross-functional teams, and innovation programs.
-          It centralises project tracking, team collaboration, technology governance, and AI-augmented reporting in one place.
-        </P>
-        <P>
-          Built for Chief AI Officers, Program Managers, and their teams, DOINg.AI bridges the gap between execution and executive visibility.
-        </P>
-
-        <H3>Core modules at a glance</H3>
-        <div className="grid grid-cols-2 gap-2 my-3">
-          {[
-            { icon: <LayoutDashboard className="w-3.5 h-3.5" />, label: 'Dashboard', desc: 'Live portfolio KPIs & alerts' },
-            { icon: <Target className="w-3.5 h-3.5" />, label: 'Projects', desc: 'Full project & task lifecycle' },
-            { icon: <Network className="w-3.5 h-3.5" />, label: 'Working Groups', desc: 'Session-chained meetings' },
-            { icon: <Users className="w-3.5 h-3.5" />, label: 'Contributors', desc: 'Team roster & workload' },
-            { icon: <Cpu className="w-3.5 h-3.5" />, label: 'Technologies', desc: 'Tech radar & governance' },
-            { icon: <Zap className="w-3.5 h-3.5" />, label: 'Hackathons', desc: 'Innovation event management' },
-            { icon: <Mail className="w-3.5 h-3.5" />, label: 'Communications', desc: 'Emails & newsletters' },
-            { icon: <Bot className="w-3.5 h-3.5" />, label: 'AI Features', desc: 'Assistant, AI PRJ, ⌘K' },
-          ].map((m) => (
-            <div key={m.label} className="flex items-center gap-2 p-2 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-800">
-              <span className="text-brand">{m.icon}</span>
-              <div>
-                <p className="text-[10px] font-bold uppercase">{m.label}</p>
-                <p className="text-[9px] text-muted">{m.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <H3>Role-based access</H3>
-        <div className="space-y-1.5 my-2">
-          {[
-            { role: 'Admin', desc: 'Full access: all projects, all users, settings, templates, AI features, exports.' },
-            { role: 'Manager', desc: 'Sees projects they manage or are a member of, plus their team. Can use AI PRJ.' },
-            { role: 'Contributor', desc: 'Sees projects they are assigned to. Can submit check-ins and manage their tasks.' },
-            { role: 'Viewer', desc: 'Read-only access to non-archived projects.' },
-          ].map((r) => (
-            <div key={r.role} className="flex items-start gap-3 text-[11px]">
-              <Tag>{r.role}</Tag>
-              <span className="text-neutral-600 dark:text-neutral-400">{r.desc}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <>
+        <H2>Welcome to DOINg.AI</H2>
+        <P>DOINg.AI is a local-first AI Project Operations platform. It runs entirely on your machine — a React front-end backed by a Python FastAPI server, with data stored in <code>db.json</code> and mirrored to your browser. No cloud, no third-party telemetry.</P>
+        <P>It is your single pane of glass to run an AI initiative portfolio: projects, the assets they rely on (MCP servers, agents, data feeds), the people behind them, and AI-assisted reporting that can replace most of your reporting tools.</P>
+        <H3>Roles</H3>
+        <ul>
+          <Li><Tag>Admin</Tag> Full access — every menu, all data, settings, the Manager View cockpit, and all AI features.</Li>
+          <Li><Tag color="bg-blue-100 text-blue-700">Manager</Tag> Sees the whole portfolio, pending imports and reports; manages projects & catalogs.</Li>
+          <Li><Tag color="bg-emerald-100 text-emerald-700">Contributor</Tag> Works on the projects they own or belong to.</Li>
+          <Li><Tag color="bg-neutral-200 text-neutral-700">Viewer</Tag> Read-only on what they can see.</Li>
+        </ul>
+        <Note>Some menus (Data Feeds, Pending imports, Manager View, Settings) are restricted by role and the IT flag — they only appear if you have access.</Note>
+        <Tip>Press <kbd className="px-1.5 py-0.5 text-[9px] font-mono bg-neutral-100 dark:bg-ink-700 border rounded">⌘K</kbd> (or Ctrl+K) anywhere to jump to any menu or project.</Tip>
+      </>
     ),
   },
-
+  {
+    id: 'assistant',
+    title: 'DOINg Assistant',
+    icon: <Sparkles className="w-4 h-4" />,
+    content: (
+      <>
+        <H2>DOINg Assistant — your AI cockpit</H2>
+        <P>The floating button (bottom-right, always visible) opens the assistant, the cornerstone of the app. It works in two modes and remembers your last 3 requests (per user), so you can reopen anything you generated.</P>
+        <H3>Chat mode</H3>
+        <P>Ask anything about your portfolio in natural language. The assistant sees projects, people, MCP servers, agents, data feeds, wishes and contacts, and answers with markdown, tables and inline charts. Use it for ad-hoc analyses and to connect things that aren't natively linked.</P>
+        <H3>Canvas mode — intelligent reports</H3>
+        <P>Describe a report or deck ("board deck on MCP adoption with charts and risks") and the local LLM builds a complete, branded HTML document — KPIs, SVG charts and infographics from your real data.</P>
+        <ul>
+          <Li>Preview renders in-app; click <strong>Edit text</strong> to amend any text directly in the document.</Li>
+          <Li>Export to <strong>PDF</strong>, copy the HTML, download it, or open it in a tab to send for communication.</Li>
+          <Li>Toggle <strong>full screen</strong> / reduce with the maximize button.</Li>
+        </ul>
+        <Tip>Use the History (clock) icon to reopen any of your last three chats or canvases, including the generated output.</Tip>
+      </>
+    ),
+  },
   {
     id: 'dashboard',
     title: 'Dashboard',
     icon: <LayoutDashboard className="w-4 h-4" />,
     content: (
-      <div>
+      <>
         <H2>Dashboard</H2>
-        <P>The Dashboard is your live operational command centre. It aggregates data from all modules into a single, scannable view.</P>
-
-        <H3>Today's Focus widget</H3>
-        <P>Appears automatically when there is something requiring your attention:</P>
-        <ul className="ml-2">
-          <Li><strong>Tasks due soon</strong> — your assigned tasks due in the next 48 hours, colour-coded (red = overdue).</Li>
-          <Li><strong>Milestones (next 7 days)</strong> — any project milestone falling within a week.</Li>
-          <Li><strong>Team attention</strong> — team members whose latest check-in mood was red.</Li>
-        </ul>
-
-        <H3>Team Pulse</H3>
-        <P>A stacked bar chart of weekly team moods over the last 4 weeks. Green / Amber / Red bars show the distribution at a glance. The header summarises the current state with emoji counters.</P>
-
-        <H3>KPI tiles</H3>
-        <P>Four tiles: Active Projects, Contributors, Tasks in Flight, and Completion Rate.</P>
-
-        <H3>Recent Projects</H3>
-        <P>The 6 most recent projects with their RAG health badge and progress bar. Click any row to open the project modal.</P>
-
-        <H3>Milestones & Stack Snapshot</H3>
-        <P>Right column shows the next 5 milestones and a technology category breakdown.</P>
-
-        <Tip>Click "AI Insight" (bottom-left) or use the AI Executive Insight button in the sidebar to generate an executive portfolio summary from your LLM.</Tip>
-      </div>
+        <P>Your landing page: headline counts, project health, recent activity and quick links into the app. It adapts to your role — you only see what you're allowed to.</P>
+      </>
     ),
   },
-
+  {
+    id: 'manager',
+    title: 'Manager View',
+    icon: <Gauge className="w-4 h-4" />,
+    adminOnly: true,
+    content: (
+      <>
+        <H2>Manager View — executive cockpit</H2>
+        <P>An admin-only steering cockpit, right after the Dashboard.</P>
+        <ul>
+          <Li>Headline KPIs (active / off-track / at-risk projects, big bets, agents in prod, MCP servers, data feeds, open wishes, working groups, team) — each deep-links to its menu.</Li>
+          <Li><strong>Attention required</strong>: off-track, at-risk, blocked tasks and stale projects.</Li>
+          <Li><strong>Key projects</strong> focus list and a live <strong>activity stream</strong> of updates and creations.</Li>
+          <Li><strong>Pilotage</strong> buttons: one tap generates a detailed local-LLM analysis (executive briefing, risk deep-dive, delivery momentum, workload, ROI) you can print to PDF.</Li>
+        </ul>
+      </>
+    ),
+  },
   {
     id: 'projects',
     title: 'Projects',
     icon: <Target className="w-4 h-4" />,
     content: (
-      <div>
+      <>
         <H2>Projects</H2>
-        <P>The Projects module is the core of DOINg.AI. Each project has a full lifecycle from Planning to Done, with tasks, milestones, team, audit trail, and AI tools.</P>
-
-        <H3>Creating a project</H3>
-        <ul className="ml-2">
-          <Li><strong>New</strong> — blank project assigned to you as owner.</Li>
-          <Li><strong>From template</strong> — picks a pre-built task/milestone structure (admin creates templates via "Save as template" in any project modal).</Li>
-          <Li><strong>AI PRJ</strong> — paste raw text (email, brief, notes) → LLM extracts name, description, context, deadline, and tasks. Review and edit before saving.</Li>
+        <P>The heart of the platform. Click a card to edit a project; use <strong>Show details</strong> for a clean read-only popup.</P>
+        <H3>Creating projects</H3>
+        <ul>
+          <Li><strong>New</strong> — a blank project, or start <strong>From template</strong>.</Li>
+          <Li><strong>Tools ▾</strong> menu — <Tag>AI PRJ</Tag> generate a structured project from pasted notes, <Tag>Import XLSX</Tag> bulk-import from a spreadsheet, <Tag>Booklet</Tag> export a print-ready PDF.</Li>
         </ul>
-
-        <H3>RAG health chip</H3>
-        <P>Every card shows an auto-computed health indicator:</P>
-        <ul className="ml-2">
-          <Li><Tag color="bg-emerald-100 text-emerald-700">On Track</Tag> — on schedule, no significant blockers.</Li>
-          <Li><Tag color="bg-amber-100 text-amber-700">At Risk</Tag> — deadline &lt;14 days, slipped, or any blocked task.</Li>
-          <Li><Tag color="bg-red-100 text-red-700">Off Track</Tag> — overdue or &gt;40% of tasks blocked.</Li>
+        <H3>Inside a project</H3>
+        <ul>
+          <Li><strong>Overview</strong> — status, dev workflow & innovation stage, owner, dates, FTE gain, confidentiality, <strong>Big Bet</strong> flag, members (incl. external people).</Li>
+          <Li><strong>Linked assets</strong> — select the MCP servers, agents and data feeds the project needs, plus its <strong>dependencies</strong> (blocked-by projects).</Li>
+          <Li><strong>Kanban</strong> — task board with status, priority and weight.</Li>
+          <Li><strong>Telemetry</strong> — track runtime metrics, typed in or pulled live from an API endpoint.</Li>
+          <Li><strong>ROI</strong> — a dynamic, parametric ROI / impact model; "Suggest with AI" proposes one from the context.</Li>
+          <Li><strong>AI Quick synthesis</strong> — a one-click committee brief; <strong>Presentations</strong>, <strong>Notes</strong> and an <strong>Audit</strong> trail.</Li>
         </ul>
-
-        <H3>Project modal tabs</H3>
-        <ul className="ml-2">
-          <Li><strong>Overview</strong> — status, dates, budget, manager, members, context, milestones, technologies, repos, tags. AI Brief generation button.</Li>
-          <Li><strong>Kanban</strong> — drag-and-drop task board: To Do / In Progress / Paused / Blocked / Done.</Li>
-          <Li><strong>Notes</strong> — free-form scratchpad saved with the project (decisions, links, meeting takeaways).</Li>
-          <Li><strong>Audit</strong> — full change history with timestamp and author.</Li>
-        </ul>
-
-        <H3>Export PDF</H3>
-        <P>Opens a beautiful infographic PDF (portrait/landscape, fullscreen, print) with KPI tiles, task donut, milestone roadmap, team roster, and optional AI synthesis.</P>
-
-        <Tip>The <strong>Context</strong> field in Overview is ideal for pasting stakeholder emails, business constraints, or background links. It feeds the AI Brief and the DOINg Assistant's answers.</Tip>
-
-        <H3>Templates (Admin)</H3>
-        <P>Open any project → modal footer → "Save as template". The template stores the task structure, milestones, and tags. Any user with the "From template" button can then start a pre-configured project.</P>
-      </div>
+        <H3>Duplicates</H3>
+        <P>Creating via AI PRJ or importing via XLSX automatically flags likely duplicates. Use <strong>Find duplicates</strong> any time to scan the whole portfolio — the local LLM finds semantic duplicates (renamed / re-imported), and a smart <strong>merge</strong> folds them together without losing information.</P>
+        <Tip>Group projects into <strong>Families</strong> and switch between list, card density and the Portfolio view.</Tip>
+      </>
     ),
   },
-
+  {
+    id: 'board',
+    title: 'Task Board',
+    icon: <KanbanSquare className="w-4 h-4" />,
+    content: (
+      <>
+        <H2>Task Board</H2>
+        <P>Every task across the portfolio on one Kanban. Filter to a single project (a clear banner shows which one is displayed), search, or show only your tasks. Drag cards to update status — changes persist back to the owning project.</P>
+      </>
+    ),
+  },
+  {
+    id: 'timeline',
+    title: 'Timeline',
+    icon: <Calendar className="w-4 h-4" />,
+    content: (
+      <>
+        <H2>Timeline</H2>
+        <P>A Gantt-style view of projects and milestones over time, including dependency relationships, to spot overlaps and bottlenecks.</P>
+      </>
+    ),
+  },
   {
     id: 'workinggroups',
     title: 'Working Groups',
     icon: <Network className="w-4 h-4" />,
     content: (
-      <div>
+      <>
         <H2>Working Groups</H2>
-        <P>Working Groups support regular multi-session collaboration. Sessions are chained: open action items automatically carry over from previous sessions.</P>
-
-        <H3>Creating a working group</H3>
-        <P>Click <strong>New Working Group</strong>. Fill in name, objective, status, owner, members and tags. Members can be leads, contributors, or observers.</P>
-
-        <H3>Tasks board (Kanban)</H3>
-        <P>A lightweight Kanban for the group's tasks: To Do → Doing → Review → Done. Drag to move, click to edit (priority, assignee, due date, labels, checklist).</P>
-
-        <H3>Sessions (Meetings tab)</H3>
-        <P>Sessions are the heart of the Working Group module. Each session records:</P>
-        <ul className="ml-2">
-          <Li><strong>Date + Title</strong></Li>
-          <Li><strong>Attendees</strong> — multi-select from WG members</Li>
-          <Li><strong>Agenda + Notes</strong></Li>
-          <Li><strong>Key Decisions</strong> — bullet list</Li>
-          <Li><strong>Action Items</strong> — per-item owner, due date, and status (todo / ongoing / blocked / done)</Li>
+        <P>Run continuous work streams as a timeline of <strong>sessions</strong>. Pick a group on the left; its sessions appear as a timeline on the right.</P>
+        <ul>
+          <Li>Each session has four tabs: <strong>Notes</strong>, <strong>Decisions</strong>, <strong>Actions</strong> (status, priority, assignee incl. external people, category, due date) and a <strong>Checklist</strong> (with an urgent flag).</Li>
+          <Li><strong>Smart carry-over</strong>: a new session automatically clones unfinished actions and checklist items from the previous one.</Li>
+          <Li>AI <strong>Full report</strong> / <strong>Last session</strong> analyses, rendered as rich markdown with Print/PDF.</Li>
         </ul>
-
-        <H3>Session chaining (carry-over)</H3>
-        <P>When you click <strong>New Session</strong>, all open action items from every previous session (status ≠ done) are automatically pre-populated in the amber "Carried-over open actions" section. You can mark them done, update status, or remove them. New actions for this session go in the section below.</P>
-
-        <Tip>Click the status icon (circle/play/pause/check) on any action item to cycle through todo → ongoing → blocked → done.</Tip>
-
-        <H3>Overview tab</H3>
-        <P>Shows task progress stats, member list with roles, tags, and a <strong>Sessions Timeline</strong> — a vertical chronological view of all sessions with open/closed action counts per session.</P>
-      </div>
+      </>
     ),
   },
-
   {
-    id: 'contributors',
-    title: 'Contributors',
-    icon: <Users className="w-4 h-4" />,
+    id: 'wishes',
+    title: 'Wish List',
+    icon: <Lightbulb className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>Contributors</H2>
-        <P>The Contributors view is your team directory. It supports team grouping, squad sub-teams, and workload monitoring.</P>
-
-        <H3>Team / Squad toggle</H3>
-        <P>Use the <strong>Group by Team / Squad</strong> toggle in the header to switch between grouping by main team or by squad sub-team. Members without a squad fall into "— No Squad —".</P>
-
-        <H3>Workload badge</H3>
-        <P>Each contributor card shows a coloured chip with the number of active projects they are assigned to:</P>
-        <ul className="ml-2">
-          <Li><Tag color="bg-emerald-100 text-emerald-700">0–2 proj</Tag> — comfortable load</Li>
-          <Li><Tag color="bg-amber-100 text-amber-700">3–4 proj</Tag> — watch for overload</Li>
-          <Li><Tag color="bg-red-100 text-red-700">5+ proj</Tag> — overloaded</Li>
-        </ul>
-
-        <H3>User fields</H3>
-        <ul className="ml-2">
-          <Li><strong>User ID (uid)</strong> — login handle, must be unique</Li>
-          <Li><strong>Role</strong> — admin / manager / contributor / viewer</Li>
-          <Li><strong>Team / Squad</strong> — organisational grouping</Li>
-          <Li><strong>Function title</strong> — job title shown on cards</Li>
-          <Li><strong>Technical Architect</strong> — flagged in Technologies</Li>
-          <Li><strong>Expectations</strong> — brief note shown on the card</Li>
-          <Li><strong>Avatar colour</strong> — hex colour for the initials avatar</Li>
-        </ul>
-
-        <Note>Only admins can create, edit or delete contributors. Managers see the full list but cannot modify it.</Note>
-      </div>
+      <>
+        <H2>Wish List</H2>
+        <P>A collective backlog of needs — link a wish to a project, MCP, agent or data feed, set a category, priority, sponsor and dates.</P>
+        <P>Each wish is validated individually by an admin: <strong>Accept</strong> or <strong>Decline</strong>. Declining captures a reason and <strong>notifies the requester</strong> via the alerts bell.</P>
+      </>
     ),
   },
-
   {
-    id: 'technologies',
-    title: 'Technologies',
+    id: 'datafeeds',
+    title: 'Data Feeds',
+    icon: <DatabaseZap className="w-4 h-4" />,
+    adminOnly: true,
+    content: (
+      <>
+        <H2>Data Feeds</H2>
+        <P>Registry of data pipelines from source systems to silver copies / data warehouses (admin + IT-flagged users).</P>
+        <ul>
+          <Li>Track platform, data type, frequency, source → destination, status, prod date, JIRA ref, cost (MD), ETA, PM, developer and a presentation link.</Li>
+          <Li>Link the <strong>MCP servers</strong> that consume each feed.</Li>
+          <Li>Double-click a feed for a read-only preview.</Li>
+          <Li><strong>AI Booklet</strong>: choose which feeds to include, generate a local-LLM executive narrative, preview it (no forced print), then Print / Copy / Open-to-Send.</Li>
+        </ul>
+      </>
+    ),
+  },
+  {
+    id: 'catalogs',
+    title: 'Catalogs',
     icon: <Cpu className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>Technologies</H2>
-        <P>A curated registry of technologies used across your AI portfolio — your tech radar.</P>
-
-        <H3>Fields</H3>
-        <ul className="ml-2">
-          <Li><strong>Category</strong> — framework / library / database / tool / language / service</Li>
-          <Li><strong>Layer</strong> — frontend / backend / data / ml-ai / infrastructure / devops / …</Li>
-          <Li><strong>Maturity status</strong> — evaluating / adopted / deprecated / hold</Li>
-          <Li><strong>Technical Architect</strong> — the person responsible for this technology</Li>
-          <Li><strong>License / URL / Version</strong> — governance metadata</Li>
-          <Li><strong>Internal Owner</strong> — team or person owning it internally</Li>
-        </ul>
-
-        <Tip>Link technologies to projects via the project Overview tab → "Technologies" field. This populates the Stack Snapshot on the Dashboard.</Tip>
-      </div>
+      <>
+        <H2>Catalogs</H2>
+        <H3><Cpu className="w-3 h-3 inline mr-1" /> Technologies</H3>
+        <P>The tech inventory — category, layer, maturity, architect — open to everyone, editable by managers/admins.</P>
+        <H3><GitBranch className="w-3 h-3 inline mr-1" /> Repositories</H3>
+        <P>Code repositories with provider and visibility, linkable to projects.</P>
+        <H3><Plug className="w-3 h-3 inline mr-1" /> MCP Hub</H3>
+        <P>Catalog and manage Model Context Protocol servers — families, tools, deploy status, scope, owning team, use cases and best practices.</P>
+        <H3><Bot className="w-3 h-3 inline mr-1" /> AI Agents</H3>
+        <P>Track AI agents through their lifecycle — stack, framework, tools, the MCP servers they use, releases, evaluations and metrics (cost, invocations, success rate).</P>
+        <H3><Zap className="w-3 h-3 inline mr-1" /> Hackathons</H3>
+        <P>Run hackathons with candidate kits, participant rosters, documents and a message board.</P>
+      </>
     ),
   },
-
   {
-    id: 'hackathons',
-    title: 'Hackathons',
-    icon: <Zap className="w-4 h-4" />,
+    id: 'aicontacts',
+    title: 'AI Contacts',
+    icon: <ContactRound className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>Hackathons</H2>
-        <P>Manage innovation sprints end-to-end: from kick-off to post-event synthesis.</P>
-
-        <H3>Lifecycle</H3>
-        <ul className="ml-2">
-          <Li><Tag>Upcoming</Tag> — preparation phase, add participants and documents</Li>
-          <Li><Tag>Active</Tag> — event in progress, use the chat for live updates</Li>
-          <Li><Tag>Completed</Tag> — results filled in, AI synthesis available</Li>
-          <Li><Tag color="bg-neutral-100 text-neutral-500">Archived</Tag> — closed, read-only</Li>
-        </ul>
-
-        <H3>Participants</H3>
-        <P>Add participants with role (dev / sme / expert / pm / designer / other), email, team, and expertise. Export the participant list as a CSV.</P>
-
-        <H3>Documents</H3>
-        <P>Attach briefs, guides, results, presentations, and resources. Rich text content with export to PDF.</P>
-
-        <H3>AI Synthesis</H3>
-        <P>Click <strong>AI Synthesis</strong> to generate a post-hackathon report covering: mission accomplished, deliverables, technical highlights, lessons learned, and next steps. The synthesis can be exported to PDF.</P>
-
-        <H3>Candidate Kit PDF</H3>
-        <P>Generates a participant briefing document: objective, challenge, schedule, and team list.</P>
-
-        <H3>Live chat</H3>
-        <P>An internal message thread for real-time coordination during the event.</P>
-      </div>
+      <>
+        <H2>AI Contacts</H2>
+        <P>A directory of the people in your AI organisation — name, email, location, function, team and pole. Organise them by family and view the org chart.</P>
+      </>
     ),
   },
-
   {
-    id: 'communications',
-    title: 'Communications',
-    icon: <Mail className="w-4 h-4" />,
+    id: 'collaboration',
+    title: 'Collaboration',
+    icon: <Users className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>Communications</H2>
-        <P>Draft and manage team communications: weekly status emails, newsletters, ExCo updates, and info notes.</P>
-
-        <H3>Communication types</H3>
-        <ul className="ml-2">
-          <Li><strong>Weekly</strong> — recurring team status update</Li>
-          <Li><strong>Newsletter</strong> — broad-audience announcement</Li>
-          <Li><strong>ExCo</strong> — executive committee briefing (formal tone)</Li>
-          <Li><strong>Info</strong> — ad-hoc informational note</Li>
-        </ul>
-
-        <H3>Templates</H3>
-        <P>Create reusable email templates per type. When drafting a new communication, pick a template to pre-fill subject and body.</P>
-
-        <H3>Mailing lists</H3>
-        <P>Manage distribution lists under the <strong>Lists</strong> tab. A communication can target one or more lists.</P>
-
-        <H3>AI generation</H3>
-        <P>The AI Writer button generates a draft from linked project data, using the appropriate prompt (weekly, newsletter, ExCo, or info) via your configured LLM.</P>
-
-        <H3>PDF preview</H3>
-        <P>Preview any communication as a formatted PDF before sending. Print directly or export as a file.</P>
-
-        <Tip>Link a communication to specific projects — this gives the AI Writer richer context and helps you track which projects were mentioned.</Tip>
-      </div>
+      <>
+        <H2>Collaboration</H2>
+        <H3><Mail className="w-3 h-3 inline mr-1" /> Communications</H3>
+        <P>Draft AI-generated weekly / newsletter / Exco updates, manage email templates and mailing lists, and export Outlook-ready <code>.eml</code> files.</P>
+        <H3><ClipboardList className="w-3 h-3 inline mr-1" /> Weekly Check-in</H3>
+        <P>Lightweight status pulses (mood, accomplishments, blockers). Admins can consolidate the team's check-ins with AI.</P>
+        <H3><Users className="w-3 h-3 inline mr-1" /> Contributors</H3>
+        <P>The internal team directory used across projects (admin-managed).</P>
+      </>
     ),
   },
-
   {
-    id: 'checkin',
-    title: 'Weekly Check-in',
+    id: 'insights',
+    title: 'Insights',
+    icon: <Share2 className="w-4 h-4" />,
+    content: (
+      <>
+        <H2>Insights</H2>
+        <H3><Share2 className="w-3 h-3 inline mr-1" /> Knowledge Graph</H3>
+        <P>A relationship map reusing the links inside each object: project ↔ MCP / agent / data feed / technology / repository / family, project → project dependencies, and data feed ↔ MCP. Drag to pan, scroll to zoom, click a node to focus, and export a readable A4 PDF.</P>
+        <H3><FileBarChart className="w-3 h-3 inline mr-1" /> Reports</H3>
+        <P>Generate an executive weekly/monthly portfolio digest with the local LLM, rendered as beautiful markdown (headings, tables) with a one-click Print / PDF. <Tag>Admin / Manager</Tag></P>
+        <H3><Calendar className="w-3 h-3 inline mr-1" /> Activity & Capacity</H3>
+        <P>A cross-entity activity feed and a team capacity view.</P>
+      </>
+    ),
+  },
+  {
+    id: 'alerts',
+    title: 'Alerts',
+    icon: <Bell className="w-4 h-4" />,
+    content: (
+      <>
+        <H2>Alerts</H2>
+        <P>The bell shows alerts that concern <strong>you</strong> — stale projects you own, your slipping tasks, declined wishes, overdue check-ins. Admins see <strong>everyone's</strong> alerts with owner context.</P>
+        <P>Dismiss an alert individually (the ✕ on the card) or all at once with <strong>Dismiss all</strong>. Dismissals are remembered per user and survive refresh, so the count only reflects what's still outstanding.</P>
+      </>
+    ),
+  },
+  {
+    id: 'tools',
+    title: 'Smart ToDo',
     icon: <ClipboardList className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>Weekly Check-in</H2>
-        <P>A structured weekly pulse for each team member. Encourages transparency and surfaces blockers early.</P>
-
-        <H3>Fields</H3>
-        <ul className="ml-2">
-          <Li><strong>Week of</strong> — ISO Monday date (auto-set to current week)</Li>
-          <Li><strong>Accomplishments</strong> — what was completed this week</Li>
-          <Li><strong>Blockers</strong> — obstacles that need attention</Li>
-          <Li><strong>Next Steps</strong> — planned work for next week</Li>
-          <Li><strong>Mood</strong> — <Tag color="bg-emerald-100 text-emerald-700">Green</Tag> / <Tag color="bg-amber-100 text-amber-700">Amber</Tag> / <Tag color="bg-red-100 text-red-700">Red</Tag> (team energy signal)</Li>
-        </ul>
-
-        <H3>History</H3>
-        <P>All previous check-ins are listed in chronological order. Each entry shows the mood badge and full content.</P>
-
-        <H3>AI Consolidation</H3>
-        <P>Managers and admins see an <strong>AI Consolidation</strong> button that synthesises all team check-ins for the selected week into a single executive report, grouped by project.</P>
-
-        <Note>The mood signal feeds the <strong>Today's Focus</strong> dashboard widget and the <strong>Team Pulse</strong> chart. Submitting weekly keeps the health indicators accurate.</Note>
-      </div>
+      <>
+        <H2>Smart ToDo</H2>
+        <P>A personal task manager with an Eisenhower matrix, energy levels and planning periods. Private to you, with ICS export to your calendar.</P>
+      </>
     ),
   },
-
-  {
-    id: 'timeline',
-    title: 'Timeline & Risk',
-    icon: <Calendar className="w-4 h-4" />,
-    content: (
-      <div>
-        <H2>Timeline</H2>
-        <P>A portfolio-level Gantt-style timeline showing all project deadlines and milestones on a horizontal axis.</P>
-        <ul className="ml-2">
-          <Li>Projects displayed as horizontal bars spanning start → deadline</Li>
-          <Li>Milestones shown as diamond markers</Li>
-          <Li>Overdue items highlighted in red</Li>
-          <Li>Click a project row to open its detail modal</Li>
-        </ul>
-
-        <H2>Risk Heatmap</H2>
-        <P>A RAG (Red/Amber/Green) matrix view of all projects, available to admins. Each cell represents a risk dimension:</P>
-        <ul className="ml-2">
-          <Li><strong>Schedule</strong> — deadline proximity and slippage</Li>
-          <Li><strong>Tasks</strong> — blocked and overdue task ratio</Li>
-          <Li><strong>Team</strong> — morale signals from check-ins</Li>
-          <Li><strong>Scope</strong> — manually set by admin</Li>
-        </ul>
-        <P>Click any cell to edit the risk level and add a comment. The heatmap is exportable.</P>
-      </div>
-    ),
-  },
-
   {
     id: 'ai',
     title: 'AI Features',
     icon: <Bot className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>AI Features</H2>
-        <P>DOINg.AI integrates AI at multiple levels. All AI calls go through your locally configured LLM (Ollama, OpenAI-compatible, or n8n webhook).</P>
-
-        <H3>DOINg Assistant (chat)</H3>
-        <P>Click <strong>DOINg Assistant</strong> in the top-right header. A slide-in panel opens with:</P>
-        <ul className="ml-2">
-          <Li>Multi-turn conversation with full portfolio context</Li>
-          <Li>Context is automatically scoped to your access level (you only see what you're allowed to)</Li>
-          <Li>Suggested questions to get started quickly</Li>
-          <Li>Beautiful markdown rendering: tables, code blocks, headers, lists</Li>
-          <Li>Per-message copy button</Li>
-          <Li>Clear conversation button</Li>
+      <>
+        <H2>AI features across the app</H2>
+        <P>Everything AI runs through your configured <strong>local LLM</strong> (Ollama / OpenAI-compatible / webhook). Nothing leaves your environment unless you point it at a remote endpoint.</P>
+        <ul>
+          <Li>DOINg Assistant — chat + the intelligent Canvas report studio.</Li>
+          <Li>AI PRJ — turn pasted notes into a structured project; XLSX bulk import with AI extraction.</Li>
+          <Li>Project AI Quick synthesis & "Suggest ROI model".</Li>
+          <Li>Working Group reports, Data Feeds booklet, portfolio Reports, Manager View deep-dives.</Li>
+          <Li>Intelligent duplicate detection & merge.</Li>
         </ul>
-
-        <H3>AI PRJ — Project extraction</H3>
-        <P>In Projects → <strong>AI PRJ</strong> button (visible to managers & admins):</P>
-        <ul className="ml-2">
-          <Li>Paste any text (email, brief, Confluence page, notes)</Li>
-          <Li>The LLM extracts: project name, description, context, deadline, and a tasks list</Li>
-          <Li>Review and edit every field before saving</Li>
-          <Li>Creates the full project in one click</Li>
-        </ul>
-
-        <H3>AI Insight (portfolio)</H3>
-        <P>Sidebar → <strong>AI Executive Insight</strong>. Generates an executive summary of the full portfolio: highlights, risks, strategic recommendations.</P>
-
-        <H3>AI Brief (per project)</H3>
-        <P>Project modal → Overview tab → <strong>Generate Brief</strong>. Creates a structured project brief: context, status, deliverables, risks, next milestones.</P>
-
-        <H3>AI Synthesis (hackathons)</H3>
-        <P>Hackathon detail → <strong>AI Synthesis</strong>. Generates a post-event synthesis report.</P>
-
-        <H3>AI Communication Writer</H3>
-        <P>Communications → New / Edit → <strong>AI Writer</strong>. Drafts weekly emails, newsletters, ExCo updates, or info notes from linked project data.</P>
-
-        <H3>⌘K Command Palette</H3>
-        <P>Press <kbd className="px-1.5 py-0.5 text-[9px] font-mono bg-neutral-100 dark:bg-ink-700 border rounded">⌘K</kbd> (or <kbd className="px-1.5 py-0.5 text-[9px] font-mono bg-neutral-100 dark:bg-ink-700 border rounded">Ctrl K</kbd>) to open the command palette:</P>
-        <ul className="ml-2">
-          <Li>Search projects, tasks, contributors, technologies, working groups, hackathons</Li>
-          <Li>Navigate to any section instantly</Li>
-          <Li>Keyboard-driven: ↑↓ navigate, ↵ open, ESC close</Li>
-        </ul>
-
-        <H3>LLM Configuration</H3>
-        <P>Admin Settings → LLM tab. Configure provider, base URL, API key, model name, and system prompt. Use "Test Connection" to verify before using AI features.</P>
-
-        <Note>All AI responses are generated locally or via your own endpoint. No data leaves your environment unless you configure a remote API.</Note>
-      </div>
+        <Note>Configure and test the LLM in Admin → Settings before using AI features.</Note>
+      </>
     ),
   },
-
   {
-    id: 'settings',
+    id: 'admin',
     title: 'Admin & Settings',
     icon: <Settings className="w-4 h-4" />,
     adminOnly: true,
     content: (
-      <div>
+      <>
         <H2>Admin & Settings</H2>
-        <P>Accessible only to users with the <Tag>Admin</Tag> role. Configure the entire DOINg.AI instance.</P>
-
-        <H3>LLM Configuration</H3>
-        <ul className="ml-2">
-          <Li><strong>Provider</strong> — Ollama (local), OpenAI-compatible, or n8n webhook</Li>
-          <Li><strong>Base URL</strong> — e.g. <code className="font-mono text-[10px]">http://localhost:11434</code> for Ollama</Li>
-          <Li><strong>Model</strong> — e.g. <code className="font-mono text-[10px]">llama3</code>, <code className="font-mono text-[10px]">mistral</code>, <code className="font-mono text-[10px]">gpt-4o</code></Li>
-          <Li><strong>System Prompt</strong> — customise the AI persona and tone</Li>
-          <Li><strong>Test Connection</strong> — verify the LLM is reachable and list available models</Li>
+        <ul>
+          <Li><strong>LLM</strong> — provider, base URL, API key, model and system prompt, with a Test Connection button.</Li>
+          <Li><strong>SSO</strong> — configurable enterprise OIDC / OAuth2 (Azure AD, Okta, Keycloak, Google).</Li>
+          <Li><strong>SharePoint import</strong> — pull projects from an on-prem SharePoint with a daily delta and admin review of pending imports.</Li>
+          <Li><strong>Users</strong> — manage accounts, roles, the IT flag, and force a password reset.</Li>
+          <Li><strong>Webhooks</strong> — outbound Slack/Teams notifications on key transitions.</Li>
+          <Li><strong>Backup</strong> — export / import the full dataset as JSON.</Li>
         </ul>
-
-        <H3>User Management</H3>
-        <P>Create, edit and delete users. Set role, team, squad, function title, avatar colour, and password.</P>
-
-        <H3>Export Backup</H3>
-        <P>Downloads the entire DOINg.AI dataset as a timestamped JSON file (<code className="font-mono text-[10px]">doing-ai-backup-YYYY-MM-DD.json</code>). Includes all projects, users, technologies, communications, hackathons, working groups, and templates. Theme is preserved; session state is excluded.</P>
-
-        <H3>Import Backup</H3>
-        <P>Restore a previous backup file. <strong>Warning:</strong> this replaces all current data. There is no undo.</P>
-
-        <H3>Reset cache</H3>
-        <P>Wipes browser localStorage. Server data is preserved and reloaded on next boot. Useful if the app behaves unexpectedly.</P>
-
-        <Tip>Export a backup before any major operation (bulk user changes, imports, or app upgrades).</Tip>
-      </div>
+        <H3><Shield className="w-3 h-3 inline mr-1" /> Security</H3>
+        <P>Passwords are hashed with PBKDF2-SHA256. Any user can change their own password from the options menu.</P>
+      </>
     ),
   },
-
   {
     id: 'shortcuts',
     title: 'Keyboard Shortcuts',
     icon: <Keyboard className="w-4 h-4" />,
     content: (
-      <div>
-        <H2>Keyboard Shortcuts</H2>
-
-        <H3>Global</H3>
-        <div className="my-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 px-4">
-          <KbShortcut keys={['⌘', 'K']} desc="Open command palette / global search" />
-          <KbShortcut keys={['Esc']} desc="Close any open modal or panel" />
+      <>
+        <H2>Keyboard shortcuts</H2>
+        <div className="mt-2">
+          <KbShortcut keys={['⌘', 'K']} desc="Open the command palette (jump to any menu or project)" />
+          <KbShortcut keys={['Esc']} desc="Close the open modal / panel" />
+          <KbShortcut keys={['Enter']} desc="Send (in the assistant chat)" />
+          <KbShortcut keys={['⌘', 'Enter']} desc="Generate (in the Canvas brief)" />
         </div>
-
-        <H3>Command Palette</H3>
-        <div className="my-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 px-4">
-          <KbShortcut keys={['↑', '↓']} desc="Navigate results" />
-          <KbShortcut keys={['↵']} desc="Open selected result" />
-          <KbShortcut keys={['Esc']} desc="Close palette" />
-        </div>
-
-        <H3>Project modal</H3>
-        <div className="my-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 px-4">
-          <KbShortcut keys={['Esc']} desc="Close modal without saving" />
-        </div>
-
-        <H3>DOINg Assistant chat</H3>
-        <div className="my-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 px-4">
-          <KbShortcut keys={['↵']} desc="Send message" />
-          <KbShortcut keys={['Shift', '↵']} desc="New line in message" />
-          <KbShortcut keys={['Esc']} desc="Close assistant panel" />
-        </div>
-
-        <H3>Session editor (Working Groups)</H3>
-        <div className="my-2 bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 px-4">
-          <KbShortcut keys={['↵']} desc="Add decision / action item (in input field)" />
-        </div>
-      </div>
-    ),
-  },
-
-  {
-    id: 'repos',
-    title: 'Repositories',
-    icon: <GitBranch className="w-4 h-4" />,
-    content: (
-      <div>
-        <H2>Code Repositories</H2>
-        <P>Track all code repositories associated with your AI portfolio.</P>
-
-        <H3>Fields</H3>
-        <ul className="ml-2">
-          <Li><strong>Provider</strong> — GitHub, GitLab, Bitbucket, Azure DevOps, or other</Li>
-          <Li><strong>URL</strong> — direct link to the repository</Li>
-          <Li><strong>Visibility</strong> — public / private / internal</Li>
-          <Li><strong>Language</strong> — primary programming language</Li>
-          <Li><strong>Linked Projects</strong> — associate with one or more projects</Li>
-        </ul>
-
-        <H3>Bitbucket import</H3>
-        <P>Use the <strong>Import from Bitbucket</strong> button to bulk-import repositories from a Bitbucket workspace using your credentials.</P>
-
-        <Tip>Link repositories to projects in the project Overview tab → "Repos" field. Linked repos appear in the project PDF export.</Tip>
-      </div>
+      </>
     ),
   },
 ];
