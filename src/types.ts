@@ -898,10 +898,21 @@ export type WGActionStatus = 'todo' | 'ongoing' | 'blocked' | 'done';
 export interface WGActionItem {
   id: string;
   text: string;
-  ownerId?: string;
+  ownerId?: string;              // user id, or free-text name for an external person
   dueDate?: string;
+  eta?: string;
   status: WGActionStatus;
+  priority?: WGTaskPriority;
+  category?: string;             // free-text grouping (e.g. "Legal", "Tech")
   carriedFromSessionId?: string;
+}
+
+export interface WGChecklistItem {
+  id: string;
+  text: string;
+  comment?: string;
+  isUrgent?: boolean;
+  done: boolean;
 }
 
 export interface WGMember {
@@ -932,6 +943,7 @@ export interface WGMeetingNote {
   notes: string;
   decisions: string[];
   actionItems?: WGActionItem[];
+  checklist?: WGChecklistItem[];
   createdAt: string;
   updatedAt: string;
 }
@@ -943,9 +955,10 @@ export interface WorkingGroup {
   objective: string;
   status: WGStatus;
   ownerId?: string;
+  projectId?: string;            // optional linked project
   members: WGMember[];
   tasks: WGTask[];
-  meetings: WGMeetingNote[];
+  meetings: WGMeetingNote[];     // sessions, newest-first in the UI
   tags: string[];
   createdAt: string;
   updatedAt: string;

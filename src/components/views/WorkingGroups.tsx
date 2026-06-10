@@ -1,1647 +1,742 @@
-import React, { useState, useMemo, useRef } from 'react';
+/**
+ * WorkingGroupsView — continuous work sessions, reworked to match the
+ * DOING_New2 experience (two-pane layout + session timeline + 4-tab session
+ * editor + action modal + smart carry-over of unfinished items + AI reports),
+ * rendered in the DOINg.AI brutalist brand (brand orange #FF3E00, ink scale).
+ *
+ * Data model: each WorkingGroup keeps its sessions in `meetings`
+ * (WGMeetingNote). A session has notes, decisions, action items (with status /
+ * priority / category / owner) and a checklist (with urgent flag).
+ */
+
+import React, { useMemo, useState } from 'react';
 import {
-  Plus, X, ChevronRight, Network, Users, CheckSquare,
-  Calendar, Edit2, Trash2, Tag, Flag, User as UserIcon,
-  ChevronDown, MessageSquare, Target, MoreHorizontal,
-  ArrowLeft, Check, Clock, AlertCircle, GripVertical,
-  RefreshCw, Circle, PlayCircle, PauseCircle, CheckCircle2,
+  Plus, Folder, Calendar, CheckSquare, Trash2, X, Edit, UserPlus, Clock,
+  AlertTriangle, FileText, Sparkles, Bot, Loader2, Copy, Check, Flag, Layers,
+  List, Edit2, Gavel, Siren, Printer, Users as UsersIcon,
 } from 'lucide-react';
 import {
-  AppState, User, WorkingGroup, WGTask, WGMeetingNote,
-  WGStatus, WGMemberRole, WGTaskStatus, WGTaskPriority,
-  WGActionItem, WGActionStatus, ChecklistItem,
+  AppState, User, WorkingGroup, WGMeetingNote, WGActionItem, WGActionStatus,
+  WGChecklistItem, WGTaskPriority,
 } from '../../types';
 import { generateId } from '../../services/storage';
+import { runPrompt } from '../../services/llmService';
 import { useEditingLock } from '../../hooks/useEditingLock';
+import { MarkdownView } from '../ui/MarkdownView';
 
-/* ─────────────────────────────────────── helpers ── */
-
-const STATUS_COLOR: Record<WGStatus, string> = {
-  active: 'bg-emerald-500',
-  paused: 'bg-amber-500',
-  closed: 'bg-neutral-400',
-};
-
-const STATUS_LABEL: Record<WGStatus, string> = {
-  active: 'Active',
-  paused: 'Paused',
-  closed: 'Closed',
-};
-
-const TASK_COL: { id: WGTaskStatus; label: string }[] = [
-  { id: 'todo', label: 'To Do' },
-  { id: 'doing', label: 'In Progress' },
-  { id: 'review', label: 'Review' },
-  { id: 'done', label: 'Done' },
-];
-
-const TASK_COL_STYLE: Record<WGTaskStatus, string> = {
-  todo: 'border-neutral-300 dark:border-ink-600',
-  doing: 'border-blue-400',
-  review: 'border-amber-400',
-  done: 'border-emerald-500',
-};
-
-const PRIORITY_COLOR: Record<WGTaskPriority, string> = {
-  low: 'text-neutral-400',
-  medium: 'text-blue-400',
-  high: 'text-amber-500',
-  urgent: 'text-red-500',
-};
-
-const PRIORITY_LABEL: Record<WGTaskPriority, string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  urgent: 'Urgent',
-};
-
-const MEMBER_ROLE_LABEL: Record<WGMemberRole, string> = {
-  lead: 'Lead',
-  contributor: 'Contributor',
-  observer: 'Observer',
-};
+interface Props {
+  state: AppState;
+  currentUser: User;
+  update: (m: (s: AppState) => AppState) => void;
+}
 
 const now = () => new Date().toISOString();
 
-const fmtDate = (d: string) =>
-  new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+const STATUS_LABEL: Record<WGActionStatus, string> = {
+  todo: 'To start', ongoing: 'Ongoing', blocked: 'Blocked', done: 'Done',
+};
+const statusColor = (s: WGActionStatus): string => {
+  switch (s) {
+    case 'done': return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400';
+    case 'blocked': return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+    case 'ongoing': return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400';
+    default: return 'bg-neutral-100 text-neutral-600 dark:bg-ink-700 dark:text-neutral-300';
+  }
+};
+const priorityColor = (p?: WGTaskPriority): string => {
+  switch (p) {
+    case 'urgent': return 'text-red-500';
+    case 'high': return 'text-orange-500';
+    case 'medium': return 'text-sky-500';
+    default: return 'text-neutral-400';
+  }
+};
 
-/* ─────────────────────────────────────── Avatar ── */
-const Avatar: React.FC<{ name: string; color?: string; size?: number }> = ({
-  name, color = '#FF3E00', size = 7,
-}) => (
-  <div
-    className={`w-${size} h-${size} flex items-center justify-center text-[9px] font-bold uppercase text-white rounded-none shrink-0`}
-    style={{ backgroundColor: color, width: `${size * 4}px`, height: `${size * 4}px` }}
-  >
-    {name.slice(0, 2)}
-  </div>
-);
+export const WorkingGroupsView: React.FC<Props> = ({ state, currentUser, update }) => {
+  const groups = state.workingGroups ?? [];
 
-/* ─────────────────────────────────────── Props ── */
-interface ViewProps {
-  state: AppState;
-  currentUser: User;
-  update: (fn: (s: AppState) => AppState) => void;
-}
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(groups[0]?.id ?? null);
+  const [editingGroup, setEditingGroup] = useState<WorkingGroup | null>(null);
+  const [editingSession, setEditingSession] = useState<{ groupId: string; session: WGMeetingNote } | null>(null);
+  const [activeTab, setActiveTab] = useState<'notes' | 'decisions' | 'actions' | 'checklist'>('notes');
+  const [actionInEdit, setActionInEdit] = useState<{ index: number; action: WGActionItem } | null>(null);
+  const [newDecisionText, setNewDecisionText] = useState('');
+  const [groupByCategory, setGroupByCategory] = useState(false);
 
-/* ══════════════════════════════════════════════════
-   TASK MODAL — full editor for a WGTask
-══════════════════════════════════════════════════ */
-const TaskModal: React.FC<{
-  task: WGTask | null;
-  wgId: string;
-  users: User[];
-  wgMembers: string[];
-  onClose: () => void;
-  onSave: (task: WGTask) => void;
-  onDelete?: () => void;
-}> = ({ task, wgId: _wgId, users, wgMembers, onClose, onSave, onDelete }) => {
-  const isNew = !task;
-  // Modal mounts only while open → hold the editing lock so a teammate's
-  // concurrent save can't refresh the tree and reset this form mid-edit.
-  useEditingLock(true);
-  const [title, setTitle] = useState(task?.title ?? '');
-  const [desc, setDesc] = useState(task?.description ?? '');
-  const [status, setStatus] = useState<WGTaskStatus>(task?.status ?? 'todo');
-  const [priority, setPriority] = useState<WGTaskPriority>(task?.priority ?? 'medium');
-  const [assigneeId, setAssigneeId] = useState(task?.assigneeId ?? '');
-  const [dueDate, setDueDate] = useState(task?.dueDate ?? '');
-  const [labels, setLabels] = useState<string[]>(task?.labels ?? []);
-  const [labelInput, setLabelInput] = useState('');
-  const [checklist, setChecklist] = useState<ChecklistItem[]>(task?.checklist ?? []);
-  const [checkInput, setCheckInput] = useState('');
+  // AI report modal
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiContent, setAiContent] = useState('');
+  const [aiTitle, setAiTitle] = useState('');
+  const [aiCopied, setAiCopied] = useState(false);
 
-  const assignableUsers = users.filter((u) => wgMembers.includes(u.id));
+  useEditingLock(!!editingGroup || !!editingSession || !!actionInEdit);
 
-  const addLabel = () => {
-    const v = labelInput.trim();
-    if (v && !labels.includes(v)) setLabels([...labels, v]);
-    setLabelInput('');
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId) || null;
+  const canEdit = !!currentUser && (
+    currentUser.role === 'admin' || (selectedGroup?.members ?? []).some((m) => m.userId === currentUser.id)
+  );
+
+  // ── persistence helpers ──────────────────────────────────────────────
+  const upsertGroup = (g: WorkingGroup) =>
+    update((s) => ({
+      ...s,
+      workingGroups: (s.workingGroups ?? []).some((x) => x.id === g.id)
+        ? (s.workingGroups ?? []).map((x) => (x.id === g.id ? { ...g, updatedAt: now() } : x))
+        : [{ ...g, updatedAt: now() }, ...(s.workingGroups ?? [])],
+    }));
+
+  const deleteGroup = (id: string) => {
+    if (!window.confirm('Delete this working group and all its sessions?')) return;
+    update((s) => ({ ...s, workingGroups: (s.workingGroups ?? []).filter((g) => g.id !== id) }));
+    if (selectedGroupId === id) setSelectedGroupId(null);
   };
 
-  const addCheckItem = () => {
-    const v = checkInput.trim();
-    if (!v) return;
-    setChecklist([...checklist, { id: generateId(), text: v, done: false }]);
-    setCheckInput('');
+  const projectName = (id?: string) => (id ? state.projects.find((p) => p.id === id)?.name : null);
+  const userName = (id?: string) => {
+    const u = state.users.find((x) => x.id === id);
+    return u ? `${u.firstName} ${u.lastName}` : null;
+  };
+  const hasBlocked = (g: WorkingGroup) => {
+    const latest = [...(g.meetings ?? [])].sort((a, b) => b.date.localeCompare(a.date))[0];
+    return !!latest?.actionItems?.some((a) => a.status === 'blocked');
+  };
+  const groupCategories = (g: WorkingGroup | null): string[] => {
+    const set = new Set<string>();
+    (g?.meetings ?? []).forEach((m) => (m.actionItems ?? []).forEach((a) => a.category && set.add(a.category)));
+    return [...set];
   };
 
-  const toggleCheck = (id: string) =>
-    setChecklist(checklist.map((c) => (c.id === id ? { ...c, done: !c.done } : c)));
-
-  const removeCheck = (id: string) =>
-    setChecklist(checklist.filter((c) => c.id !== id));
-
-  const handleSave = () => {
-    if (!title.trim()) return;
-    const t: WGTask = {
-      id: task?.id ?? generateId(),
-      title: title.trim(),
-      description: desc.trim(),
-      status,
-      priority,
-      assigneeId: assigneeId || undefined,
-      dueDate: dueDate || undefined,
-      labels,
-      checklist,
-      createdAt: task?.createdAt ?? now(),
-      updatedAt: now(),
+  // ── group handlers ───────────────────────────────────────────────────
+  const handleCreateGroup = () => {
+    const g: WorkingGroup = {
+      id: generateId(),
+      name: 'New Working Group',
+      description: '', objective: '', status: 'active',
+      ownerId: currentUser.id,
+      members: [{ userId: currentUser.id, role: 'lead' }],
+      tasks: [], meetings: [], tags: [],
+      createdAt: now(), updatedAt: now(),
     };
-    onSave(t);
+    setEditingGroup(g);
+  };
+  const saveGroup = () => {
+    if (!editingGroup) return;
+    upsertGroup(editingGroup);
+    setSelectedGroupId(editingGroup.id);
+    setEditingGroup(null);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="bg-white dark:bg-ink-900 w-full max-w-lg max-h-[90vh] overflow-y-auto border border-neutral-200 dark:border-ink-700 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-ink-700">
-          <h2 className="text-[11px] font-bold uppercase tracking-[0.14em]">
-            {isNew ? 'New Task' : 'Edit Task'}
-          </h2>
-          <button onClick={onClose} className="text-muted hover:text-neutral-900 dark:hover:text-white"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {/* Title */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Title *</label>
-            <input
-              className="w-full input-base"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Task title"
-              autoFocus
-            />
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Description</label>
-            <textarea
-              className="w-full input-base resize-none"
-              rows={3}
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-              placeholder="Details, context, acceptance criteria..."
-            />
-          </div>
-
-          {/* Status + Priority */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Status</label>
-              <select className="w-full input-base" value={status} onChange={(e) => setStatus(e.target.value as WGTaskStatus)}>
-                {TASK_COL.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Priority</label>
-              <select className="w-full input-base" value={priority} onChange={(e) => setPriority(e.target.value as WGTaskPriority)}>
-                {Object.entries(PRIORITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Assignee + Due date */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Assignee</label>
-              <select className="w-full input-base" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
-                <option value="">Unassigned</option>
-                {assignableUsers.map((u) => (
-                  <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Due Date</label>
-              <input type="date" className="w-full input-base" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-            </div>
-          </div>
-
-          {/* Labels */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Labels</label>
-            <div className="flex gap-2 mb-2 flex-wrap">
-              {labels.map((l) => (
-                <span key={l} className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] bg-brand/10 text-brand border border-brand/30">
-                  {l}
-                  <button onClick={() => setLabels(labels.filter((x) => x !== l))}><X className="w-2.5 h-2.5" /></button>
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 input-base"
-                value={labelInput}
-                onChange={(e) => setLabelInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addLabel())}
-                placeholder="Add label…"
-              />
-              <button onClick={addLabel} className="btn-secondary text-[10px]">Add</button>
-            </div>
-          </div>
-
-          {/* Checklist */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">
-              Checklist ({checklist.filter((c) => c.done).length}/{checklist.length})
-            </label>
-            <div className="space-y-1 mb-2">
-              {checklist.map((c) => (
-                <div key={c.id} className="flex items-center gap-2">
-                  <button onClick={() => toggleCheck(c.id)} className={`w-4 h-4 border flex items-center justify-center shrink-0 ${c.done ? 'bg-brand border-brand text-white' : 'border-neutral-300 dark:border-ink-500'}`}>
-                    {c.done && <Check className="w-2.5 h-2.5" />}
-                  </button>
-                  <span className={`flex-1 text-[11px] ${c.done ? 'line-through text-muted' : ''}`}>{c.text}</span>
-                  <button onClick={() => removeCheck(c.id)} className="text-muted hover:text-red-500"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 input-base"
-                value={checkInput}
-                onChange={(e) => setCheckInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCheckItem())}
-                placeholder="Add checklist item…"
-              />
-              <button onClick={addCheckItem} className="btn-secondary text-[10px]">Add</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between px-6 py-4 border-t border-neutral-200 dark:border-ink-700">
-          <div>
-            {!isNew && onDelete && (
-              <button onClick={onDelete} className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-500 hover:text-red-700">
-                Delete Task
-              </button>
-            )}
-          </div>
-          <div className="flex gap-3">
-            <button onClick={onClose} className="btn-secondary text-[10px]">Cancel</button>
-            <button onClick={handleSave} disabled={!title.trim()} className="btn-primary text-[10px]">
-              {isNew ? 'Create Task' : 'Save Changes'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+  // ── session handlers ─────────────────────────────────────────────────
+  const sortedSessions = useMemo(
+    () => [...(selectedGroup?.meetings ?? [])].sort((a, b) => b.date.localeCompare(a.date)),
+    [selectedGroup]
   );
-};
 
-/* ══════════════════════════════════════════════════
-   SESSION EDITOR — chained meeting sessions
-══════════════════════════════════════════════════ */
+  const handleCreateSession = (g: WorkingGroup) => {
+    const prev = [...(g.meetings ?? [])].sort((a, b) => b.date.localeCompare(a.date))[0];
+    // Smart carry-over: clone unfinished actions + checklist items into the new session.
+    const carryActions: WGActionItem[] = (prev?.actionItems ?? [])
+      .filter((a) => a.status !== 'done')
+      .map((a) => ({ ...a, id: generateId(), carriedFromSessionId: prev!.id }));
+    const carryChecklist: WGChecklistItem[] = (prev?.checklist ?? [])
+      .filter((c) => !c.done)
+      .map((c) => ({ ...c, id: generateId() }));
+    const session: WGMeetingNote = {
+      id: generateId(),
+      date: new Date().toISOString().slice(0, 10),
+      title: '', attendeeIds: [], notes: '',
+      decisions: [], actionItems: carryActions, checklist: carryChecklist,
+      createdAt: now(), updatedAt: now(),
+    };
+    setEditingSession({ groupId: g.id, session });
+    setActiveTab('notes');
+  };
 
-const ACTION_STATUS_CYCLE: WGActionStatus[] = ['todo', 'ongoing', 'blocked', 'done'];
+  const handleEditSession = (g: WorkingGroup, s: WGMeetingNote) => {
+    setEditingSession({ groupId: g.id, session: JSON.parse(JSON.stringify(s)) });
+    setActiveTab('notes');
+  };
 
-const ACTION_STATUS_ICON: Record<WGActionStatus, React.ReactNode> = {
-  todo: <Circle className="w-3.5 h-3.5 text-neutral-400" />,
-  ongoing: <PlayCircle className="w-3.5 h-3.5 text-blue-500" />,
-  blocked: <PauseCircle className="w-3.5 h-3.5 text-red-500" />,
-  done: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />,
-};
+  const saveSession = () => {
+    if (!editingSession) return;
+    const g = groups.find((x) => x.id === editingSession.groupId);
+    if (g) {
+      const idx = (g.meetings ?? []).findIndex((m) => m.id === editingSession.session.id);
+      const stamped = { ...editingSession.session, updatedAt: now() };
+      const meetings = idx >= 0
+        ? g.meetings.map((m) => (m.id === stamped.id ? stamped : m))
+        : [stamped, ...(g.meetings ?? [])];
+      upsertGroup({ ...g, meetings });
+    }
+    setEditingSession(null);
+  };
 
-const ACTION_STATUS_LABEL: Record<WGActionStatus, string> = {
-  todo: 'To Do',
-  ongoing: 'Ongoing',
-  blocked: 'Blocked',
-  done: 'Done',
-};
+  const deleteSession = () => {
+    if (!editingSession) return;
+    if (!window.confirm('Delete this session? This cannot be undone.')) return;
+    const g = groups.find((x) => x.id === editingSession.groupId);
+    if (g) upsertGroup({ ...g, meetings: (g.meetings ?? []).filter((m) => m.id !== editingSession.session.id) });
+    setEditingSession(null);
+  };
 
-const SessionEditor: React.FC<{
-  session: WGMeetingNote | null;
-  carriedItems: WGActionItem[];
-  users: User[];
-  wgMembers: string[];
-  onClose: () => void;
-  onSave: (m: WGMeetingNote) => void;
-  onDelete?: () => void;
-}> = ({ session, carriedItems, users, wgMembers, onClose, onSave, onDelete }) => {
-  const isNew = !session;
-  // Hold the editing lock for the whole session-editor lifetime so a
-  // concurrent save can't wipe what's being typed (the 'session disappears' bug).
-  useEditingLock(true);
-  const [date, setDate] = useState(session?.date ?? new Date().toISOString().slice(0, 10));
-  const [title, setTitle] = useState(session?.title ?? '');
-  const [attendeeIds, setAttendeeIds] = useState<string[]>(session?.attendeeIds ?? []);
-  const [agenda, setAgenda] = useState(session?.agenda ?? '');
-  const [notes, setNotes] = useState(session?.notes ?? '');
-  const [decisions, setDecisions] = useState<string[]>(session?.decisions ?? []);
-  const [decisionInput, setDecisionInput] = useState('');
-  // Pre-populate with carried items (for new session) or existing actionItems
-  const [actionItems, setActionItems] = useState<WGActionItem[]>(
-    session?.actionItems ?? carriedItems.map((a) => ({ ...a, id: generateId(), carriedFromSessionId: a.carriedFromSessionId ?? a.id }))
-  );
-  const [actionInput, setActionInput] = useState('');
-  const [actionOwnerId, setActionOwnerId] = useState('');
-  const [actionDueDate, setActionDueDate] = useState('');
+  // session-local mutators
+  const patchSession = (patch: Partial<WGMeetingNote>) =>
+    setEditingSession((cur) => (cur ? { ...cur, session: { ...cur.session, ...patch } } : cur));
 
-  const assignableUsers = users.filter((u) => wgMembers.includes(u.id));
+  const saveActionFromModal = () => {
+    if (!editingSession || !actionInEdit) return;
+    const items = [...(editingSession.session.actionItems ?? [])];
+    if (actionInEdit.index === -1) items.push(actionInEdit.action);
+    else items[actionInEdit.index] = actionInEdit.action;
+    patchSession({ actionItems: items });
+    setActionInEdit(null);
+  };
+  const openActionModal = (index: number, action?: WGActionItem) => {
+    setActionInEdit(action
+      ? { index, action: { ...action } }
+      : { index: -1, action: { id: generateId(), text: '', ownerId: '', dueDate: '', status: 'todo', priority: 'medium', category: '' } });
+  };
+  const deleteAction = (index: number) => {
+    if (!editingSession) return;
+    patchSession({ actionItems: (editingSession.session.actionItems ?? []).filter((_, i) => i !== index) });
+  };
 
-  const toggleAttendee = (id: string) =>
-    setAttendeeIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const addChecklist = () => {
+    if (!editingSession) return;
+    patchSession({ checklist: [...(editingSession.session.checklist ?? []), { id: generateId(), text: '', comment: '', isUrgent: false, done: false }] });
+  };
+  const updateChecklist = (index: number, field: keyof WGChecklistItem, value: any) => {
+    if (!editingSession) return;
+    patchSession({ checklist: (editingSession.session.checklist ?? []).map((c, i) => (i === index ? { ...c, [field]: value } : c)) });
+  };
+  const deleteChecklist = (index: number) => {
+    if (!editingSession) return;
+    patchSession({ checklist: (editingSession.session.checklist ?? []).filter((_, i) => i !== index) });
+  };
 
   const addDecision = () => {
-    const v = decisionInput.trim();
-    if (v) { setDecisions([...decisions, v]); setDecisionInput(''); }
+    if (!editingSession || !newDecisionText.trim()) return;
+    patchSession({ decisions: [...(editingSession.session.decisions ?? []), newDecisionText.trim()] });
+    setNewDecisionText('');
+  };
+  const deleteDecision = (idx: number) => {
+    if (!editingSession) return;
+    patchSession({ decisions: (editingSession.session.decisions ?? []).filter((_, i) => i !== idx) });
   };
 
-  const addAction = () => {
-    const v = actionInput.trim();
-    if (!v) return;
-    const item: WGActionItem = {
-      id: generateId(),
-      text: v,
-      ownerId: actionOwnerId || undefined,
-      dueDate: actionDueDate || undefined,
-      status: 'todo',
-    };
-    setActionItems([...actionItems, item]);
-    setActionInput('');
-    setActionOwnerId('');
-    setActionDueDate('');
-  };
-
-  const cycleActionStatus = (id: string) => {
-    setActionItems(actionItems.map((a) => {
-      if (a.id !== id) return a;
-      const idx = ACTION_STATUS_CYCLE.indexOf(a.status);
-      return { ...a, status: ACTION_STATUS_CYCLE[(idx + 1) % ACTION_STATUS_CYCLE.length] };
-    }));
-  };
-
-  const removeAction = (id: string) => setActionItems(actionItems.filter((a) => a.id !== id));
-
-  const handleSave = () => {
-    if (!title.trim()) return;
-    onSave({
-      id: session?.id ?? generateId(),
-      date,
-      title: title.trim(),
-      attendeeIds,
-      agenda: agenda.trim(),
-      notes: notes.trim(),
-      decisions,
-      actionItems,
-      createdAt: session?.createdAt ?? now(),
-      updatedAt: now(),
+  // ── AI report ────────────────────────────────────────────────────────
+  const buildGroupData = (g: WorkingGroup, onlyLast: boolean): string => {
+    const sessions = [...(g.meetings ?? [])].sort((a, b) => b.date.localeCompare(a.date));
+    const scope = onlyLast ? sessions.slice(0, 1) : sessions;
+    const lines: string[] = [`GROUP: ${g.name}`];
+    if (g.projectId) lines.push(`LINKED PROJECT: ${projectName(g.projectId) ?? g.projectId}`);
+    lines.push(`MEMBERS: ${g.members.map((m) => userName(m.userId) ?? m.userId).join(', ') || 'none'}`);
+    scope.forEach((s) => {
+      lines.push(`\nSESSION ${s.date}:`);
+      if (s.notes) lines.push(`Notes: ${s.notes}`);
+      if (s.decisions?.length) lines.push(`Decisions: ${s.decisions.join(' | ')}`);
+      (s.actionItems ?? []).forEach((a) =>
+        lines.push(`Action [${STATUS_LABEL[a.status]}${a.priority ? `/${a.priority}` : ''}]${a.category ? ` (${a.category})` : ''}: ${a.text}${a.ownerId ? ` -> ${userName(a.ownerId) ?? a.ownerId}` : ''}${a.dueDate ? ` due ${a.dueDate}` : ''}`));
+      (s.checklist ?? []).forEach((c) => lines.push(`Checklist [${c.done ? 'x' : ' '}]${c.isUrgent ? ' URGENT' : ''}: ${c.text}`));
     });
+    return lines.join('\n');
   };
 
-  const carried = actionItems.filter((a) => a.carriedFromSessionId);
-  const newActions = actionItems.filter((a) => !a.carriedFromSessionId);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="bg-white dark:bg-ink-900 w-full max-w-2xl max-h-[92vh] overflow-y-auto border border-neutral-200 dark:border-ink-700 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-ink-700">
-          <h2 className="text-[11px] font-bold uppercase tracking-[0.14em]">{isNew ? 'New Session' : 'Edit Session'}</h2>
-          <button onClick={onClose} className="text-muted hover:text-neutral-900 dark:hover:text-white"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div className="p-6 space-y-5">
-          {/* Date + Title */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Date</label>
-              <input type="date" className="w-full input-base" value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Title *</label>
-              <input className="w-full input-base" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" autoFocus />
-            </div>
-          </div>
-
-          {/* Attendees */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Attendees</label>
-            <div className="flex flex-wrap gap-2">
-              {assignableUsers.map((u) => (
-                <button
-                  key={u.id}
-                  onClick={() => toggleAttendee(u.id)}
-                  className={`px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] border transition-colors ${attendeeIds.includes(u.id) ? 'bg-brand text-white border-brand' : 'border-neutral-300 dark:border-ink-500 text-muted'}`}
-                >
-                  {u.firstName} {u.lastName}
-                </button>
-              ))}
-              {assignableUsers.length === 0 && <span className="text-[10px] text-muted">No members in group</span>}
-            </div>
-          </div>
-
-          {/* Carried-over open actions */}
-          {carried.length > 0 && (
-            <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/50 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
-                <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-400">
-                  Carried-over open actions ({carried.length})
-                </p>
-              </div>
-              <div className="space-y-2">
-                {carried.map((a) => (
-                  <div key={a.id} className="flex items-center gap-2">
-                    <button
-                      onClick={() => cycleActionStatus(a.id)}
-                      title={`Status: ${ACTION_STATUS_LABEL[a.status]} — click to advance`}
-                      className="shrink-0"
-                    >
-                      {ACTION_STATUS_ICON[a.status]}
-                    </button>
-                    <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
-                    {a.ownerId && (
-                      <span className="text-[9px] text-muted">
-                        {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
-                      </span>
-                    )}
-                    <button onClick={() => removeAction(a.id)} className="text-muted hover:text-red-500 shrink-0"><X className="w-3 h-3" /></button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Agenda + Notes */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Agenda</label>
-            <textarea className="w-full input-base resize-none" rows={2} value={agenda} onChange={(e) => setAgenda(e.target.value)} placeholder="Topics to cover…" />
-          </div>
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Notes</label>
-            <textarea className="w-full input-base resize-none" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Session notes, context, discussions…" />
-          </div>
-
-          {/* Decisions */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Key Decisions</label>
-            <div className="space-y-1 mb-2">
-              {decisions.map((d, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className="text-brand mt-0.5 shrink-0">•</span>
-                  <span className="flex-1 text-[11px]">{d}</span>
-                  <button onClick={() => setDecisions(decisions.filter((_, j) => j !== i))} className="text-muted hover:text-red-500"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 input-base"
-                value={decisionInput}
-                onChange={(e) => setDecisionInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addDecision())}
-                placeholder="Add decision…"
-              />
-              <button onClick={addDecision} className="btn-secondary text-[10px]">Add</button>
-            </div>
-          </div>
-
-          {/* New action items */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">
-              Action Items — This Session ({newActions.length})
-            </label>
-            <div className="space-y-1 mb-3">
-              {newActions.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 py-1 border-b border-neutral-100 dark:border-ink-800">
-                  <button onClick={() => cycleActionStatus(a.id)} title={ACTION_STATUS_LABEL[a.status]} className="shrink-0">
-                    {ACTION_STATUS_ICON[a.status]}
-                  </button>
-                  <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
-                  {a.ownerId && (
-                    <span className="text-[9px] text-muted">
-                      {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
-                    </span>
-                  )}
-                  {a.dueDate && <span className="text-[9px] font-mono text-muted">{a.dueDate.slice(5)}</span>}
-                  <button onClick={() => removeAction(a.id)} className="text-muted hover:text-red-500 shrink-0"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-3 gap-2 mb-2">
-              <input
-                className="col-span-3 input-base"
-                value={actionInput}
-                onChange={(e) => setActionInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addAction())}
-                placeholder="New action item…"
-              />
-              <select className="input-base text-[10px]" value={actionOwnerId} onChange={(e) => setActionOwnerId(e.target.value)}>
-                <option value="">Owner…</option>
-                {assignableUsers.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-              </select>
-              <input type="date" className="input-base text-[10px]" value={actionDueDate} onChange={(e) => setActionDueDate(e.target.value)} />
-              <button onClick={addAction} className="btn-secondary text-[10px]">Add</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between px-6 py-4 border-t border-neutral-200 dark:border-ink-700">
-          <div>
-            {!isNew && onDelete && (
-              <button onClick={onDelete} className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-500 hover:text-red-700">Delete Session</button>
-            )}
-          </div>
-          <div className="flex gap-3">
-            <button onClick={onClose} className="btn-secondary text-[10px]">Cancel</button>
-            <button onClick={handleSave} disabled={!title.trim()} className="btn-primary text-[10px]">
-              {isNew ? 'Log Session' : 'Save'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   WG EDITOR MODAL — create / edit a Working Group
-══════════════════════════════════════════════════ */
-const WGEditor: React.FC<{
-  wg: WorkingGroup | null;
-  users: User[];
-  onClose: () => void;
-  onSave: (wg: WorkingGroup) => void;
-  onDelete?: () => void;
-}> = ({ wg, users, onClose, onSave, onDelete }) => {
-  const isNew = !wg;
-  const [name, setName] = useState(wg?.name ?? '');
-  const [description, setDescription] = useState(wg?.description ?? '');
-  const [objective, setObjective] = useState(wg?.objective ?? '');
-  const [status, setStatus] = useState<WGStatus>(wg?.status ?? 'active');
-  const [ownerId, setOwnerId] = useState(wg?.ownerId ?? '');
-  const [members, setMembers] = useState<{ userId: string; role: WGMemberRole }[]>(wg?.members ?? []);
-  const [tags, setTags] = useState<string[]>(wg?.tags ?? []);
-  const [tagInput, setTagInput] = useState('');
-
-  const addMember = (userId: string) => {
-    if (!members.find((m) => m.userId === userId))
-      setMembers([...members, { userId, role: 'contributor' }]);
+  const runReport = async (onlyLast: boolean) => {
+    if (!selectedGroup) return;
+    setAiTitle(onlyLast ? `Last session summary — ${selectedGroup.name}` : `Deep analysis — ${selectedGroup.name}`);
+    setAiContent(''); setAiLoading(true); setAiOpen(true);
+    const prompt = `You are DOINg.AI, an executive operations assistant. Produce a polished ${onlyLast ? 'summary of the latest working session' : 'full analysis of this working group across its sessions'} in English, using rich Markdown (headings, bullet lists, **bold**, and a short table of open action items with owner + status). Cover progress, key decisions, blockers/risks, who owns what, and clear next steps. Be specific; do not invent data.\n\nDATA:\n${buildGroupData(selectedGroup, onlyLast)}`;
+    try {
+      const out = await runPrompt(prompt, state.llmConfig);
+      setAiContent(out || '_No output generated._');
+    } catch {
+      setAiContent('> Generation failed. Check the local LLM connection in Settings.');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
-  const removeMember = (userId: string) => setMembers(members.filter((m) => m.userId !== userId));
-
-  const setMemberRole = (userId: string, role: WGMemberRole) =>
-    setMembers(members.map((m) => (m.userId === userId ? { ...m, role } : m)));
-
-  const addTag = () => {
-    const v = tagInput.trim();
-    if (v && !tags.includes(v)) setTags([...tags, v]);
-    setTagInput('');
+  const printReport = () => {
+    const body = document.getElementById('wg-report-render')?.innerHTML ?? '';
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${aiTitle}</title>
+<style>@media print{@page{size:A4;margin:18mm}}body{font-family:-apple-system,system-ui,sans-serif;color:#111;max-width:820px;margin:0 auto;padding:32px;line-height:1.6}
+h1,h2,h3{font-weight:800;letter-spacing:-.02em}h2{border-bottom:2px solid #FF3E00;padding-bottom:4px}h3{color:#FF3E00}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:10pt}th,td{border:1px solid #e5e7eb;padding:6px 10px;text-align:left}th{background:#faf3f0}
+.cover{background:#050505;color:#fff;padding:28px;margin:-32px -32px 24px}.brand{font-size:26pt;font-weight:900}.brand span{color:#FF3E00}</style></head><body>
+<div class="cover"><div style="font-size:8pt;letter-spacing:.25em;text-transform:uppercase;color:#FF3E00;margin-bottom:8px">Working Group · ${today}</div><div class="brand">DOINg<span>.AI</span></div><div style="color:#aaa;margin-top:4px">${aiTitle}</div></div>
+${body}</body></html>`);
+    w.document.close(); w.focus(); w.print();
   };
 
-  const handleSave = () => {
-    if (!name.trim()) return;
-    onSave({
-      id: wg?.id ?? generateId(),
-      name: name.trim(),
-      description: description.trim(),
-      objective: objective.trim(),
-      status,
-      ownerId: ownerId || undefined,
-      members,
-      tasks: wg?.tasks ?? [],
-      meetings: wg?.meetings ?? [],
-      tags,
-      createdAt: wg?.createdAt ?? now(),
-      updatedAt: now(),
-    });
-  };
-
-  const nonMembers = users.filter((u) => !members.find((m) => m.userId === u.id));
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div
-        className="bg-white dark:bg-ink-900 w-full max-w-lg max-h-[90vh] overflow-y-auto border border-neutral-200 dark:border-ink-700 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-ink-700">
-          <h2 className="text-[11px] font-bold uppercase tracking-[0.14em]">
-            {isNew ? 'New Working Group' : 'Edit Working Group'}
-          </h2>
-          <button onClick={onClose} className="text-muted hover:text-neutral-900 dark:hover:text-white"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Name *</label>
-            <input className="w-full input-base" value={name} onChange={(e) => setName(e.target.value)} placeholder="Group name" autoFocus />
-          </div>
-
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Objective</label>
-            <input className="w-full input-base" value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Core mission of this group…" />
-          </div>
-
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Description</label>
-            <textarea className="w-full input-base resize-none" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Additional context…" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Status</label>
-              <select className="w-full input-base" value={status} onChange={(e) => setStatus(e.target.value as WGStatus)}>
-                <option value="active">Active</option>
-                <option value="paused">Paused</option>
-                <option value="closed">Closed</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Owner</label>
-              <select className="w-full input-base" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-                <option value="">— None —</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Members */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-2">Members</label>
-            {members.length > 0 && (
-              <div className="space-y-1 mb-2">
-                {members.map((m) => {
-                  const u = users.find((x) => x.id === m.userId);
-                  if (!u) return null;
-                  return (
-                    <div key={m.userId} className="flex items-center gap-2 py-1 border-b border-neutral-100 dark:border-ink-800">
-                      <span className="flex-1 text-[11px] font-bold">{u.firstName} {u.lastName}</span>
-                      <select
-                        className="text-[9px] uppercase tracking-[0.1em] border border-neutral-200 dark:border-ink-600 bg-white dark:bg-ink-800 px-1 py-0.5"
-                        value={m.role}
-                        onChange={(e) => setMemberRole(m.userId, e.target.value as WGMemberRole)}
-                      >
-                        <option value="lead">Lead</option>
-                        <option value="contributor">Contributor</option>
-                        <option value="observer">Observer</option>
-                      </select>
-                      <button onClick={() => removeMember(m.userId)} className="text-muted hover:text-red-500"><X className="w-3 h-3" /></button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {nonMembers.length > 0 && (
-              <select className="w-full input-base" value="" onChange={(e) => e.target.value && addMember(e.target.value)}>
-                <option value="">+ Add member…</option>
-                {nonMembers.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
-              </select>
-            )}
-          </div>
-
-          {/* Tags */}
-          <div>
-            <label className="block text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Tags</label>
-            <div className="flex flex-wrap gap-1 mb-2">
-              {tags.map((t) => (
-                <span key={t} className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold bg-neutral-100 dark:bg-ink-700 text-muted">
-                  {t}
-                  <button onClick={() => setTags(tags.filter((x) => x !== t))}><X className="w-2.5 h-2.5" /></button>
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 input-base"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                placeholder="Add tag…"
-              />
-              <button onClick={addTag} className="btn-secondary text-[10px]">Add</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between px-6 py-4 border-t border-neutral-200 dark:border-ink-700">
-          <div>
-            {!isNew && onDelete && (
-              <button onClick={onDelete} className="text-[10px] font-bold uppercase tracking-[0.14em] text-red-500 hover:text-red-700">Delete Group</button>
-            )}
-          </div>
-          <div className="flex gap-3">
-            <button onClick={onClose} className="btn-secondary text-[10px]">Cancel</button>
-            <button onClick={handleSave} disabled={!name.trim()} className="btn-primary text-[10px]">
-              {isNew ? 'Create Group' : 'Save Changes'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   TASKS KANBAN TAB
-══════════════════════════════════════════════════ */
-const TasksTab: React.FC<{
-  wg: WorkingGroup;
-  users: User[];
-  canManage: boolean;
-  onUpdateTasks: (tasks: WGTask[]) => void;
-}> = ({ wg, users, canManage, onUpdateTasks }) => {
-  const [editingTask, setEditingTask] = useState<WGTask | null | 'new'>(null);
-  const [newInCol, setNewInCol] = useState<WGTaskStatus | null>(null);
-  const [quickTitle, setQuickTitle] = useState('');
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<WGTaskStatus | null>(null);
-
-  const tasksByCol = useMemo(() => {
-    const map: Record<WGTaskStatus, WGTask[]> = { todo: [], doing: [], review: [], done: [] };
-    wg.tasks.forEach((t) => map[t.status].push(t));
-    return map;
-  }, [wg.tasks]);
-
-  const saveTask = (task: WGTask) => {
-    const exists = wg.tasks.find((t) => t.id === task.id);
-    const next = exists ? wg.tasks.map((t) => (t.id === task.id ? task : t)) : [...wg.tasks, task];
-    onUpdateTasks(next);
-    setEditingTask(null);
-  };
-
-  const deleteTask = (id: string) => {
-    onUpdateTasks(wg.tasks.filter((t) => t.id !== id));
-    setEditingTask(null);
-  };
-
-  const quickAdd = (col: WGTaskStatus) => {
-    const t = quickTitle.trim();
-    if (!t) { setNewInCol(null); return; }
-    const task: WGTask = {
-      id: generateId(),
-      title: t,
-      description: '',
-      status: col,
-      priority: 'medium',
-      labels: [],
-      checklist: [],
-      createdAt: now(),
-      updatedAt: now(),
-    };
-    onUpdateTasks([...wg.tasks, task]);
-    setQuickTitle('');
-    setNewInCol(null);
-  };
-
-  const onDragStart = (id: string) => setDragId(id);
-  const onDragEnd = () => { setDragId(null); setDragOver(null); };
-  const onDrop = (col: WGTaskStatus) => {
-    if (!dragId) return;
-    onUpdateTasks(wg.tasks.map((t) => t.id === dragId ? { ...t, status: col, updatedAt: now() } : t));
-    setDragId(null);
-    setDragOver(null);
-  };
-
-  const assigneeName = (id?: string) => {
-    if (!id) return null;
-    const u = users.find((x) => x.id === id);
-    return u ? `${u.firstName} ${u.lastName[0]}.` : null;
-  };
-
-  return (
-    <div className="flex gap-4 overflow-x-auto pb-4 min-h-[500px]">
-      {TASK_COL.map((col) => {
-        const colTasks = tasksByCol[col.id];
-        const isOver = dragOver === col.id;
-        return (
-          <div
-            key={col.id}
-            className={`flex flex-col flex-shrink-0 w-64 ${isOver ? 'opacity-80' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(col.id); }}
-            onDragLeave={() => setDragOver(null)}
-            onDrop={() => onDrop(col.id)}
-          >
-            {/* Column header */}
-            <div className={`flex items-center justify-between px-3 py-2 border-b-2 ${TASK_COL_STYLE[col.id]} mb-3`}>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-[0.14em]">{col.label}</span>
-                <span className="text-[9px] font-mono text-muted bg-neutral-100 dark:bg-ink-700 px-1.5 py-0.5 rounded-none">
-                  {colTasks.length}
-                </span>
-              </div>
-              {canManage && (
-                <button
-                  onClick={() => { setNewInCol(col.id); setQuickTitle(''); }}
-                  className="text-muted hover:text-brand transition-colors"
-                  title="Add task"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Quick-add input */}
-            {newInCol === col.id && (
-              <div className="mb-2 p-2 border border-brand/40 bg-brand/5">
-                <input
-                  autoFocus
-                  className="w-full bg-transparent text-[11px] font-medium outline-none placeholder:text-muted"
-                  placeholder="Task title…"
-                  value={quickTitle}
-                  onChange={(e) => setQuickTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); quickAdd(col.id); }
-                    if (e.key === 'Escape') { setNewInCol(null); setQuickTitle(''); }
-                  }}
-                />
-                <div className="flex gap-2 mt-2">
-                  <button onClick={() => quickAdd(col.id)} className="text-[9px] font-bold uppercase tracking-[0.14em] text-brand">Add</button>
-                  <button onClick={() => { setNewInCol(null); setQuickTitle(''); setEditingTask('new'); }} className="text-[9px] text-muted uppercase tracking-[0.14em]">Full form</button>
-                  <button onClick={() => { setNewInCol(null); setQuickTitle(''); }} className="text-[9px] text-muted uppercase tracking-[0.14em] ml-auto">Cancel</button>
-                </div>
-              </div>
-            )}
-
-            {/* Task cards */}
-            <div className="space-y-2 flex-1">
-              {colTasks.map((task) => {
-                const done = task.checklist?.filter((c) => c.done).length ?? 0;
-                const total = task.checklist?.length ?? 0;
-                const isOverdue = task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'done';
-                return (
-                  <div
-                    key={task.id}
-                    draggable={canManage}
-                    onDragStart={() => onDragStart(task.id)}
-                    onDragEnd={onDragEnd}
-                    className={`group bg-white dark:bg-ink-800 border border-neutral-200 dark:border-ink-700 p-3 cursor-pointer hover:border-brand/50 transition-all ${dragId === task.id ? 'opacity-50' : ''}`}
-                    onClick={() => setEditingTask(task)}
-                  >
-                    <div className="flex items-start justify-between gap-1 mb-1">
-                      <span className="text-[11px] font-bold leading-tight flex-1">{task.title}</span>
-                      {canManage && (
-                        <GripVertical className="w-3 h-3 text-muted opacity-0 group-hover:opacity-100 shrink-0 mt-0.5" />
-                      )}
-                    </div>
-
-                    {task.description && (
-                      <p className="text-[10px] text-muted line-clamp-2 mb-2">{task.description}</p>
-                    )}
-
-                    {task.labels && task.labels.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {task.labels.map((l) => (
-                          <span key={l} className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-brand/10 text-brand">{l}</span>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[9px] font-bold uppercase ${PRIORITY_COLOR[task.priority]}`}>
-                          {PRIORITY_LABEL[task.priority]}
-                        </span>
-                        {total > 0 && (
-                          <span className="text-[9px] text-muted font-mono">{done}/{total}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {isOverdue && <AlertCircle className="w-3 h-3 text-red-500" />}
-                        {task.dueDate && (
-                          <span className={`text-[9px] font-mono ${isOverdue ? 'text-red-500' : 'text-muted'}`}>
-                            {task.dueDate.slice(5)}
-                          </span>
-                        )}
-                        {task.assigneeId && (
-                          <span className="text-[9px] text-muted">{assigneeName(task.assigneeId)}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {total > 0 && (
-                      <div className="mt-2 h-0.5 bg-neutral-100 dark:bg-ink-700 w-full">
-                        <div className="h-full bg-brand transition-all" style={{ width: `${(done / total) * 100}%` }} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {colTasks.length === 0 && newInCol !== col.id && (
-                <div className={`border-2 border-dashed flex items-center justify-center h-16 text-[9px] text-muted uppercase tracking-[0.14em] transition-colors ${isOver ? 'border-brand/50 bg-brand/5' : 'border-neutral-200 dark:border-ink-700'}`}>
-                  {isOver ? 'Drop here' : 'Empty'}
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Task editor modal */}
-      {editingTask !== null && (
-        <TaskModal
-          task={editingTask === 'new' ? null : editingTask}
-          wgId={wg.id}
-          users={users}
-          wgMembers={wg.members.map((m) => m.userId)}
-          onClose={() => setEditingTask(null)}
-          onSave={saveTask}
-          onDelete={editingTask !== 'new' ? () => deleteTask((editingTask as WGTask).id) : undefined}
-        />
-      )}
-    </div>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   MEETINGS TAB — session-chaining view
-══════════════════════════════════════════════════ */
-const MeetingsTab: React.FC<{
-  wg: WorkingGroup;
-  users: User[];
-  canManage: boolean;
-  onUpdateMeetings: (meetings: WGMeetingNote[]) => void;
-}> = ({ wg, users, canManage, onUpdateMeetings }) => {
-  const [editing, setEditing] = useState<WGMeetingNote | null | 'new'>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  const sorted = [...wg.meetings].sort((a, b) => b.date.localeCompare(a.date));
-
-  // All action items from all sessions that are not done — used as carry-over for new sessions
-  const openCarriedItems: WGActionItem[] = wg.meetings.flatMap((m) =>
-    (m.actionItems ?? []).filter((a) => a.status !== 'done').map((a) => ({
-      ...a,
-      carriedFromSessionId: a.carriedFromSessionId ?? m.id,
-    }))
-  );
-
-  const saveSession = (m: WGMeetingNote) => {
-    const exists = wg.meetings.find((x) => x.id === m.id);
-    const next = exists ? wg.meetings.map((x) => (x.id === m.id ? m : x)) : [...wg.meetings, m];
-    onUpdateMeetings(next);
-    setEditing(null);
-  };
-
-  const deleteSession = (id: string) => {
-    onUpdateMeetings(wg.meetings.filter((m) => m.id !== id));
-    setEditing(null);
-  };
-
-  const userName = (id: string) => {
-    const u = users.find((x) => x.id === id);
-    return u ? `${u.firstName} ${u.lastName}` : id;
-  };
-
-  const sessionOpenCount = (m: WGMeetingNote) =>
-    (m.actionItems ?? []).filter((a) => a.status !== 'done').length;
-
-  return (
-    <div>
-      {canManage && (
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-[9px] text-muted uppercase tracking-[0.14em]">
-            {sorted.length} session{sorted.length !== 1 ? 's' : ''}
-            {openCarriedItems.length > 0 && (
-              <span className="ml-2 text-amber-600 font-bold">{openCarriedItems.length} open action{openCarriedItems.length !== 1 ? 's' : ''} across sessions</span>
-            )}
-          </p>
-          <button onClick={() => setEditing('new')} className="btn-primary text-[10px] flex items-center gap-2">
-            <Plus className="w-3.5 h-3.5" /> New Session
-          </button>
-        </div>
-      )}
-
-      {sorted.length === 0 ? (
-        <div className="text-center py-16 text-muted">
-          <MessageSquare className="w-8 h-8 mx-auto mb-3 opacity-30" />
-          <p className="text-[11px] uppercase tracking-[0.14em]">No sessions logged yet</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {sorted.map((m, idx) => {
-            const isExpanded = expanded === m.id;
-            const openCount = sessionOpenCount(m);
-            const carriedCount = (m.actionItems ?? []).filter((a) => a.carriedFromSessionId).length;
-            const isMostRecent = idx === 0;
-            return (
-              <div key={m.id} className={`border bg-white dark:bg-ink-900 ${isMostRecent ? 'border-brand/40' : 'border-neutral-200 dark:border-ink-700'}`}>
-                <button
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-neutral-50 dark:hover:bg-ink-800 transition-colors"
-                  onClick={() => setExpanded(isExpanded ? null : m.id)}
-                >
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {isMostRecent && (
-                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-brand text-white">Latest</span>
-                    )}
-                    <span className="text-[9px] font-mono text-muted">{fmtDate(m.date)}</span>
-                    <span className="text-[11px] font-bold">{m.title}</span>
-                    <span className="text-[9px] text-muted">{m.attendeeIds.length} attendees</span>
-                    {m.decisions.length > 0 && (
-                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-brand/10 text-brand">
-                        {m.decisions.length} decision{m.decisions.length > 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {openCount > 0 && (
-                      <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-amber-100 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
-                        {openCount} open action{openCount > 1 ? 's' : ''}
-                      </span>
-                    )}
-                    {carriedCount > 0 && (
-                      <span className="flex items-center gap-1 text-[8px] text-muted">
-                        <RefreshCw className="w-2.5 h-2.5" /> {carriedCount} carried
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {canManage && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditing(m); }}
-                        className="text-muted hover:text-brand"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    <ChevronDown className={`w-4 h-4 text-muted transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                  </div>
-                </button>
-
-                {isExpanded && (
-                  <div className="border-t border-neutral-100 dark:border-ink-700 px-4 py-4 space-y-4">
-                    {m.attendeeIds.length > 0 && (
-                      <div>
-                        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1">Attendees</p>
-                        <p className="text-[11px]">{m.attendeeIds.map(userName).join(', ')}</p>
-                      </div>
-                    )}
-                    {m.agenda && (
-                      <div>
-                        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1">Agenda</p>
-                        <p className="text-[11px] text-muted whitespace-pre-wrap">{m.agenda}</p>
-                      </div>
-                    )}
-                    {m.notes && (
-                      <div>
-                        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1">Notes</p>
-                        <p className="text-[11px] whitespace-pre-wrap">{m.notes}</p>
-                      </div>
-                    )}
-                    {m.decisions.length > 0 && (
-                      <div>
-                        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-1">Key Decisions</p>
-                        <ul className="space-y-0.5">
-                          {m.decisions.map((d, i) => (
-                            <li key={i} className="flex items-start gap-2 text-[11px]">
-                              <span className="text-brand mt-0.5">•</span>
-                              <span>{d}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {(m.actionItems ?? []).length > 0 && (
-                      <div>
-                        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted mb-2">Action Items</p>
-                        {/* Carried-over section */}
-                        {(m.actionItems ?? []).filter((a) => a.carriedFromSessionId).length > 0 && (
-                          <div className="mb-2 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-700/40 p-2 rounded">
-                            <p className="text-[8px] font-bold uppercase tracking-[0.14em] text-amber-600 mb-1.5">
-                              <RefreshCw className="w-2.5 h-2.5 inline mr-1" />Carried over
-                            </p>
-                            <div className="space-y-1">
-                              {(m.actionItems ?? []).filter((a) => a.carriedFromSessionId).map((a) => (
-                                <div key={a.id} className="flex items-center gap-2">
-                                  {ACTION_STATUS_ICON[a.status]}
-                                  <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
-                                  {a.ownerId && (
-                                    <span className="text-[9px] text-muted">
-                                      {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
-                                    </span>
-                                  )}
-                                  {a.dueDate && <span className="text-[9px] font-mono text-muted">{a.dueDate.slice(5)}</span>}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {/* New actions from this session */}
-                        <div className="space-y-1">
-                          {(m.actionItems ?? []).filter((a) => !a.carriedFromSessionId).map((a) => (
-                            <div key={a.id} className="flex items-center gap-2 py-0.5">
-                              {ACTION_STATUS_ICON[a.status]}
-                              <span className={`flex-1 text-[11px] ${a.status === 'done' ? 'line-through text-muted' : ''}`}>{a.text}</span>
-                              {a.ownerId && (
-                                <span className="text-[9px] text-muted">
-                                  {(() => { const u = users.find((x) => x.id === a.ownerId); return u ? u.firstName : ''; })()}
-                                </span>
-                              )}
-                              {a.dueDate && <span className="text-[9px] font-mono text-muted">{a.dueDate.slice(5)}</span>}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {editing !== null && (
-        <SessionEditor
-          session={editing === 'new' ? null : editing}
-          carriedItems={editing === 'new' ? openCarriedItems : []}
-          users={users}
-          wgMembers={wg.members.map((m) => m.userId)}
-          onClose={() => setEditing(null)}
-          onSave={saveSession}
-          onDelete={editing !== 'new' ? () => deleteSession((editing as WGMeetingNote).id) : undefined}
-        />
-      )}
-    </div>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   OVERVIEW TAB
-══════════════════════════════════════════════════ */
-const OverviewTab: React.FC<{
-  wg: WorkingGroup;
-  users: User[];
-}> = ({ wg, users }) => {
-  const totalTasks = wg.tasks.length;
-  const doneTasks = wg.tasks.filter((t) => t.status === 'done').length;
-  const inProgress = wg.tasks.filter((t) => t.status === 'doing').length;
-  const blocked = wg.tasks.filter((t) => t.status === 'review').length;
-  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
-
-  return (
-    <div className="space-y-6">
-      {/* Objective */}
-      {wg.objective && (
-        <div className="p-4 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Objective</p>
-          <p className="text-[13px]">{wg.objective}</p>
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Total Tasks', value: totalTasks, color: 'text-neutral-900 dark:text-white' },
-          { label: 'In Progress', value: inProgress, color: 'text-blue-500' },
-          { label: 'In Review', value: blocked, color: 'text-amber-500' },
-          { label: 'Done', value: doneTasks, color: 'text-emerald-500' },
-        ].map((s) => (
-          <div key={s.label} className="p-4 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900 text-center">
-            <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
-            <p className="text-[9px] uppercase tracking-[0.14em] text-muted mt-1">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Progress */}
-      {totalTasks > 0 && (
-        <div className="p-4 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted">Overall Progress</p>
-            <span className="text-[11px] font-bold text-brand">{progress}%</span>
-          </div>
-          <div className="h-2 bg-neutral-100 dark:bg-ink-700 w-full">
-            <div className="h-full bg-brand transition-all duration-500" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-      )}
-
-      {/* Members */}
-      <div className="p-4 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
-        <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-3">Members ({wg.members.length})</p>
-        {wg.members.length === 0 ? (
-          <p className="text-[11px] text-muted">No members yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {wg.members.map((m) => {
-              const u = users.find((x) => x.id === m.userId);
-              if (!u) return null;
-              return (
-                <div key={m.userId} className="flex items-center gap-3">
-                  <div
-                    className="w-7 h-7 flex items-center justify-center text-[9px] font-bold uppercase text-white shrink-0"
-                    style={{ backgroundColor: u.avatarColor ?? '#FF3E00' }}
-                  >
-                    {u.firstName.charAt(0)}{u.lastName.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-bold truncate">{u.firstName} {u.lastName}</p>
-                    <p className="text-[9px] text-muted uppercase tracking-[0.1em]">{u.functionTitle} — {u.team}</p>
-                  </div>
-                  <span className={`text-[9px] font-bold uppercase tracking-[0.12em] px-2 py-0.5 ${m.role === 'lead' ? 'bg-brand/10 text-brand' : 'text-muted bg-neutral-100 dark:bg-ink-700'}`}>
-                    {MEMBER_ROLE_LABEL[m.role]}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Tags */}
-      {wg.tags.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {wg.tags.map((t) => (
-            <span key={t} className="px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] bg-neutral-100 dark:bg-ink-700 text-muted">
-              {t}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Session Timeline */}
-      {wg.meetings.length > 0 && (
-        <div className="p-4 border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
-          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-4">Sessions Timeline</p>
-          <div className="relative pl-5">
-            <div className="absolute left-2 top-0 bottom-0 w-px bg-neutral-200 dark:bg-ink-700" />
-            <div className="space-y-4">
-              {[...wg.meetings].sort((a, b) => a.date.localeCompare(b.date)).map((m, i, arr) => {
-                const openCount = (m.actionItems ?? []).filter((a) => a.status !== 'done').length;
-                const doneCount = (m.actionItems ?? []).filter((a) => a.status === 'done').length;
-                const isLast = i === arr.length - 1;
-                return (
-                  <div key={m.id} className="relative flex items-start gap-3">
-                    <div className={`absolute -left-3 top-1 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-ink-900 ${isLast ? 'bg-brand' : 'bg-neutral-400 dark:bg-ink-500'}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[9px] font-mono text-muted">{fmtDate(m.date)}</span>
-                        <span className="text-[11px] font-bold">{m.title}</span>
-                        {isLast && <span className="px-1.5 py-0.5 text-[8px] font-bold uppercase bg-brand text-white">Latest</span>}
-                      </div>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className="text-[9px] text-muted">{m.attendeeIds.length} attendees</span>
-                        {m.decisions.length > 0 && <span className="text-[9px] text-brand font-bold">{m.decisions.length} decisions</span>}
-                        {openCount > 0 && <span className="text-[9px] text-amber-600 font-bold">{openCount} open</span>}
-                        {doneCount > 0 && <span className="text-[9px] text-emerald-600">{doneCount} closed</span>}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   WG DETAIL — hero + tabs
-══════════════════════════════════════════════════ */
-type WGTab = 'tasks' | 'meetings' | 'overview';
-
-const WGDetail: React.FC<{
-  wg: WorkingGroup;
-  users: User[];
-  canManage: boolean;
-  onBack: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onUpdateTasks: (tasks: WGTask[]) => void;
-  onUpdateMeetings: (meetings: WGMeetingNote[]) => void;
-}> = ({ wg, users, canManage, onBack, onEdit, onDelete, onUpdateTasks, onUpdateMeetings }) => {
-  const [tab, setTab] = useState<WGTab>('tasks');
-  const owner = users.find((u) => u.id === wg.ownerId);
-  const totalTasks = wg.tasks.length;
-  const doneTasks = wg.tasks.filter((t) => t.status === 'done').length;
-  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
-
-  const TABS: { id: WGTab; label: string }[] = [
-    { id: 'tasks', label: `Tasks (${totalTasks})` },
-    { id: 'meetings', label: `Meetings (${wg.meetings.length})` },
-    { id: 'overview', label: 'Overview' },
-  ];
-
-  return (
-    <div className="space-y-6">
-      {/* Hero header */}
-      <div className="border border-neutral-200 dark:border-ink-700 bg-white dark:bg-ink-900">
-        <div className="px-6 py-4 border-b border-neutral-200 dark:border-ink-700 flex items-center gap-3">
-          <button onClick={onBack} className="text-muted hover:text-brand transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div className={`w-2 h-2 rounded-full ${STATUS_COLOR[wg.status]}`} />
-          <h1 className="text-lg font-bold flex-1 truncate">{wg.name}</h1>
-          <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted">
-            {STATUS_LABEL[wg.status]}
-          </span>
-          {canManage && (
-            <>
-              <button onClick={onEdit} className="text-muted hover:text-brand transition-colors" title="Edit">
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button onClick={onDelete} className="text-muted hover:text-red-500 transition-colors" title="Delete">
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </>
-          )}
-        </div>
-
-        <div className="px-6 py-4 grid grid-cols-3 gap-6">
-          <div>
-            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Owner</p>
-            <p className="text-[11px] font-bold">{owner ? `${owner.firstName} ${owner.lastName}` : '—'}</p>
-          </div>
-          <div>
-            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Members</p>
-            <div className="flex items-center gap-1">
-              {wg.members.slice(0, 5).map((m) => {
-                const u = users.find((x) => x.id === m.userId);
-                if (!u) return null;
-                return (
-                  <div
-                    key={m.userId}
-                    title={`${u.firstName} ${u.lastName}`}
-                    className="w-6 h-6 flex items-center justify-center text-[8px] font-bold uppercase text-white"
-                    style={{ backgroundColor: u.avatarColor ?? '#FF3E00' }}
-                  >
-                    {u.firstName[0]}{u.lastName[0]}
-                  </div>
-                );
-              })}
-              {wg.members.length > 5 && (
-                <span className="text-[9px] text-muted ml-1">+{wg.members.length - 5}</span>
-              )}
-              {wg.members.length === 0 && <span className="text-[11px] text-muted">—</span>}
-            </div>
-          </div>
-          <div>
-            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted mb-1">Progress</p>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-neutral-100 dark:bg-ink-700">
-                <div className="h-full bg-brand" style={{ width: `${progress}%` }} />
-              </div>
-              <span className="text-[10px] font-bold text-brand">{progress}%</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-neutral-200 dark:border-ink-700">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] border-b-2 transition-colors -mb-px ${
-              tab === t.id
-                ? 'border-brand text-brand'
-                : 'border-transparent text-muted hover:text-neutral-900 dark:hover:text-white'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {tab === 'tasks' && (
-        <TasksTab wg={wg} users={users} canManage={canManage} onUpdateTasks={onUpdateTasks} />
-      )}
-      {tab === 'meetings' && (
-        <MeetingsTab wg={wg} users={users} canManage={canManage} onUpdateMeetings={onUpdateMeetings} />
-      )}
-      {tab === 'overview' && (
-        <OverviewTab wg={wg} users={users} />
-      )}
-    </div>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   WG CARD
-══════════════════════════════════════════════════ */
-const WGCard: React.FC<{
-  wg: WorkingGroup;
-  users: User[];
-  onClick: () => void;
-}> = ({ wg, users, onClick }) => {
-  const totalTasks = wg.tasks.length;
-  const doneTasks = wg.tasks.filter((t) => t.status === 'done').length;
-  const inProgress = wg.tasks.filter((t) => t.status === 'doing' || t.status === 'review').length;
-  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
-
-  return (
-    <button
-      onClick={onClick}
-      className="group w-full text-left bg-white dark:bg-ink-900 border border-neutral-200 dark:border-ink-700 hover:border-brand/50 hover:shadow-sm transition-all"
-    >
-      <div className={`h-1 w-full ${STATUS_COLOR[wg.status]}`} />
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="text-[12px] font-bold group-hover:text-brand transition-colors leading-tight">{wg.name}</h3>
-          <span className={`text-[8px] font-bold uppercase tracking-[0.14em] px-1.5 py-0.5 shrink-0 ${
-            wg.status === 'active' ? 'bg-emerald-500/10 text-emerald-600' :
-            wg.status === 'paused' ? 'bg-amber-500/10 text-amber-600' :
-            'bg-neutral-100 text-muted'
-          }`}>
-            {STATUS_LABEL[wg.status]}
-          </span>
-        </div>
-
-        {wg.objective && (
-          <p className="text-[10px] text-muted line-clamp-2 mb-3">{wg.objective}</p>
-        )}
-
-        {/* Progress bar */}
-        <div className="mb-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] text-muted">{doneTasks}/{totalTasks} tasks</span>
-            {inProgress > 0 && <span className="text-[9px] text-blue-500">{inProgress} active</span>}
-          </div>
-          <div className="h-1 bg-neutral-100 dark:bg-ink-700 w-full">
-            <div className="h-full bg-brand transition-all" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
-
-        {/* Members + meta */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-0.5">
-            {wg.members.slice(0, 4).map((m) => {
-              const u = users.find((x) => x.id === m.userId);
-              if (!u) return null;
-              return (
-                <div
-                  key={m.userId}
-                  title={`${u.firstName} ${u.lastName}`}
-                  className="w-5 h-5 flex items-center justify-center text-[7px] font-bold uppercase text-white"
-                  style={{ backgroundColor: u.avatarColor ?? '#FF3E00' }}
-                >
-                  {u.firstName[0]}{u.lastName[0]}
-                </div>
-              );
-            })}
-            {wg.members.length > 4 && (
-              <span className="text-[9px] text-muted ml-1">+{wg.members.length - 4}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1 text-muted">
-            <ChevronRight className="w-3 h-3 group-hover:text-brand transition-colors" />
-          </div>
-        </div>
-
-        {wg.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {wg.tags.slice(0, 3).map((t) => (
-              <span key={t} className="px-1.5 py-0.5 text-[8px] uppercase bg-neutral-100 dark:bg-ink-700 text-muted">{t}</span>
-            ))}
-          </div>
-        )}
-      </div>
-    </button>
-  );
-};
-
-/* ══════════════════════════════════════════════════
-   MAIN VIEW
-══════════════════════════════════════════════════ */
-export const WorkingGroupsView: React.FC<ViewProps> = ({ state, currentUser, update }) => {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<WGStatus | 'all'>('all');
-  const [editorWg, setEditorWg] = useState<WorkingGroup | null | 'new'>(null);
-
-  const canManage = currentUser.role === 'admin' || currentUser.role === 'manager';
-  const wgs = state.workingGroups ?? [];
-
-  const filtered = useMemo(() => {
-    if (filter === 'all') return wgs;
-    return wgs.filter((wg) => wg.status === filter);
-  }, [wgs, filter]);
-
-  const selected = useMemo(() => wgs.find((wg) => wg.id === selectedId) ?? null, [wgs, selectedId]);
-
-  const updateWGs = (fn: (wgs: WorkingGroup[]) => WorkingGroup[]) =>
-    update((s) => ({ ...s, workingGroups: fn(s.workingGroups ?? []) }));
-
-  const saveWG = (wg: WorkingGroup) => {
-    updateWGs((prev) => {
-      const exists = prev.find((x) => x.id === wg.id);
-      return exists ? prev.map((x) => (x.id === wg.id ? wg : x)) : [...prev, wg];
-    });
-    setEditorWg(null);
-    if (!selected) setSelectedId(wg.id);
-  };
-
-  const deleteWG = (id: string) => {
-    updateWGs((prev) => prev.filter((x) => x.id !== id));
-    setSelectedId(null);
-  };
-
-  const updateTasks = (wgId: string, tasks: WGTask[]) =>
-    updateWGs((prev) => prev.map((x) => (x.id === wgId ? { ...x, tasks, updatedAt: now() } : x)));
-
-  const updateMeetings = (wgId: string, meetings: WGMeetingNote[]) =>
-    updateWGs((prev) => prev.map((x) => (x.id === wgId ? { ...x, meetings, updatedAt: now() } : x)));
-
-  const FILTER_TABS: { id: WGStatus | 'all'; label: string }[] = [
-    { id: 'all', label: `All (${wgs.length})` },
-    { id: 'active', label: `Active (${wgs.filter((w) => w.status === 'active').length})` },
-    { id: 'paused', label: `Paused (${wgs.filter((w) => w.status === 'paused').length})` },
-    { id: 'closed', label: `Closed (${wgs.filter((w) => w.status === 'closed').length})` },
-  ];
-
-  /* ── Detail view ── */
-  if (selected) {
+  // ── render: empty state ──────────────────────────────────────────────
+  if (groups.length === 0) {
     return (
-      <div>
-        <WGDetail
-          wg={selected}
-          users={state.users}
-          canManage={canManage}
-          onBack={() => setSelectedId(null)}
-          onEdit={() => setEditorWg(selected)}
-          onDelete={() => { if (confirm(`Delete "${selected.name}"?`)) deleteWG(selected.id); }}
-          onUpdateTasks={(tasks) => updateTasks(selected.id, tasks)}
-          onUpdateMeetings={(meetings) => updateMeetings(selected.id, meetings)}
-        />
-
-        {editorWg !== null && (
-          <WGEditor
-            wg={editorWg === 'new' ? null : editorWg}
-            users={state.users}
-            onClose={() => setEditorWg(null)}
-            onSave={saveWG}
-            onDelete={editorWg !== 'new' ? () => { deleteWG((editorWg as WorkingGroup).id); setEditorWg(null); } : undefined}
-          />
-        )}
+      <div className="max-w-7xl mx-auto animate-fade-in">
+        {editingGroup && renderGroupModal()}
+        <div className="surface border p-12 text-center max-w-lg mx-auto mt-10">
+          <div className="w-20 h-20 bg-brand/10 flex items-center justify-center mx-auto mb-6">
+            <Folder className="w-10 h-10 text-brand" />
+          </div>
+          <h2 className="display-xl mb-3">Working Groups</h2>
+          <p className="text-sm text-muted mb-8 leading-relaxed">
+            Organise continuous work sessions, track long-running topics and keep a history of decisions and actions.
+          </p>
+          <button onClick={handleCreateGroup} className="inline-flex items-center gap-2 px-6 py-3 bg-brand text-white text-[11px] font-bold uppercase tracking-[0.16em] hover:bg-brand/90 transition-colors">
+            <Plus className="w-4 h-4" /> Create first group
+          </button>
+        </div>
       </div>
     );
   }
 
-  /* ── List view ── */
+  // ── render: main ─────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="display-lg">Working Groups</h1>
-          <p className="text-[11px] text-muted mt-1">Cross-functional groups, tasks and decisions</p>
-        </div>
-        {canManage && (
-          <button onClick={() => setEditorWg('new')} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> New Group
+    <div className="flex gap-5 max-w-[1500px] mx-auto h-[calc(100vh-7rem)] animate-fade-in">
+      {editingGroup && renderGroupModal()}
+      {editingSession && renderSessionModal()}
+      {actionInEdit && renderActionModal()}
+      {aiOpen && renderAiModal()}
+
+      {/* Sidebar — group list */}
+      <div className="w-72 shrink-0 surface border flex flex-col overflow-hidden">
+        <div className="p-4 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between">
+          <h2 className="text-[11px] font-black uppercase tracking-[0.16em]">Working Groups</h2>
+          <button onClick={handleCreateGroup} title="New group" className="w-8 h-8 flex items-center justify-center bg-brand text-white hover:bg-brand/90 transition-colors">
+            <Plus className="w-4 h-4" />
           </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {groups.map((g) => {
+            const active = g.id === selectedGroupId;
+            return (
+              <button key={g.id} onClick={() => setSelectedGroupId(g.id)}
+                className={`w-full text-left p-3 border transition-colors ${active ? 'border-brand bg-brand/5' : 'border-transparent hover:bg-neutral-100 dark:hover:bg-ink-700'}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className={`text-[13px] font-bold leading-snug ${active ? 'text-brand' : ''}`}>{g.name}</h3>
+                  {hasBlocked(g) && <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />}
+                </div>
+                {g.projectId && (
+                  <p className="text-[10px] text-muted flex items-center gap-1 mt-1 truncate"><Folder className="w-3 h-3" /> {projectName(g.projectId)}</p>
+                )}
+                <p className="text-[10px] text-muted mt-1">{(g.meetings ?? []).length} session{(g.meetings ?? []).length !== 1 ? 's' : ''}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Main — selected group */}
+      <div className="flex-1 surface border flex flex-col overflow-hidden min-w-0">
+        {selectedGroup ? (
+          <>
+            <div className="p-5 border-b border-neutral-200 dark:border-ink-600 flex items-start justify-between gap-3 surface-flat">
+              <div className="min-w-0">
+                <h2 className="text-xl font-black uppercase tracking-tight truncate">{selectedGroup.name}</h2>
+                <div className="flex gap-4 text-[11px] text-muted mt-1">
+                  {selectedGroup.projectId && <span className="flex items-center gap-1"><Folder className="w-3.5 h-3.5" /> {projectName(selectedGroup.projectId)}</span>}
+                  <span className="flex items-center gap-1"><UsersIcon className="w-3.5 h-3.5" /> {selectedGroup.members.length} member{selectedGroup.members.length !== 1 ? 's' : ''}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                <button onClick={() => setGroupByCategory((v) => !v)} title="Group actions by category"
+                  className={`flex items-center gap-1.5 px-2.5 h-8 text-[10px] font-bold uppercase tracking-[0.12em] border transition-colors ${groupByCategory ? 'border-brand text-brand' : 'border-neutral-300 dark:border-ink-600 text-muted hover:border-brand hover:text-brand'}`}>
+                  {groupByCategory ? <Layers className="w-3.5 h-3.5" /> : <List className="w-3.5 h-3.5" />} {groupByCategory ? 'Grouped' : 'List'}
+                </button>
+                {state.llmConfig?.provider && (
+                  <>
+                    <button onClick={() => runReport(false)} className="flex items-center gap-1.5 px-2.5 h-8 text-[10px] font-bold uppercase tracking-[0.12em] border border-neutral-300 dark:border-ink-600 text-brand hover:border-brand transition-colors"><FileText className="w-3.5 h-3.5" /> Full report</button>
+                    <button onClick={() => runReport(true)} className="flex items-center gap-1.5 px-2.5 h-8 text-[10px] font-bold uppercase tracking-[0.12em] border border-neutral-300 dark:border-ink-600 text-purple-500 hover:border-purple-500 transition-colors"><Sparkles className="w-3.5 h-3.5" /> Last session</button>
+                  </>
+                )}
+                {canEdit && (
+                  <>
+                    <button onClick={() => setEditingGroup(selectedGroup)} title="Configure" className="w-8 h-8 flex items-center justify-center text-muted hover:text-brand transition-colors"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => deleteGroup(selectedGroup.id)} title="Delete group" className="w-8 h-8 flex items-center justify-center text-muted hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => handleCreateSession(selectedGroup)} className="flex items-center gap-1.5 px-3 h-8 text-[10px] font-bold uppercase tracking-[0.12em] bg-brand text-white hover:bg-brand/90 transition-colors ml-1"><Plus className="w-3.5 h-3.5" /> New session</button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Timeline */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {sortedSessions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-muted">
+                  <Clock className="w-12 h-12 mb-3 opacity-20" />
+                  <p className="text-sm">No sessions yet.</p>
+                  {canEdit && <p className="text-xs">Create a session to start tracking.</p>}
+                </div>
+              ) : (
+                <div className="relative pl-6 space-y-5 before:absolute before:left-[7px] before:top-2 before:bottom-2 before:w-0.5 before:bg-neutral-200 dark:before:bg-ink-600">
+                  {sortedSessions.map((s) => (
+                    <div key={s.id} className="relative">
+                      <div className="absolute -left-6 top-1.5 w-3.5 h-3.5 rounded-full bg-brand border-2 border-white dark:border-ink-900" />
+                      <div className="surface-flat border p-4">
+                        <div className="flex items-center justify-between mb-3 pb-2 border-b border-neutral-200 dark:border-ink-600">
+                          <time className="text-[12px] font-bold text-brand flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> {s.date}</time>
+                          {canEdit && <button onClick={() => handleEditSession(selectedGroup, s)} className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted hover:text-brand">Edit</button>}
+                        </div>
+
+                        {s.notes && <p className="text-[13px] leading-relaxed whitespace-pre-wrap mb-3">{s.notes}</p>}
+
+                        {s.decisions?.length > 0 && (
+                          <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-amber-700 dark:text-amber-400 flex items-center gap-1 mb-1.5"><Gavel className="w-3 h-3" /> Key decisions</p>
+                            <ul className="space-y-1">
+                              {s.decisions.map((d, i) => <li key={i} className="text-[12px] flex gap-2"><span className="text-amber-500">•</span> {d}</li>)}
+                            </ul>
+                          </div>
+                        )}
+
+                        {(s.checklist?.length ?? 0) > 0 && (
+                          <div className="mb-3 space-y-1">
+                            {s.checklist!.map((c) => (
+                              <div key={c.id} className="text-[12px] flex items-center gap-2 bg-neutral-50 dark:bg-ink-800/50 px-2 py-1">
+                                {c.done ? <CheckSquare className="w-3.5 h-3.5 text-emerald-500" /> : <span className="w-3.5 h-3.5 border border-neutral-400" />}
+                                <span className={c.done ? 'line-through opacity-60' : ''}>{c.text}</span>
+                                {c.isUrgent && <Siren className="w-3.5 h-3.5 text-red-500 ml-auto" />}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {(s.actionItems?.length ?? 0) > 0 && (
+                          <div className="bg-neutral-50 dark:bg-ink-800/50 border border-neutral-200 dark:border-ink-600 p-3">
+                            <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center gap-1 mb-2"><CheckSquare className="w-3 h-3" /> Actions</p>
+                            {renderActionList(s.actionItems!)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted">
+            <Folder className="w-16 h-16 mb-3 opacity-10" />
+            <p className="text-sm">Select a working group.</p>
+          </div>
         )}
       </div>
-
-      {/* Filter tabs */}
-      <div className="flex gap-0 border-b border-neutral-200 dark:border-ink-700">
-        {FILTER_TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setFilter(t.id)}
-            className={`px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em] border-b-2 transition-colors -mb-px ${
-              filter === t.id
-                ? 'border-brand text-brand'
-                : 'border-transparent text-muted hover:text-neutral-900 dark:hover:text-white'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Grid */}
-      {filtered.length === 0 ? (
-        <div className="text-center py-24">
-          <Network className="w-10 h-10 mx-auto mb-4 text-muted opacity-30" />
-          <p className="text-[11px] uppercase tracking-[0.14em] text-muted mb-4">
-            {filter === 'all' ? 'No working groups yet' : `No ${filter} groups`}
-          </p>
-          {canManage && filter === 'all' && (
-            <button onClick={() => setEditorWg('new')} className="btn-primary text-[10px] flex items-center gap-2 mx-auto">
-              <Plus className="w-3.5 h-3.5" /> Create First Group
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((wg) => (
-            <WGCard key={wg.id} wg={wg} users={state.users} onClick={() => setSelectedId(wg.id)} />
-          ))}
-        </div>
-      )}
-
-      {/* Editor modal */}
-      {editorWg !== null && (
-        <WGEditor
-          wg={editorWg === 'new' ? null : editorWg}
-          users={state.users}
-          onClose={() => setEditorWg(null)}
-          onSave={saveWG}
-        />
-      )}
     </div>
   );
+
+  // ── action list (view mode, optional category grouping) ──────────────
+  function renderActionList(items: WGActionItem[]) {
+    const line = (a: WGActionItem) => {
+      const isExternal = a.ownerId && !state.users.some((u) => u.id === a.ownerId);
+      const owner = userName(a.ownerId) ?? a.ownerId;
+      return (
+        <li key={a.id} className="flex items-start gap-2 border border-neutral-200 dark:border-ink-600 p-2 bg-white dark:bg-ink-800">
+          <div className="flex flex-col items-center gap-1">
+            <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase w-16 text-center ${statusColor(a.status)}`}>{STATUS_LABEL[a.status]}</span>
+            {a.priority && a.priority !== 'medium' && <Flag className={`w-3 h-3 ${priorityColor(a.priority)}`} />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              {!groupByCategory && a.category && <span className="text-[8px] font-bold uppercase tracking-wide bg-neutral-100 dark:bg-ink-700 text-muted px-1.5">{a.category}</span>}
+              <span className={`text-[12px] font-medium truncate ${a.status === 'done' ? 'line-through opacity-60' : ''}`}>{a.text}</span>
+            </div>
+            <div className="flex gap-2 mt-1 items-center text-[10px] text-muted">
+              {a.ownerId && <span className={`px-1.5 py-0.5 ${isExternal ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-neutral-100 dark:bg-ink-700'}`}>{isExternal ? <UserPlus className="w-2.5 h-2.5 inline mr-1" /> : '@'}{owner}</span>}
+              {a.dueDate && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {a.dueDate}</span>}
+            </div>
+          </div>
+        </li>
+      );
+    };
+    if (groupByCategory) {
+      const grouped: Record<string, WGActionItem[]> = {};
+      items.forEach((a) => { const c = a.category || 'General'; (grouped[c] ||= []).push(a); });
+      return (
+        <div className="space-y-3">
+          {Object.entries(grouped).map(([cat, listItems]) => (
+            <div key={cat}>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-brand border-b border-brand/20 pb-0.5 mb-1.5">{cat}</p>
+              <ul className="space-y-1.5">{listItems.map(line)}</ul>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return <ul className="space-y-1.5">{items.map(line)}</ul>;
+  }
+
+  // ── group config modal ───────────────────────────────────────────────
+  function renderGroupModal() {
+    if (!editingGroup) return null;
+    const g = editingGroup;
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="surface border w-full max-w-lg p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-lg font-black uppercase tracking-tight">Configure group</h3>
+            <button onClick={() => setEditingGroup(null)} className="w-8 h-8 flex items-center justify-center hover:text-brand"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Title</label>
+              <input value={g.name} onChange={(e) => setEditingGroup({ ...g, name: e.target.value })}
+                className="w-full h-9 px-3 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand" />
+            </div>
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Linked project (optional)</label>
+              <select value={g.projectId || ''} onChange={(e) => setEditingGroup({ ...g, projectId: e.target.value || undefined })}
+                className="w-full h-9 px-3 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand">
+                <option value="">— Standalone —</option>
+                {state.projects.filter((p) => !p.isArchived).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Members (can edit)</label>
+              <div className="max-h-40 overflow-y-auto border border-neutral-300 dark:border-ink-600 p-2 space-y-1">
+                {state.users.map((u) => {
+                  const on = g.members.some((m) => m.userId === u.id);
+                  return (
+                    <label key={u.id} className="flex items-center gap-2 text-[12px] cursor-pointer py-0.5">
+                      <input type="checkbox" checked={on} onChange={() => setEditingGroup({
+                        ...g,
+                        members: on ? g.members.filter((m) => m.userId !== u.id) : [...g.members, { userId: u.id, role: 'contributor' }],
+                      })} />
+                      {u.firstName} {u.lastName}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-6">
+            <button onClick={() => setEditingGroup(null)} className="px-4 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 text-muted hover:border-neutral-400">Cancel</button>
+            <button onClick={saveGroup} className="px-5 h-9 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90">Save</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── session editor modal (4 tabs) ─────────────────────────────────────
+  function renderSessionModal() {
+    if (!editingSession) return null;
+    const s = editingSession.session;
+    const tab = (id: typeof activeTab, label: string) => (
+      <button onClick={() => setActiveTab(id)}
+        className={`flex-1 py-3 text-[11px] font-bold uppercase tracking-[0.12em] border-b-2 transition-colors ${activeTab === id ? 'border-brand text-brand' : 'border-transparent text-muted hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+        {label}
+      </button>
+    );
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="surface border w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden">
+          <div className="p-4 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between surface-flat">
+            <div>
+              <h3 className="text-lg font-black uppercase tracking-tight">Edit session</h3>
+              <input type="date" value={s.date} onChange={(e) => patchSession({ date: e.target.value })}
+                className="bg-transparent text-[12px] text-muted font-medium focus:outline-none mt-0.5" />
+            </div>
+            <button onClick={() => setEditingSession(null)} className="w-9 h-9 flex items-center justify-center hover:text-brand"><X className="w-5 h-5" /></button>
+          </div>
+
+          <div className="flex border-b border-neutral-200 dark:border-ink-600">
+            {tab('notes', 'Notes')}
+            {tab('decisions', `Decisions (${s.decisions?.length ?? 0})`)}
+            {tab('actions', `Actions (${s.actionItems?.length ?? 0})`)}
+            {tab('checklist', `Checklist (${s.checklist?.length ?? 0})`)}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5">
+            {activeTab === 'notes' && (
+              <textarea value={s.notes} onChange={(e) => patchSession({ notes: e.target.value })}
+                placeholder="Meeting minutes — key points, context, discussion…"
+                className="w-full h-full min-h-[300px] p-4 text-[13px] leading-relaxed border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand resize-none" />
+            )}
+
+            {activeTab === 'decisions' && (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <input value={newDecisionText} onChange={(e) => setNewDecisionText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addDecision()}
+                    placeholder="Record a key decision…" className="flex-1 h-9 px-3 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand" />
+                  <button onClick={addDecision} className="px-4 text-[10px] font-bold uppercase tracking-[0.12em] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">Add</button>
+                </div>
+                {(s.decisions ?? []).map((d, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30">
+                    <Gavel className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span className="flex-1 text-[12px]">{d}</span>
+                    <button onClick={() => deleteDecision(i)} className="text-muted hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+                {(s.decisions?.length ?? 0) === 0 && <p className="text-center text-[12px] text-muted italic py-8">No decisions recorded.</p>}
+              </div>
+            )}
+
+            {activeTab === 'actions' && (
+              <div className="space-y-3">
+                <button onClick={() => openActionModal(-1)} className="w-full py-2 border-2 border-dashed border-brand/40 text-brand text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-brand/5 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> Add action</button>
+                {(s.actionItems ?? []).map((a, idx) => {
+                  const isExternal = a.ownerId && !state.users.some((u) => u.id === a.ownerId);
+                  return (
+                    <div key={a.id} onClick={() => openActionModal(idx, a)} className="border border-neutral-200 dark:border-ink-600 p-3 bg-white dark:bg-ink-800 hover:border-brand transition-colors cursor-pointer group">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-1.5 py-0.5 text-[8px] font-bold uppercase ${statusColor(a.status)}`}>{STATUS_LABEL[a.status]}</span>
+                            {a.priority === 'urgent' && <AlertTriangle className="w-3 h-3 text-red-500" />}
+                            <span className="text-[12px] font-medium truncate">{a.text || <span className="italic text-muted">Untitled</span>}</span>
+                          </div>
+                          <div className="flex gap-2 items-center text-[10px] text-muted">
+                            <span className={isExternal ? 'text-amber-600 dark:text-amber-400' : ''}><UserPlus className="w-3 h-3 inline mr-1" />{userName(a.ownerId) ?? a.ownerId ?? 'Unassigned'}</span>
+                            {a.dueDate && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {a.dueDate}</span>}
+                            {a.category && <span className="bg-neutral-100 dark:bg-ink-700 px-1.5">{a.category}</span>}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); deleteAction(idx); }} className="text-muted hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 className="w-4 h-4" /></button>
+                          <Edit2 className="w-3.5 h-3.5 text-muted opacity-0 group-hover:opacity-100" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {(s.actionItems?.length ?? 0) === 0 && <p className="text-center text-[12px] text-muted italic py-4">No actions defined.</p>}
+              </div>
+            )}
+
+            {activeTab === 'checklist' && (
+              <div className="space-y-2">
+                <button onClick={addChecklist} className="w-full py-2 border-2 border-dashed border-brand/40 text-brand text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-brand/5 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> Add item</button>
+                {(s.checklist ?? []).map((c, idx) => (
+                  <div key={c.id} className="flex items-start gap-3 border border-neutral-200 dark:border-ink-600 p-3 bg-white dark:bg-ink-800">
+                    <input type="checkbox" checked={c.done} onChange={(e) => updateChecklist(idx, 'done', e.target.checked)} className="w-4 h-4 mt-1" />
+                    <div className="flex-1 space-y-1">
+                      <input value={c.text} onChange={(e) => updateChecklist(idx, 'text', e.target.value)} placeholder="Item…"
+                        className={`w-full bg-transparent text-[12px] focus:outline-none ${c.done ? 'line-through text-muted' : ''}`} />
+                      <input value={c.comment ?? ''} onChange={(e) => updateChecklist(idx, 'comment', e.target.value)} placeholder="Note…"
+                        className="w-full bg-transparent text-[10px] italic text-muted focus:outline-none" />
+                    </div>
+                    <button onClick={() => updateChecklist(idx, 'isUrgent', !c.isUrgent)} title="Toggle urgent"
+                      className={`p-1.5 ${c.isUrgent ? 'text-red-500 bg-red-100 dark:bg-red-900/30' : 'text-muted hover:bg-neutral-100 dark:hover:bg-ink-700'}`}><Siren className="w-4 h-4" /></button>
+                    <button onClick={() => deleteChecklist(idx)} className="text-muted hover:text-red-500 pt-1.5"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-between surface-flat">
+            <button onClick={deleteSession} className="px-4 h-9 text-[10px] font-bold uppercase tracking-[0.14em] text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"><Trash2 className="w-4 h-4" /> Delete</button>
+            <div className="flex gap-2">
+              <button onClick={() => setEditingSession(null)} className="px-4 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 text-muted hover:border-neutral-400">Cancel</button>
+              <button onClick={saveSession} className="px-5 h-9 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90">Save session</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── action editor modal ───────────────────────────────────────────────
+  function renderActionModal() {
+    if (!actionInEdit) return null;
+    const a = actionInEdit.action;
+    const isExternal = a.ownerId && !state.users.some((u) => u.id === a.ownerId);
+    const cats = groupCategories(selectedGroup);
+    const setA = (patch: Partial<WGActionItem>) => setActionInEdit({ ...actionInEdit, action: { ...a, ...patch } });
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="surface border w-full max-w-lg p-6">
+          <div className="flex items-center justify-between mb-5 pb-3 border-b border-neutral-200 dark:border-ink-600">
+            <h3 className="text-lg font-black uppercase tracking-tight flex items-center gap-2"><CheckSquare className="w-5 h-5 text-brand" /> {actionInEdit.index === -1 ? 'New action' : 'Edit action'}</h3>
+            <button onClick={() => setActionInEdit(null)} className="hover:text-brand"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Description</label>
+              <textarea value={a.text} onChange={(e) => setA({ text: e.target.value })} rows={3} placeholder="What needs to be done?"
+                className="w-full p-3 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand resize-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Status</label>
+                <select value={a.status} onChange={(e) => setA({ status: e.target.value as WGActionStatus })}
+                  className="w-full h-9 px-2 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand">
+                  {(Object.keys(STATUS_LABEL) as WGActionStatus[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Priority</label>
+                <select value={a.priority || 'medium'} onChange={(e) => setA({ priority: e.target.value as WGTaskPriority })}
+                  className="w-full h-9 px-2 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand">
+                  {(['low', 'medium', 'high', 'urgent'] as WGTaskPriority[]).map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Assignee</label>
+              <select value={isExternal ? 'EXTERNAL' : (a.ownerId || '')} onChange={(e) => setA({ ownerId: e.target.value === 'EXTERNAL' ? 'External person' : e.target.value })}
+                className="w-full h-9 px-2 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand mb-2">
+                <option value="">— Unassigned —</option>
+                {state.users.map((u) => <option key={u.id} value={u.id}>{u.firstName} {u.lastName}</option>)}
+                <option value="EXTERNAL">— External person —</option>
+              </select>
+              {isExternal && (
+                <input value={a.ownerId} onChange={(e) => setA({ ownerId: e.target.value })} placeholder="External name…" autoFocus
+                  className="w-full h-9 px-3 text-[12px] border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/10 focus:outline-none" />
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Category</label>
+                <input list="wg-cats" value={a.category || ''} onChange={(e) => setA({ category: e.target.value })} placeholder="e.g. Legal"
+                  className="w-full h-9 px-3 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand" />
+                <datalist id="wg-cats">{cats.map((c) => <option key={c} value={c} />)}</datalist>
+              </div>
+              <div>
+                <label className="block text-[9px] font-bold uppercase tracking-[0.16em] text-muted mb-1">Due date</label>
+                <input type="date" value={a.dueDate || ''} onChange={(e) => setA({ dueDate: e.target.value })}
+                  className="w-full h-9 px-3 text-[12px] border border-neutral-300 dark:border-ink-600 bg-white dark:bg-ink-800 focus:outline-none focus:border-brand" />
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-6">
+            <button onClick={() => setActionInEdit(null)} className="px-4 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 text-muted hover:border-neutral-400">Cancel</button>
+            <button onClick={saveActionFromModal} className="px-5 h-9 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90">Save action</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── AI report modal ────────────────────────────────────────────────────
+  function renderAiModal() {
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+        <div className="surface border w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+          <div className="p-4 border-b border-neutral-200 dark:border-ink-600 flex items-center justify-between bg-brand text-white">
+            <h3 className="text-[13px] font-black uppercase tracking-tight flex items-center gap-2"><Bot className="w-5 h-5" /> {aiTitle}</h3>
+            <button onClick={() => setAiOpen(false)} className="hover:opacity-70"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-6 bg-neutral-50 dark:bg-ink-950">
+            {aiLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted">
+                <Loader2 className="w-8 h-8 animate-spin text-brand mb-3" />
+                <p className="text-[11px] uppercase tracking-[0.16em]">Analysing sessions with the local LLM…</p>
+              </div>
+            ) : (
+              <div id="wg-report-render" className="surface border p-6 md:p-8 text-[13px] leading-relaxed"><MarkdownView content={aiContent} /></div>
+            )}
+          </div>
+          <div className="p-4 border-t border-neutral-200 dark:border-ink-600 flex justify-end gap-2">
+            <button onClick={printReport} disabled={aiLoading || !aiContent} className="flex items-center gap-1.5 px-3 h-9 text-[10px] font-bold uppercase tracking-[0.14em] bg-brand text-white hover:bg-brand/90 disabled:opacity-40"><Printer className="w-3.5 h-3.5" /> Print / PDF</button>
+            <button onClick={() => { navigator.clipboard?.writeText(aiContent); setAiCopied(true); setTimeout(() => setAiCopied(false), 1500); }} disabled={aiLoading || !aiContent} className="flex items-center gap-1.5 px-3 h-9 text-[10px] font-bold uppercase tracking-[0.14em] border border-neutral-300 dark:border-ink-600 hover:border-brand hover:text-brand disabled:opacity-40">{aiCopied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />} {aiCopied ? 'Copied' : 'Copy'}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 };
